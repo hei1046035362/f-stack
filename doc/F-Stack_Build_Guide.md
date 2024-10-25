@@ -34,7 +34,7 @@ $ ln -s /usr/local/bin/pkg-config /usr/bin/pkg-config
 
 # Compile f-stack lib
 $ export FF_PATH=/data/f-stack
-$ export PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig
+$ export PKG_CONFIG_PATH=/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/lib64/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/pkgconfig
 $ cd /data/f-stack/lib
 $ make
 
@@ -46,8 +46,10 @@ $ make install
 
 # Compile Redis
 $ cd app/redis-6.2.6/deps/jemalloc
+$ apt install autoconf
 $ ./autogen.sh
 $ cd ../redis-6.2.6
+$ make distclean
 $ make
 
 # Compile f-stack tools

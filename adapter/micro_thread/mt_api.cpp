@@ -645,6 +645,11 @@ void* mt_start_thread(void* entry, void* args)
     return MtFrame::Instance()->CreateThread((ThreadStart)entry, args, true);
 }
 
+int mt_nomore_thread()
+{
+    return MtFrame::Instance()->ThreadPoolFull();
+}
+
 void* mt_active_thread()
 {
     return MtFrame::Instance()->GetActiveThread();

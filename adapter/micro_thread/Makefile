@@ -44,7 +44,7 @@ C_ARGS = -Wall -g -fPIC -O0 -DMT_REAL_TIME -Wno-register
 ifeq ($(ARCH),32)
 	C_ARGS +=  -march=pentium4 -m32 -DSUS_LINUX -pthread
 else
-	C_ARGS +=  -m64 -DSUS_LINUX -pthread
+	C_ARGS +=  -march=native -m64 -DSUS_LINUX -pthread
 endif
 # You might have to change this if your c compiler is not cc
 CC = g++

@@ -176,15 +176,15 @@ bool KqueueProxy::KqueueCtrlAdd(int fd, int events)
         return false;
     }
 
-    item->AttachEvents(events);
+    item->AttachEvents(events);// 累加读或写事件的计数
 
     int old_events = item->GetListenEvents();
     int new_events = old_events | events;
     if (old_events == new_events)
-    {
+    {// 新加的事件已经存在，就不需要通知给协议栈
         return true;
     }
-    
+    // 更新监听的事件
     KqEvent ke;
     int ret;
     if (old_events & KQ_EVENT_WRITE) {
@@ -228,7 +228,7 @@ bool KqueueProxy::KqueueCtrlAdd(int fd, int events)
         }
     }
 
-    item->SetListenEvents(new_events);
+    item->SetListenEvents(new_events);// 更新监听的事件
 
     return true;
 }

@@ -28,7 +28,7 @@ app/nginx-1.16.0/objs/
 app/nginx-1.16.0/Makefile
 dpdk/.ci/
 dpdk/.travis.yml
-.vscode/
+.vs/
 .code.yml
 .orange-ci.yml
 SMEDockerfile
