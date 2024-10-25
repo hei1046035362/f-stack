@@ -385,6 +385,8 @@ public:
     void FreeThread(MicroThread* thread);
 
     int GetUsedNum(void);
+
+    int ThreadPoolFull() { return _total_num >= _max_num;}
     
 private:
     ThreadList      _freelist;
