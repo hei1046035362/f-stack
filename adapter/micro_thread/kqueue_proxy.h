@@ -152,7 +152,7 @@ class KqueuerObj
 typedef TAILQ_HEAD(__KqFdList, KqueuerObj) KqObjList;
 typedef struct kevent KqEvent;
 
-
+// 作用：防止同一个fd同样的事件重复监听
 class KqFdRef
 {
 private:
