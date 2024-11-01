@@ -17,19 +17,25 @@ int g_fd_limit = 1000*1000;
 static int s_zone_size = g_fd_limit*sizeof(tgg_cli_info);  // 存储最多100w个fd
 const struct rte_memzone* g_fd_zone = NULL;
 const char* s_fd_zone_name = "tgg_fd_zone";
+const struct rte_memzone* g_lock_zone = NULL;
+const char* s_lock_zone_name = "tgg_lock_zone";
 
 const char* s_read_ring_name = "tgg_read_ring";
+const char* s_bwrcv_ring_name = "tgg_bwrcv_ring";
 const char* s_write_ring_name = "tgg_write_ring";
 static int s_ring_size = 1024*8;  // 缓冲队列的长度，得是2的幂
 const struct rte_ring* g_ring_read = NULL;
 const struct rte_ring* g_ring_write = NULL;
+const struct rte_ring* g_ring_bwrcv = NULL;
 
 const char* s_pool_read_name = "tgg_pool_read_name";
 const char* s_pool_read_name = "tgg_pool_write_name";
+const char* s_pool_read_name = "tgg_pool_bwrcv_name";
 static int s_mempool_size = 10000;
 static int s_mempool_read_cache = sizeof(struct st_read_data);// 单个缓存的大小待定
 static int s_mempool_write_cache = sizeof(struct st_write_data);// 单个缓存的大小待定
-const struct rte_mempool* g_mempool_read = NULL, g_mempool_write = NULL;
+static int s_mempool_bwrcv_cache = sizeof(tgg_bw_data);// 单个缓存的大小待定
+const struct rte_mempool* g_mempool_read = NULL, g_mempool_write = NULL, g_mempool_bwrcv = NULL;
 
 const char* g_rte_malloc_type = "tgg_dpdk_malloc";
 
@@ -38,10 +44,13 @@ const char* g_rte_malloc_type = "tgg_dpdk_malloc";
 const char* s_gid_hash_name = "tgg_gid_hash";
 const char* s_uid_hash_name = "tgg_uid_hash";
 const char* s_cid_hash_name = "tgg_cid_hash";
+const char* s_giduid_hash_name = "tgg_giduid_hash";
 static int s_id_hash_len = 20; // hash key 长度
 const struct rte_hash *g_gid_hash = NULL;
 const struct rte_hash *g_uid_hash = NULL;
 const struct rte_hash *g_cid_hash = NULL;
+const struct rte_hash *g_giduid_hash = NULL;
+
 
 rte_atomic32_t *shared_id_atomic_ptr = NULL;
 const char[21] g_cid_str = {0};  // 8位地址+4位端口+8位idx+1位结束符'\0'
@@ -76,18 +85,10 @@ static void init_cid()
 	// ip和端口 是固定的，只需要初始化的时候赋值就可以了
 	g_gate_ip = convert_ip2int(g_gateway_ip_str);
 	init_cid_prefix(g_gate_ip, g_gateway_port);
-
-	// idx后续可能会多进程，使用共享内存+原子锁  保证idx不会重复
-   shared_id_atomic_ptr = (rte_atomic32_t *)rte_malloc("shared_id_atomic", sizeof(rte_atomic32_t), 0);
-   if (shared_id_atomic_ptr == NULL) {
-       // 处理内存分配失败的情况
-       rte_exit(EXIT_FAILURE, "Failed to allocate shared memory for atomic ID\n");
-   }
-   rte_atomic32_set(shared_id_atomic_ptr, 0);  // 初始化为0
 }
 
 static const struct rte_memzone *
-find_memzone(const char *name, size_t)
+find_memzone(const char *name)
 {
 	unsigned int socket_id = rte_socket_id();
 	char mz_name[RTE_MEMZONE_NAMESIZE];
@@ -111,6 +112,7 @@ make_memzone(const char *name, size_t size)
 	snprintf(mz_name, RTE_MEMZONE_NAMESIZE, "%s_%u", name, socket_id);
 	memzone = rte_memzone_lookup(mz_name);
 	if (memzone != NULL && memzone->len != size) {
+		memset(memzone->addr, 0, memzone->len);
 		rte_memzone_free(memzone);
 		memzone = NULL;
 		RTE_LOG(ERR, USER1, "memzone[%s] found, but len[%d] not match[%d]::%s:%d", 
@@ -125,6 +127,7 @@ make_memzone(const char *name, size_t size)
 				mz_name, __func__, __LINE__);
 		}
 	}
+	memset(memzone->addr, 0, size);
 	RTE_LOG(INFO, USER1, "New zone allocated: %s",
 		mz_name);
 	return memzone;
@@ -267,13 +270,17 @@ void tgg_master_init()
 	RTE_LOG(INFO, USER1, "Init dpdk master for tgg...");
 	// 100W个FD  32M的空间
 	g_fd_zone = make_memzone(s_fd_zone_name, s_zone_size);
+	g_lock_zone = make_memzone(s_lock_zone_name, sizeof(tgg_lock));
 	g_ring_read = make_ring(s_read_ring_name, s_ring_size);
 	g_ring_write = make_ring(s_write_ring_name, s_ring_size);
+	g_ring_bwrcv = make_ring(s_bwrcv_ring_name, s_ring_size);
 	g_mempool_read = make_mempool(s_pool_read_name, s_mempool_size, s_mempool_read_cache);
 	g_mempool_write = make_mempool(s_pool_write_name, s_mempool_size, s_mempool_write_cache);
+	g_mempool_bwrcv = make_mempool(s_pool_bwrcv_name, s_mempool_size, s_mempool_bwrcv_cache);
 	g_gid_hash = init_hash(s_gid_hash_name, g_fd_limit, s_id_hash_len);
 	g_uid_hash = init_hash(s_uid_hash_name, g_fd_limit, s_id_hash_len);
 	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, s_id_hash_len);
+	g_giduid_hash = init_hash(s_giduid_hash_name, g_fd_limit, s_id_hash_len);
 	init_cid();
 }
 
@@ -281,25 +288,38 @@ void tgg_master_uninit()
 {
 	rte_memzone_free(g_fd_zone);
 	g_fd_zone = NULL;
+	rte_memzone_free(g_lock_zone);
+	g_lock_zone = NULL;
 	rte_mempool_free(g_mempool_read);
 	g_mempool_read = NULL;
 	rte_ring_free(g_ring_read);
 	g_ring_read = NULL;
 	rte_ring_free(g_ring_write);
 	g_ring_write = NULL;
+	rte_ring_free(g_ring_bwrcv);
+	g_ring_bwrcv = NULL;
 	rte_hash_free(g_uid_hash);
 	g_uid_hash = NULL;
+	rte_hash_free(g_gid_hash);
+	g_gid_hash = NULL;
+	rte_hash_free(g_cid_hash);
+	g_cid_hash = NULL;
+	rte_hash_free(g_giduid_hash);
+	g_giduid_hash = NULL;
 }
 
 void tgg_secondary_init()
 {
 	RTE_LOG(INFO, USER1, "Init dpdk secodary for tgg...");
 	// 100W个FD  32M的空间
-	g_fd_zone = find_memzone(s_fd_zone_name, s_zone_size);
+	g_fd_zone = find_memzone(s_fd_zone_name);
+	g_lock_zone = find_memzone(s_lock_zone_name,);
 	g_ring_read = find_ring(s_read_ring_name);
 	g_ring_write = find_ring(s_write_ring_name);
+	g_ring_bwrcv = find_ring(s_bwrcv_ring_name);
 	g_mempool_read = find_mempool(s_pool_read_name);
 	g_mempool_write = find_mempool(s_pool_write_name);
+	g_mempool_bwrcv = find_mempool(s_pool_bwrcv_name);
 	g_uid_hash = get_hash_byname(s_uid_hash_name, g_fd_limit, s_uid_hash_len);
 }
 void tgg_secondary_uninit()
