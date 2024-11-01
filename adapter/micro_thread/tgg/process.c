@@ -6,6 +6,7 @@
 #include "tgg_common.h"
 #include "tgg_struct.h"
 #include "tgg_init.h"
+#include "cmd/WsConsumer.h"
 
 static int g_run = 1;
 
@@ -34,48 +35,82 @@ void signal_handler(int signum)
 	}
 }
 
-void tgg_process(void* arg)
+void tgg_process_read_data(void* arg)
 {
-	tgg_read_data* rdata = (tgg_read_data*)arg
+	WsConsumer cons;
+	cons.ConsumerData(arg);
 }
 
-static int tgg_dequeue()
+static int tgg_process_read()
 {
 	tgg_read_data* rdata = NULL;
 	if (tgg_dequeue_read(&rdata) < 0) {
-	    	// 队列空
-		usleep(10);
-		return 0;
+	    // 队列空
+		return 1;
 	}
 	if (!rdata) {
 		return 0;
 	}
-		// 等待可用线程
+	// 等待可用线程
 	while (mt_nomore_thread() && g_run) {
 		usleep(10);
 		continue;
 	}
-		// 进程要退出了，不再启动新的线程，释放内存就退出
+	// 进程要退出了，不再启动新的线程，释放内存就退出
 	if (!g_run) {
 		rte_free(rdata->data);
-		memset(rdata->data, 0, rdata->data_len);
-		rdata->data_len = 0;
-		rdata->fd = 0;
+		memset(rdata, 0, sizeof(tgg_read_data));
 		rte_mempool_put(g_mempool_read, (void*)rdata);
 		return -1;
 	}
 
-	mt_start_thread((void *)tgg_process, (void *)rdata);
+	mt_start_thread((void *)tgg_process_read_data, (void *)rdata);
 	return 0;
 }
+
+static int tgg_process_bwrcv()
+{
+	tgg_bw_data* bdata = NULL;
+	if (tgg_dequeue_bwrcv(&bdata) < 0) {
+	    // 队列空
+		return 1;
+	}
+	if (!bdata) {
+		return 0;
+	}
+	// 等待可用线程
+	while (mt_nomore_thread() && g_run) {
+		usleep(10);
+		continue;
+	}
+	// 进程要退出了，不再启动新的线程，释放内存就退出
+	if (!g_run) {
+		rte_free(bdata->data);
+		memset(bdata, 0, sizeof(tgg_bw_data));
+		rte_mempool_put(g_mempool_bwrcv, (void*)bdata);
+		return -1;
+	}
+
+	mt_start_thread((void *)tgg_process_bwrcv_data, (void *)bdata);
+	return 0;
+}
+
 
 int tgg_gw_process(void* data)
 {
 	unsigned long long last_time = mt_time_ms();
 	while (g_run) {
 		// 处理客户端连接和转发数据
-		if (tgg_dequeue() < 0)
-			break;
+		while (g_run) {
+			// 优先保证客户端能上报
+			if (tgg_process_read() > 0)
+			{
+				break;
+			}
+		}
+		// 处理从bw过来的数据
+		if (tgg_process_bwrcv() > 0)
+			usleep(10);
 
 		// 发送心跳
 		// unsigned long long cur_time = mt_time_ms();
@@ -166,5 +201,7 @@ int main(int argc, char *argv[])
 	mt_init_frame(argc, argv);
 	tgg_process_init();
 	tgg_gw_process();
+	init_bwserver();
+	uninit_bwserver();
 	tgg_process_uninit();
 }
