@@ -127,8 +127,8 @@ static void tgg_recv(void *arg)
 	int clt_fd = *p;
 	delete p;
 	char buf[64 * 1024];
-	tgg_cli_info* pcli = tgg_get_cli_data(clt_fd);
-	if (!(pcli->status & FD_STATUS_READYFORCONNECT )) {
+	int status = tgg_get_cli_status(clt_fd);
+	if (!(status & FD_STATUS_READYFORCONNECT )) {
 		// TODO 如果fd已经被协议栈回收并再次使用了，但是网关内关于这个fd的操作尚未完成，是否还有更好的方案？
 		// 如果上一个fd在系统中还没有操作完，那就先不让连，然后去使用其他的fd
 		close(clt_fd);
@@ -144,9 +144,10 @@ static void tgg_recv(void *arg)
 			break;
 		}
 		enum FD_OPT opt;
-		if (pcli->status & FD_STATUS_NEWSESSION) {
+		if (status & FD_STATUS_NEWSESSION) {
 			// 首次连接
-			pcli->status |= FD_STATUS_NEWSESSION;
+			status |= FD_STATUS_NEWSESSION;
+			tgg_set_cli_status(cli_fd, status);
 			opt = FD_NEW;
 		} else {
 			// 后续数据包
@@ -159,7 +160,8 @@ static void tgg_recv(void *arg)
 	}
 	// 对端主动关闭了
 	// memset(cli->uid, 0, sizeof(cli->uid));
-	cli->status = FD_STATUS_CLOSING;
+	status = FD_STATUS_CLOSING;
+	tgg_set_cli_status(cli_fd, status);
 	// 为确保fd正确关闭,对应的内存正确释放,就必须要入队列一个关闭的操作
 	while (tgg_recv_enqueue(clt_fd, NULL, 0, FD_CLOSE) < 0) {
 
@@ -167,44 +169,42 @@ static void tgg_recv(void *arg)
 	close(clt_fd);
 }
 
-
 static void tgg_do_send(tgg_write_data* wdata)
 {
-	tgg_cli_info* cli = tgg_get_cli_data(wdata->fd);
-	if (!cli) {
-		RTE_LOG(ERR, USER1, "[%s][%d] Get client info failed.", __func__, __LINE__);
-		close(wdata->fd);
-		goto DO_SEND_END;
-	}
-	// 连接已关闭就不需要发送了，直接清理空间
-	if (cli->status & FD_STATUS_CLOSING) {
-		RTE_LOG(ERR, USER1, "[%s][%d] Connection is already closed.", __func__, __LINE__);
-		goto DO_SEND_CLOSE;
-	}
-
-	// 是否需要发送数据
-	if ((wdata->fd_opt & FD_WRITE) && 
-		(cli->status & (FD_STATUS_NEWSESSION | FD_STATUS_CONNECTED)) ) {
-		ret = mt_send(clt_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
-		if (ret < 0) {
-			RTE_LOG(ERR, USER1, "[%s][%d] send data to client[%s] error, ret[%d]", __func__, __LINE__, cli->uid, ret);
-		} else {
-			g_tgg_stats->en_read_stats.enqueue++;
+	while (wdata->lst_fd->next) {
+		int cli_fd = wdata->lst_fd->next->fd;
+		int status = tgg_get_cli_status(cli_fd);
+		// 连接已关闭就不需要发送了，直接清理空间
+		if (status & FD_STATUS_CLOSING) {
+			RTE_LOG(ERR, USER1, "[%s][%d] Connection is already closed.", __func__, __LINE__);
+			wdata->fd_opt &= FD_CLOSE;
+			goto DO_SEND_CLOSE;
 		}
-	}
 
+		// 是否需要发送数据
+		if ((wdata->fd_opt & FD_WRITE) && 
+			(status & (FD_STATUS_NEWSESSION | FD_STATUS_CONNECTED)) ) {
+			ret = mt_send(clt_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
+			if (ret < 0) {
+				RTE_LOG(ERR, USER1, "[%s][%d] send data to client[%s] error, ret[%d]", __func__, __LINE__, cli->uid, ret);
+			} else {
+				g_tgg_stats->en_read_stats.enqueue++;
+			}
+		}
 DO_SEND_CLOSE:
-	// 是否需关闭连接
-	if (wdata->fd_opt & FD_CLOSE) {
-		memset(cli->uid, 0, sizeof(cli->uid));
-		memset(cli->cid, 0, sizeof(cli->cid));
-		memset(cli->reserved, 0, sizeof(cli->reserved));
-		cli->status = FD_STATUS_CLOSED;
-		close(wdata->fd);
+		// 是否需关闭连接
+		if (wdata->fd_opt & FD_CLOSE) {
+			tgg_close_cli(cli_fd);
+			close(cli_fd);
+		}
+		tgg_fd_list* tmp = wdata->lst_fd->next;
+		wdata->lst_fd->next = wdata->lst_fd->next->next;
+		memset(tmp, 0, sizeof(tgg_fd_list));
+		rte_free(tmp);
 	}
-
-DO_SEND_END:
+	memset(wdata->lst_fd, 0, sizeof(tgg_fd_list));
 	memset(wdata->data, 0, wdata->data_len);
+	rte_free(wdata->lst_fd);
 	rte_free(wdata->data);
 	memset(wdata, 0, sizeof(tgg_write_data));
 	rte_mempool_put(g_mempool_write, wdata);	
@@ -266,7 +266,8 @@ static int tgg_gw_master()
 			mt_sleep(1);
 			continue;
 		}
-		// uint32_t ip_int = get_local_addr(clt_fd);  // TODO 获取ip的方式待商榷
+		// TODO 获取ip的方式待商榷
+		// uint32_t ip_int = get_local_addr(clt_fd);
 		if (set_fd_nonblock(clt_fd) == -1) {
 			fprintf(stderr, "set clt_fd nonblock failed [%m]\n");
 			break;
