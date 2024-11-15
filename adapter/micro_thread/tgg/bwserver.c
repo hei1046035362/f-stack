@@ -9,8 +9,14 @@
 
 #include "bwserver.h"
 #include "ff_api.h"
-#include "tgg_struct.h"
-#include "tgg_bwcomm.h"
+#include "tgg_comm/tgg_struct.h"
+#include "tgg_comm/tgg_common.h"
+#include "cmd/tgg_bwcomm.h"
+#include "cmd/CmdProcessor.h"
+#include <map>
+#include <rte_log.h>
+#include <rte_malloc.h>
+#include <rte_mempool.h>
 
 #define PORT 8888
 #define BUFFER_SIZE 1024
@@ -22,7 +28,7 @@ static 	pthread_t s_bwserver_thread;
 extern std::map<int, tgg_bw_info*> g_map_bwinfo;
 
 static volatile int s_idx = 0;// 防止同一个fd被重用了，内存中的数据任然往新的连接中发送数据
-extern const rte_mempool* g_mempool_bwrcv;
+extern struct rte_mempool* g_mempool_bwrcv;
 
 void tgg_process_bwrcv_data(void* arg)
 {
@@ -39,7 +45,7 @@ void tgg_process_bwrcv_data(void* arg)
 
 }
 
-void bwserver_routine(void* data)
+static void* bwserver_routine(void* data)
 {
 	int server_socket, client_sockets[MAX_CLIENTS];
     struct sockaddr_in server_addr, client_addr;
@@ -116,7 +122,7 @@ void bwserver_routine(void* data)
                     tgg_bw_info* bwinfo = get_valid_bwinfo_by_fd(new_socket);
                     bwinfo->idx = ++s_idx;
                     bwinfo->status = FD_STATUS_NEWSESSION;
-                    if (get_connection_info(new_socket, bwinfo->ip, &bwinfo->port) < 0) {
+                    if (get_connection_info(new_socket, bwinfo->ip_str, &bwinfo->port) < 0) {
                         close(new_socket);
                         delete(bwinfo);
                     } else {
@@ -134,7 +140,7 @@ void bwserver_routine(void* data)
                 memset(buffer, 0, BUFFER_SIZE);
                 int bytes_read = read(client_socket, buffer, BUFFER_SIZE - 1);
                 tgg_bw_data* bdata = NULL;
-                if (rte_mempool_get(g_mempool_bwrcv, &bdata) < 0) {
+                if (rte_mempool_get(g_mempool_bwrcv, (void**)&bdata) < 0) {
                     RTE_LOG(ERR, USER1, "[%s][%d] Get mem from bwrcv mempool failed.", __func__, __LINE__);
                     continue;
                 }
@@ -166,13 +172,12 @@ void bwserver_routine(void* data)
 
     // 关闭服务器套接字
     close(server_socket);
-
-    return 0;
+    return NULL;
 }
 
 int init_bwserver()
 {
-	return ff_pthread_create(&s_bwserver_thread, NULL, bwserver_routine, NULL);
+	return ff_pthread_create(&s_bwserver_thread, NULL, &bwserver_routine, NULL);
 }
 
 void uninit_bwserver()

@@ -1,29 +1,35 @@
 #include "tgg_common.h"
+#include "tgg_bw_cache.h"
 #include <rte_ring.h>
 #include <rte_memzone.h>
 #include <rte_mempool.h>
+#include <rte_malloc.h>
 #include "tgg_lock_struct.h"
-#include "TggLock.hpp"
+#include "comm/TggLock.hpp"
+#include "comm/RedisClient.hpp"
+#include <string.h>
+#include <unistd.h>
 
-extern const struct rte_memzone* g_fd_zone;
+extern struct rte_memzone* g_fd_zone;
 extern int g_fd_limit;
-extern const struct rte_ring* g_ring_read;
-extern const struct rte_ring* g_ring_write;
-extern const struct rte_mempool* g_mempool_read;
-extern const struct rte_mempool* g_mempool_write;
-extern const struct rte_mempool* g_mempool_bwrcv;
+extern struct rte_ring* g_ring_read;
+extern struct rte_ring* g_ring_write;
+extern struct rte_ring* g_ring_bwrcv;
+extern struct rte_mempool* g_mempool_read;
+extern struct rte_mempool* g_mempool_write;
+extern struct rte_mempool* g_mempool_bwrcv;
 
-const tgg_stats g_tgg_stats = {0};
+tgg_stats g_tgg_stats = {0};
 
 void tgg_close_cli(int fd)
 {
 	SpinLock lock(get_cli_lock());
 	if (fd < 0 || fd >= g_fd_limit)	{
-		RTE_LOG(INFO, USER1, "given fd[%s] is invalid,[0,%d]",
+		RTE_LOG(INFO, USER1, "given fd[%d] is invalid,[0,%d]",
 			fd, g_fd_limit - 1);
 		return ;
 	}
-	tgg_cli_info* cli = &((tgg_cli_info*)g_fd_zone->addr)[fd]
+	tgg_cli_info* cli = &((tgg_cli_info*)g_fd_zone->addr)[fd];
 	memset(cli->cid, 0, sizeof(cli->cid));
 	memset(cli->uid, 0, sizeof(cli->uid));
 	memset(cli->reserved, 0, sizeof(cli->reserved));
@@ -60,7 +66,7 @@ std::string tgg_get_cli_uid(int fd)
 {
 	SpinLock lock(get_cli_lock());
 	if (fd < 0 || fd >= g_fd_limit)
-		return -1;
+		return "";
 	return ((tgg_cli_info*)g_fd_zone->addr)[fd].uid;	
 }
 
@@ -68,7 +74,7 @@ std::string tgg_get_cli_cid(int fd)
 {
 	SpinLock lock(get_cli_lock());
 	if (fd < 0 || fd >= g_fd_limit)
-		return -1;
+		return "";
 	return ((tgg_cli_info*)g_fd_zone->addr)[fd].cid;	
 }
 
@@ -76,7 +82,7 @@ std::string tgg_get_cli_reserved(int fd)
 {
 	SpinLock lock(get_cli_lock());
 	if (fd < 0 || fd >= g_fd_limit)
-		return -1;
+		return "";
 	return ((tgg_cli_info*)g_fd_zone->addr)[fd].reserved;	
 }
 
@@ -134,10 +140,10 @@ int tgg_set_cli_reserved(int fd, const char* reserved)
 	return 0;
 }
 
-int cache_ws_buffer(int fd, void* data, int len, int pos = 0, int iscomplete)
+int cache_ws_buffer(int fd, void* data, int len, int pos, int iscomplete)
 {
 	SpinLock lock(get_cli_lock());
-	tgg_ws_data* wsdata = &((tgg_cli_info*)g_fd_zone->addr)[fd]->ws_data;
+	tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zone->addr)[fd])->ws_data;
     if (!wsdata) {// 第一次缓存
     	wsdata = (tgg_ws_data*)dpdk_rte_malloc(sizeof(tgg_ws_data));
     	if (!wsdata)
@@ -170,7 +176,7 @@ std::string get_one_frame_buffer(int fd, void* data, int len)
 {
 	SpinLock lock(get_cli_lock());
 	std::string buffer;
-	tgg_ws_data* wsdata = &((tgg_cli_info*)g_fd_zone->addr)[fd]->ws_data;
+	tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zone->addr)[fd])->ws_data;
     if (!wsdata || wsdata->data_list) {// 没有数据
     	buffer = std::string((char*)data, len);
     	return buffer;
@@ -194,12 +200,12 @@ std::string get_whole_buffer(int fd)
 {
 	SpinLock lock(get_cli_lock());
 	std::string buffer;
-	tgg_ws_data* wsdata = &((tgg_cli_info*)g_fd_zone->addr)[fd]->ws_data;
+	tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zone->addr)[fd])->ws_data;
     if (!wsdata || wsdata->data_list) {// 没有数据
         // buffer = std::string((char*)data + pos, len);
     	return buffer;
     }
-    tgg_ws_unit* phead = wsdata->data_li
+    tgg_ws_unit* phead = wsdata->data_list;
     while(phead) {
     	buffer += std::string((char*)phead->data + phead->pos, phead->len);
     	phead = phead->next;
@@ -210,7 +216,7 @@ std::string get_whole_buffer(int fd)
 void clean_ws_buffer(int fd)
 {
 	SpinLock lock(get_cli_lock());
-    tgg_ws_data* wsdata = &((tgg_cli_info*)g_fd_zone->addr)[fd]->ws_data;
+    tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zone->addr)[fd])->ws_data;
     if (!wsdata) {// 没有数据
         return;
     }
@@ -224,48 +230,48 @@ void clean_ws_buffer(int fd)
         wsdata->data_list = phead->next;
         phead = wsdata->data_list;
     }
-    wsdata->is_complete = 0;
+    wsdata->head_complete = 0;
     wsdata->total_len = 0;
     rte_free(wsdata);
 }
 
-int tgg_enqueue_read(tgg_read_data* data);
+int tgg_enqueue_read(tgg_read_data* data)
 {
-	return rte_ring_enqueue(g_ring_read, data)
+	return rte_ring_enqueue(g_ring_read, data);
 }
 
-int tgg_dequeue_read(tgg_read_data** data);
+int tgg_dequeue_read(tgg_read_data** data)
 {
 	if (rte_ring_empty(g_ring_read)) {
 		return -ENOENT;
 	}
-	return rte_ring_dequeue(g_ring_read, (void**)data)
+	return rte_ring_dequeue(g_ring_read, (void**)data);
 }
 
-int tgg_enqueue_write(tgg_write_data* data);
+int tgg_enqueue_write(tgg_write_data* data)
 {
-	return rte_ring_enqueue(g_ring_write, data)
+	return rte_ring_enqueue(g_ring_write, data);
 }
 
-int tgg_dequeue_write(tgg_write_data** data);
+int tgg_dequeue_write(tgg_write_data** data)
 {
 	if (rte_ring_empty(g_ring_write)) {
 		return -ENOENT;
 	}
-	return rte_ring_dequeue(g_ring_write, (void**)data)
+	return rte_ring_dequeue(g_ring_write, (void**)data);
 }
 
-int tgg_enqueue_bwrcv(tgg_bw_data* data);
+int tgg_enqueue_bwrcv(tgg_bw_data* data)
 {
-	return rte_ring_enqueue(g_ring_bwrcv, data)
+	return rte_ring_enqueue(g_ring_bwrcv, data);
 }
 
-int tgg_dequeue_bwrcv(tgg_bw_data** data);
+int tgg_dequeue_bwrcv(tgg_bw_data** data)
 {
 	if (rte_ring_empty(g_ring_bwrcv)) {
 		return -ENOENT;
 	}
-	return rte_ring_dequeue(g_ring_bwrcv, (void**)data)
+	return rte_ring_dequeue(g_ring_bwrcv, (void**)data);
 }
 
 void clean_bw_data(tgg_bw_data* bdata)
@@ -298,17 +304,19 @@ void clean_write_data(tgg_write_data* wdata)
 tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& mapfdidx, int fdopt)
 {
 	tgg_write_data* wdata = NULL;
-	int ret = rte_mempool_get(g_mempool_write, &wdata);
+	int ret = rte_mempool_get(g_mempool_write, (void**)&wdata);
         // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
 	if (ret < 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d] get mem from write pool failed,code:%d.", 
 			__func__, __LINE__, ret);
 		return NULL;
 	}
-	tgg_fd_list* tail = NULL, pcur = NULL, head = NULL;
+	tgg_fd_list* tail = NULL;
+	tgg_fd_list* pcur = NULL;
+	tgg_fd_list* head = NULL;
 	std::map<int, int>::iterator it = mapfdidx.begin();
 	while (it != mapfdidx.end()) {
-		pcur = dpdk_rte_malloc(sizeof(tgg_fd_list));
+		pcur = (tgg_fd_list*)dpdk_rte_malloc(sizeof(tgg_fd_list));
 		if (!pcur) {
             // TODO 如果只有一个失败了，其他的是不是可以继续发送，而不是全部都不发了
 			goto add_data_failed;
@@ -327,26 +335,26 @@ tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& m
 	}
 	if (head) {
 		wdata->lst_fd = head;
+	} else {
+		goto add_data_failed;
 	}
 	if (sdata.length() > 0) {
 		wdata->data = dpdk_rte_malloc(sdata.length());
 		if (!wdata->data) {
 			goto add_data_failed;
 		}
-		memcpy((char*)head->data, sdata.c_str(), sdata.length());
-		wdata->len = sdata.length();
+		memcpy((char*)(wdata->data), sdata.c_str(), sdata.length());
+		wdata->data_len = sdata.length();
 	} else {
-		wdata->len = 0;
+		wdata->data_len = 0;
 	}
-	head->fd = fd;
-	head->idx = cli->idx;
 	wdata->fd_opt = fdopt;
 	return wdata;
 
-	add_data_failed:
+add_data_failed:
 	RTE_LOG(ERR, USER1, "[%s][%d] dpdk_rte_malloc mem failed.", 
 		__func__, __LINE__);
-	iter_del_fdlist(wdata->lst_fd);
+	iter_del_fdlist((void*)(wdata->lst_fd));
 	memset(wdata, 0, sizeof(tgg_write_data));
 	rte_mempool_put(g_mempool_write, wdata);
 	return NULL;
@@ -380,9 +388,26 @@ int enqueue_data_single_fd(const std::string& data, int fd, int idx, int fdopt)
 	return enqueue_data_batch_fd(data, mapfdidx, fdopt);
 }
 
-int tgg_init_uidgid()
+int tgg_init_uidgid(const std::vector<std::string>& clusterNodes, const std::string& password, const std::string& userName)
 {
+    std::map<std::string, std::set<std::string>> mapUsers;
+	int ret = GetUserWithGids(clusterNodes, mapUsers, password);
+	if (!ret) {
+		RTE_LOG(ERR, USER1, "[%s][%d] Connect redis failed.", __func__, __LINE__);
+		return ret;
+	}
 
+    std::map<std::string, std::set<std::string>>::iterator itUid = mapUsers.begin();
+    while(itUid != mapUsers.end()) {
+        std::set<std::string>::iterator itGid = itUid->second.begin();
+        while(itGid != itUid->second.end()) {
+			tgg_add_uidgid(itUid->first.c_str(), (*itGid).c_str());
+            //std::cout << "userId[" << itUid->first << "]: Gid[" << *itGid << "]" << std::endl;
+            itGid++;
+        }
+        itUid++;
+    }
+	return 0;
 }
 
 #include <sys/prctl.h>
@@ -393,4 +418,15 @@ void init_core(const char* dumpfile)
     char core_path[256];
     snprintf(core_path, sizeof(core_path), "%s.%d", dumpfile, getpid());
     prctl(PR_SET_DUMPABLE, core_path, 0, 0, 0);
+}
+
+void* dpdk_rte_malloc(int size)
+{
+	void* pdata = rte_malloc("tgg_malloc", size, 0);
+	if (!pdata)	{
+		RTE_LOG(ERR, USER1, "malloc data failed.");
+	}
+	// TODO 这里需要把pdata管理起来，因dpdk的secondary进程出core而未释放时会导致大页内存泄漏
+	// 		可以用链表管理起来，然后注册rte_service给master进程去管理，也可以放到定时任务管理
+	return pdata;
 }

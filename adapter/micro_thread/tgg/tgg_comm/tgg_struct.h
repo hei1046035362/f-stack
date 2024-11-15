@@ -1,6 +1,7 @@
 #ifndef _TGG_STRUCT_H_
 #define _TGG_STRUCT_H_
-
+#include <rte_build_config.h>
+#include <netinet/in.h>
 // #define CACHE_LINE_SIZE 64
 #define SECRET_KEY_LEN 20
 // 应用层协议类型
@@ -56,10 +57,10 @@ typedef struct st_cli_info {
 	tgg_ws_data* ws_data;	// 缓存websocket的数据，用于处理分包的情况下
 	// int need_keep;	// 是否为长连接                     	process填充
 	// int l4_type;	// 应用层协议类型，http/websocket		process填充
-	char[20] cid;	// client id 							process 填充
-	char[20] uid;	// user id 							process 填充
-	char[128] reserved;	// reserved
-} __attribute__((aligned(CACHE_LINE_SIZE))) tgg_cli_info;
+	char cid[20];	// client id 							process 填充
+	char uid[20];	// user id 							process 填充
+	char reserved[128];	// reserved
+} __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_cli_info;
 
 // BW连接信息
 typedef struct st_bw_info {
@@ -83,7 +84,14 @@ typedef struct st_read_data {
 	int idx;
 	int data_len;
 	void* data;		// 携带的数据
-} __attribute__((aligned(CACHE_LINE_SIZE))) tgg_read_data;
+} __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_read_data;
+
+// list<fd>
+typedef struct st_tgg_fd_list {
+	int fd;
+	int idx;
+	struct st_tgg_fd_list* next;
+} tgg_fd_list;
 
 // process回传给master处理
 typedef struct st_write_data {
@@ -92,7 +100,7 @@ typedef struct st_write_data {
 	int idx;
 	int data_len;
 	void* data;		// 携带的数据
-} __attribute__((aligned(CACHE_LINE_SIZE))) tgg_write_data;
+} __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_write_data;
 
 // bw数据处理传输结构
 typedef struct st_read_data tgg_bw_data;
@@ -123,15 +131,6 @@ typedef struct st_pid_data {
 	int idx;		// 索引   进程索引，标记进程能使用的队列		子进程写入和使用
 } pid_data;
 
-
-// list<fd>
-typedef struct st_tgg_fd_list {
-	int fd;
-	int idx;
-	struct st_tgg_fd_list* next;
-} tgg_fd_list;
-
-
 // gid hash data
 typedef tgg_fd_list tgg_gid_data;
 
@@ -140,7 +139,7 @@ typedef tgg_fd_list tgg_uid_data;
 
 
 typedef struct st_list_iddata {
-	char[20] data;
+	char data[20];
 	struct st_list_iddata* next;
 } tgg_list_id;
 

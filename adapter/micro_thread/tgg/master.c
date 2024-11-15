@@ -1,19 +1,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "mt_incl.h"
+#include "mt_api.h"
 #include "micro_thread.h"
 #include <rte_mempool.h>
-#include "tgg_common.h"
-#include "tgg_struct.h"
-#include "tgg_init.h"
+#include <rte_malloc.h>
+#include "tgg_comm/tgg_common.h"
+#include "tgg_comm/tgg_struct.h"
+#include "dpdk_init.h"
+#include <arpa/inet.h>
 
-
-static const char* s_dump_file = "/var/corefiles/tgg_gw_master_core"
+static const char* s_dump_file = "/var/corefiles/tgg_gw_master_core";
 
 extern const char* g_rte_malloc_type;
-extern const struct rte_mempool* g_mempool_read;
-extern const struct rte_mempool* g_mempool_write;
+extern struct rte_mempool* g_mempool_read;
+extern struct rte_mempool* g_mempool_write;
+extern struct rte_ring* g_ring_read;
 extern ushort g_gateway_port;
+extern tgg_stats g_tgg_stats;
 
 // 进程是否退出  master进程退出不需要做什么事情，但是secondary退出前必须要释放他持有的内存
 int g_run_status = 1;
@@ -71,7 +75,7 @@ static int tgg_recv_enqueue(int clt_fd, char* buf, int len, enum FD_OPT opt)
 	// 1、申请交互数据结构的内存空间，并填充数据
 	tgg_read_data* rdata = NULL;
 	int idx = 0; // 前期调试性能需要，后期可根据需求屏蔽
-	while (rte_mempool_get(g_mempool_read, rdata) < 0) {
+	while (rte_mempool_get(g_mempool_read, (void**)&rdata) < 0) {
 		// TODO  分配内存失败后的处理，  暂时采用休眠的方式等待消费端消费完释放空间，这里应该就能成功了
 		idx++;
 		usleep(10);
@@ -81,10 +85,10 @@ static int tgg_recv_enqueue(int clt_fd, char* buf, int len, enum FD_OPT opt)
 			__func__, __LINE__, g_mempool_read->name, idx);
 		idx = 0;
 	}
-	g_tgg_stats->en_read_stats.malloc_st++;
+	g_tgg_stats.en_read_stats.malloc_st++;
 	rdata->fd = clt_fd;
-	rdata->fd_opt = opt;FD_READ
-	rdata->data_len = ret;
+	rdata->fd_opt = opt;
+	rdata->data_len = len;
 	if (rdata->data_len > 0) {
 		rdata->data = dpdk_rte_malloc(rdata->data_len);
 		if (!rdata->data) {
@@ -94,7 +98,7 @@ static int tgg_recv_enqueue(int clt_fd, char* buf, int len, enum FD_OPT opt)
 			rte_mempool_put(g_mempool_read, rdata);
 			return -1;
 		}
-		g_tgg_stats->en_read_stats.malloc_data++;
+		g_tgg_stats.en_read_stats.malloc_data++;
 		memcpy(rdata->data, buf, rdata->data_len);
 	}
 
@@ -111,11 +115,12 @@ static int tgg_recv_enqueue(int clt_fd, char* buf, int len, enum FD_OPT opt)
 
 	if (tgg_enqueue_read(rdata) < 0) {
 		// TODO 统计失败计数，是否要重入队列？
+		memset(rdata->data, 0, rdata->data_len);
 		rte_free(rdata->data);
-		memset(rdata, 0, sizeof(tgg_read_data))
+		memset(rdata, 0, sizeof(tgg_read_data));
 		rte_mempool_put(g_mempool_read, rdata);
 	} else {
-		g_tgg_stats->en_read_stats.enqueue++;
+		g_tgg_stats.en_read_stats.enqueue++;
 	}
 	return 0;
 }
@@ -137,7 +142,7 @@ static void tgg_recv(void *arg)
 	while (g_run_status) {
 		// 1、接收数据  mt_recv在没有数据包的情况下会阻塞，让出cpu给其他的action执行
 		ret = mt_recv(clt_fd, (void *)buf, 64 * 1024, 0, -1);
-		g_tgg_stats->recv++;
+		g_tgg_stats.recv++;
 		if (ret < 0) {
 			// 连接主动断开了
 			printf("recv from client error\n");
@@ -147,7 +152,7 @@ static void tgg_recv(void *arg)
 		if (status & FD_STATUS_NEWSESSION) {
 			// 首次连接
 			status |= FD_STATUS_NEWSESSION;
-			tgg_set_cli_status(cli_fd, status);
+			tgg_set_cli_status(clt_fd, status);
 			opt = FD_NEW;
 		} else {
 			// 后续数据包
@@ -161,7 +166,7 @@ static void tgg_recv(void *arg)
 	// 对端主动关闭了
 	// memset(cli->uid, 0, sizeof(cli->uid));
 	status = FD_STATUS_CLOSING;
-	tgg_set_cli_status(cli_fd, status);
+	tgg_set_cli_status(clt_fd, status);
 	// 为确保fd正确关闭,对应的内存正确释放,就必须要入队列一个关闭的操作
 	while (tgg_recv_enqueue(clt_fd, NULL, 0, FD_CLOSE) < 0) {
 
@@ -184,11 +189,11 @@ static void tgg_do_send(tgg_write_data* wdata)
 		// 是否需要发送数据
 		if ((wdata->fd_opt & FD_WRITE) && 
 			(status & (FD_STATUS_NEWSESSION | FD_STATUS_CONNECTED)) ) {
-			ret = mt_send(clt_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
+			int ret = mt_send(cli_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
 			if (ret < 0) {
-				RTE_LOG(ERR, USER1, "[%s][%d] send data to client[%s] error, ret[%d]", __func__, __LINE__, cli->uid, ret);
+				RTE_LOG(ERR, USER1, "[%s][%d] send data to client[%d] error, ret[%d]", __func__, __LINE__, wdata->idx, ret);
 			} else {
-				g_tgg_stats->en_read_stats.enqueue++;
+				g_tgg_stats.en_read_stats.enqueue++;
 			}
 		}
 DO_SEND_CLOSE:
