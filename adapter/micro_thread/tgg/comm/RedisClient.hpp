@@ -1,3 +1,4 @@
+#pragma once
 #include <cstring>
 #include <iostream>
 #include <hiredis/hiredis.h>
@@ -228,10 +229,10 @@ std::string ExtractStringBetweenColons(const std::string& input) {
     return input.substr(firstColonPos + 1, secondColonPos - firstColonPos - 1);
 }
 
-std::map<std::string, std::set<std::string> > GetUserWithGids(std::vector<std::string>& clusterNodes, 
-    const char* password)
+int GetUserWithGids(const std::vector<std::string>& clusterNodes, 
+                    std::map<std::string, std::set<std::string> >& result, 
+                    const std::string& password = "")
 {
-    std::map<std::string, std::set<std::string>> result;
     RedisClient reader(clusterNodes);
 
     if (reader.Connect(password)) {
@@ -248,8 +249,10 @@ std::map<std::string, std::set<std::string> > GetUserWithGids(std::vector<std::s
                 it++;
             }
         }
+    } else {
+        return -1;
     }
-    return result;
+    return 0;
 }
 
 // int main(int argc, char* argv[]) {
