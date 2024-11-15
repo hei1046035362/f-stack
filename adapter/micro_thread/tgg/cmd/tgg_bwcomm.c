@@ -2,26 +2,31 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <zlib.h>
 #include <rte_log.h>
 #include <rte_mempool.h>
 #include "tgg_bwcomm.h"
+#include <map>
+#include <iostream>
+#include "string.h"
+#include "nlohmann/json.hpp"
 
 std::map<int, tgg_bw_info*> g_map_bwinfo;
 
-int get_connection_info(int fd, char[] ip, unsigned short* port)
+int get_connection_info(int fd, const char* ip, unsigned short* port)
 {
      // 获取IP地址信息
      struct sockaddr_in remote_addr;
      socklen_t addrlen = sizeof(remote_addr);
-     if (getpeername(fd, (struct sockaddr *)&local_addr, &addrlen) == -1) {
+     if (getpeername(fd, (struct sockaddr *)&remote_addr, &addrlen) == -1) {
          perror("getpeername");
-         close(sockfd);
+         close(fd);
          return -1;
      }
-     inet_ntop(AF_INET, &(local_addr.sin_addr), ip, INET_ADDRSTRLEN);
-     port = ntohs(addr.sin_port);
-     RTE_LOG(INFO, USER1, "[%s][%d] Cmd from [%s]:[%d]", __func__, __LINE__, ip, port);
+     inet_ntop(AF_INET, &(remote_addr.sin_addr), (char*)ip, INET_ADDRSTRLEN);
+     *port = ntohs(remote_addr.sin_port);
+     RTE_LOG(INFO, USER1, "[%s][%d] Cmd from [%s]:[%d]", __func__, __LINE__, ip, *port);
      return 0;
 }
 
@@ -49,7 +54,7 @@ tgg_bw_info* get_valid_bwinfo_by_fd(int fd)
 
 
 // 将输入字符串使用 DEFLATE 压缩
-std::vector<uint8_t> gzdeflate(const std::string& input) {
+std::string gzdeflate(const std::string& input) {
     // 输出缓冲区
     std::vector<uint8_t> output(compressBound(input.size()));
 
@@ -62,7 +67,8 @@ std::vector<uint8_t> gzdeflate(const std::string& input) {
 
     // Resize the vector to the actual compressed size
     output.resize(outputSize);
-    return output;
+    std::string retstr = std::string((char*)(output.data()), output.size());
+    return retstr;
 }
 
 std::string gzinflate(const std::string& compressedData)
@@ -106,7 +112,7 @@ std::string gzinflate(const std::string& compressedData)
     return uncompressedData;
 }
 
-std::vector<uint8_t> compress(int compressFormat, const std::string& body) {
+std::string compress(int compressFormat, const std::string& body) {
     // 具体的压缩逻辑应根据需求实现
     if (!compressFormat) {
         return body;
@@ -204,14 +210,14 @@ std::string message_unpack(const std::string& packedData)
 
     // 验证包分隔符
     short package_separator_check;
-    std::memcpy(&package_separator_check, packedData.c_str(), 2);
+    memcpy(&package_separator_check, packedData.c_str(), 2);
     if (package_separator_check!= PACKAGE_SEPARATOR) {
         return result; // 包分隔符不匹配，返回空结果向量
     }
 
     // 读取包长度
     int packageLength;
-    std::memcpy(&packageLength, packedData.c_str() + 4, 4);
+    memcpy(&packageLength, packedData.c_str() + 4, 4);
     if (packedData.length()!= packageLength) {
         return result; // 包长度不匹配，返回空结果向量
     }
@@ -220,23 +226,23 @@ std::string message_unpack(const std::string& packedData)
     size_t offset = 10; // 跳过包分隔符、未使用字段、包长度和额外大小
 
     short command;
-    std::memcpy(&command, packedData.c_str() + offset, 2);
+    memcpy(&command, packedData.c_str() + offset, 2);
     offset += 2;
 
     int seq;
-    std::memcpy(&seq, packedData.c_str() + offset, 4);
+    memcpy(&seq, packedData.c_str() + offset, 4);
     offset += 4;
 
     short version;
-    std::memcpy(&version, packedData.c_str() + offset, 2);
+    memcpy(&version, packedData.c_str() + offset, 2);
     offset += 2;
 
     unsigned char protocol;
-    std::memcpy(&protocol, packedData.c_str() + offset, 1);
+    memcpy(&protocol, packedData.c_str() + offset, 1);
     offset += 1;
 
     unsigned char compressFormat;
-    std::memcpy(&compressFormat, packedData.c_str() + offset, 1);
+    memcpy(&compressFormat, packedData.c_str() + offset, 1);
     offset += 1;
 
     // 读取压缩后的正文

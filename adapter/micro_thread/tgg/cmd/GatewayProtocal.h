@@ -112,5 +112,5 @@ enum ClientProtocal {
     // 发给worker上的关闭链接事件
     CMD_ON_CLIENT_CLOSE = 4,
 
-}
+};
 #endif // __GATEWAY_PROTOCAL_H__

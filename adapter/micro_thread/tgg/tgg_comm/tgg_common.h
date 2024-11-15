@@ -1,10 +1,10 @@
 #ifndef _TGG_COMMON_H_
 #define _TGG_COMMON_H_
 
+#include <string>
+#include <vector>
+#include <map>
 #include "tgg_struct.h"
-
-// 生成gid  ip4地址+idx
-const char* generate_cid();
 
 int tgg_get_cli_idx(int fd);
 int tgg_get_cli_status(int fd);
@@ -33,6 +33,8 @@ int tgg_enqueue_read(tgg_read_data* data);
 int tgg_enqueue_write(tgg_write_data* data);
 int tgg_dequeue_read(tgg_read_data** data);
 int tgg_dequeue_write(tgg_write_data** data);
+int tgg_enqueue_bwrcv(tgg_bw_data* data);
+int tgg_dequeue_bwrcv(tgg_bw_data** data);
 
 
 void init_core(const char* dumpfile);
@@ -60,5 +62,6 @@ tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& m
 int enqueue_data_batch_fd(const std::string& data, std::map<int, int>& mapfdidx, int fdopt);
 int enqueue_data_single_fd(const std::string& data, int fd, int idx, int fdopt);
 
-int tgg_init_uidgid();
+int tgg_init_uidgid(const std::vector<std::string>& clusterNodes, const std::string& password, const std::string& userName = "");
+
 #endif  // _TGG_COMMON_H_

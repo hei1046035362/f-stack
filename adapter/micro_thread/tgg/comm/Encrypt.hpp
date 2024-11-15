@@ -221,13 +221,13 @@ private:
 };
 
 // 模拟defaultEncrypt函数
-Encrypt defaultEncrypt(const std::string& key = "c9VTsHTDlTkZv&41", const std::string& iv = "9*4be&k7ec%x9b1t") {
+static Encrypt GetEncryptor(const std::string& key = "c9VTsHTDlTkZv&41", const std::string& iv = "9*4be&k7ec%x9b1t") {
     return Encrypt(key, iv, true);
 }
 
 // int main() {
 //     initOpenSSL();
-//     Encrypt encryptor = defaultEncrypt();
+//     Encrypt encryptor = GetEncryptor();
 //     std::string originalData = "Hello, World!";
 //     std::string encryptedData = encryptor.Aes128Encrypt(originalData);
 //     std::string decryptedData = encryptor.Aes128Decrypt(encryptedData);

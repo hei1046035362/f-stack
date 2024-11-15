@@ -4,7 +4,8 @@
 #include <unordered_map>
 #include <openssl/sha.h>
 #include "Encrypt.hpp" // 需要使用 Base64 库
-#include "tgg_common.h"
+#include "tgg_comm/tgg_common.h"
+static const size_t WS_MAX_RECV_FRAME_SZ = 10485760;
 
 // TODO: 为了快速开发，目前websocket的缓存和握手状态都在st_cli_info中，后续需要重新封装一下
 //          方法要和数据隔离
@@ -37,7 +38,7 @@ private:
     // 生成websocket连接的唯一键
     std::string _GenerateAcceptKey(const std::string& key) {
         std::string concat_key = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";    
-        return Encrypte::Base64Encode(Encrypte::sha1(concat_key));
+        return Encrypt::Base64Encode(Encrypt::sha1(concat_key));
     }
 
     std::string _HandleHandshake(const std::string& request) {
@@ -52,7 +53,7 @@ private:
             }
         }
 
-        std::string accept_key = generate_accept_key(web_key);
+        std::string accept_key = _GenerateAcceptKey(web_key);
 
         // 构建握手响应
         std::ostringstream response;
@@ -119,7 +120,7 @@ private:
     /* parse base frame according to
      * https://www.rfc-editor.org/rfc/rfc6455#section-5.2
      */
-    static enum WebSocketFrameType
+    static int
     _GetWsFrame(unsigned char *in_buffer, size_t buf_len,
         unsigned char **payload_ptr, size_t *out_len)
     {
@@ -164,7 +165,7 @@ private:
                 /* Implementation limitation, we support up to 10 MiB
                  * length, as a DoS prevention measure.
                  */
-                event_warn("%s: frame length %" PRIu64 " exceeds %" PRIu64 "\n",
+                printf("%s: frame length %lu exceeds %lu.\n",
                     __func__, tmp64, (uint64_t)WS_MAX_RECV_FRAME_SZ);
                 /* Calling code needs these values; do the best we can here.
                  * Caller will close the connection anyway.
@@ -217,24 +218,24 @@ protected:
 
 public:
     // 所有发送数据都在子类执行，这里只做websocket相关的公共操作
-    virtual void OnHandShake(std::string& response) = 0;
-    virtual void OnMessage(std::string& msg) = 0;
+    virtual void OnHandShake(const std::string& response) = 0;
+    virtual void OnMessage(const std::string& msg) = 0;
     virtual void OnClose() = 0;// 子类继承后要执行clean_buffer清理缓存
-    virtual void OnPing(std::string& response) {};
-    virtual void OnPong(std::string& response) {};
+    virtual void OnPing(const std::string& response) {};
+    virtual void OnPong(const std::string& response) {};
 
     // return  -1 缓存失败，要关闭连接并删除源数据data 0 缓存数据，本次不处理  1 消息处理完成，需要清理缓存
     int ReadWsData(void* data, int len)
     {
         if (!handshake) {
-            std::string response = _HandleHandshake(std::string(data, len));
+            std::string response = _HandleHandshake(std::string((char*)data, len));
             if (response.empty()) {
                 return -1;
             }
             OnHandShake(std::string((char*)data, len));
             return 1;
         }
-        enum WebSocketFrameType type;
+        int type;
         unsigned char *payload;
         size_t msg_len, in_len, header_sz;
         std::string completedata = get_one_frame_buffer(this->fd, data, len);
@@ -247,7 +248,7 @@ public:
                 // 数据不完整，先缓存起来，等待下一个包，一个websocket包分在两个分片中  buflen<packetlen
                 // 也就是还没有缓存一个完整的websocket包，不用解析，等待下一个包进来拼接在一起
             if (cache_ws_buffer(this->fd, data, len, 0, 0)) {
-                RTE_LOG(ERR, USER1, "[%s][%d] Cache buffer failed.");
+                RTE_LOG(ERR, USER1, "[%s][%d] Cache buffer failed.", __func__, __LINE__);
                 // 缓存失败的话，一个包缓存补上，前面的包就不完整，全部丢弃
                 return -1;
             }
@@ -256,7 +257,7 @@ public:
         header_sz = payload - input;
     
         if (cache_ws_buffer(this->fd, data, len, header_sz)) {
-            RTE_LOG(ERR, USER1, "[%s][%d] Cache buffer failed.");
+            RTE_LOG(ERR, USER1, "[%s][%d] Cache buffer failed.", __func__, __LINE__);
             return -1;
         }
         std::string buffer = get_whole_buffer(this->fd);
@@ -292,4 +293,4 @@ public:
         return 1;
     }
 
-}
+};
