@@ -127,7 +127,7 @@ typedef struct st_stats {
 // 进程信息
 typedef struct st_pid_data {
 	pid_t pid;		// 进程id									父进程写入
-	int heard_beat;	// 心跳   防止进程无响应，队列无人消费			父进程写入，子进程通过信号通知并重置计数
+	uint64_t heard_beat;	// 心跳   防止进程无响应，队列无人消费			父进程写入，子进程通过信号通知并重置计数
 	int idx;		// 索引   进程索引，标记进程能使用的队列		子进程写入和使用
 } pid_data;
 

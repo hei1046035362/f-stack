@@ -4,11 +4,11 @@
 #include <rte_memzone.h>
 #include <rte_mempool.h>
 #include <rte_malloc.h>
-#include "tgg_lock_struct.h"
+#include "tgg_lock.h"
 #include "comm/TggLock.hpp"
-#include "comm/RedisClient.hpp"
 #include <string.h>
 #include <unistd.h>
+#include <iostream>
 
 extern struct rte_memzone* g_fd_zone;
 extern int g_fd_limit;
@@ -18,8 +18,49 @@ extern struct rte_ring* g_ring_bwrcv;
 extern struct rte_mempool* g_mempool_read;
 extern struct rte_mempool* g_mempool_write;
 extern struct rte_mempool* g_mempool_bwrcv;
+extern char g_cid_str[21];  // 8位地址+4位端口+8位idx+1位结束符'\0'
 
 tgg_stats g_tgg_stats = {0};
+
+
+int get_valid_idx()
+{
+	int looptimes = 2;
+	int current_id_atomic = 0;
+	while (1) {
+		// TODO  后续要考虑自增id超过uint32_max了怎么处理，
+		rte_atomic32_inc(get_idx_lock());
+		current_id_atomic = rte_atomic32_read(get_idx_lock());
+		if(current_id_atomic > g_fd_limit) {
+			rte_atomic32_init(get_idx_lock());
+			looptimes--;
+		}
+		if(looptimes <= 0) {
+			//rte_exit(-1, "nonIdx ");
+			RTE_LOG(ERR, USER1, "[%s][%d] None idx available.", __func__, __LINE__);
+			return -1;
+		}
+		if(tgg_check_idx_exist(current_id_atomic) < 0) {
+			break;
+		}
+	}
+	return current_id_atomic;
+}
+
+static void format_idx(int idx)
+{
+	char* ptr = &g_cid_str[12];// 前面12个已经被占用了
+	for (int j = 0; j < 4; j++) {
+		sprintf(ptr, "%02X", (idx >> (24 - j * 8)) & 0xFF);
+		ptr += 2;
+	}
+}
+
+const char* get_valid_cid(int idx)
+{
+	format_idx(idx);
+	return g_cid_str;
+}
 
 void tgg_close_cli(int fd)
 {
@@ -36,6 +77,30 @@ void tgg_close_cli(int fd)
 	cli->idx = -1;
 	cli->authorized = 0;
 	cli->status |= FD_STATUS_CLOSING | FD_STATUS_CLOSED;
+}
+
+int tgg_init_cli(int fd)
+{
+	SpinLock lock(get_cli_lock());
+	if (fd < 0 || fd >= g_fd_limit)	{
+		RTE_LOG(INFO, USER1, "given fd[%d] is invalid,[0,%d]",
+			fd, g_fd_limit - 1);
+		return -1;
+	}
+	tgg_cli_info* cli = &((tgg_cli_info*)g_fd_zone->addr)[fd];
+	memset(cli->cid, 0, sizeof(cli->cid));
+	memset(cli->uid, 0, sizeof(cli->uid));
+	memset(cli->reserved, 0, sizeof(cli->reserved));
+	cli->idx = get_valid_idx();
+	if(cli->idx < 0) {
+		return -1;
+	}
+	if (tgg_add_idx(cli->idx) < 0) {
+		return -1;
+	}
+	cli->authorized = 0;
+	cli->status = FD_STATUS_READYFORCONNECT;
+	return 0;
 }
 
 int tgg_get_cli_idx(int fd)
@@ -142,33 +207,61 @@ int tgg_set_cli_reserved(int fd, const char* reserved)
 
 int cache_ws_buffer(int fd, void* data, int len, int pos, int iscomplete)
 {
+	char* buffer = (char*)dpdk_rte_malloc(len);
+	if(!buffer) {
+		return -1;
+	}
+	memcpy(buffer, data, len);
 	SpinLock lock(get_cli_lock());
 	tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zone->addr)[fd])->ws_data;
     if (!wsdata) {// 第一次缓存
     	wsdata = (tgg_ws_data*)dpdk_rte_malloc(sizeof(tgg_ws_data));
-    	if (!wsdata)
+    	if (!wsdata) {
+    		rte_free(buffer);
     		return -1;
+    	}
     	wsdata->data_list = (tgg_ws_unit* )dpdk_rte_malloc(sizeof(tgg_ws_unit));
+    	if (!wsdata->data_list) {
+    		rte_free(buffer);
+    		rte_free(wsdata);
+    		return -1;
+    	}
+    	wsdata->data_list->data = buffer;
+    	wsdata->data_list->len = len;
+    	wsdata->data_list->pos = pos;
+    	wsdata->data_list->next = NULL;
+    	wsdata->total_len = len;
+	    wsdata->head_complete = iscomplete ? 1 : 0;
+	    (&((tgg_cli_info*)g_fd_zone->addr)[fd])->ws_data = wsdata;
+	    return 0;
+
     }
     if (wsdata->total_len >= MAX_WSDATA_LEN) {
     	RTE_LOG(ERR, USER1, "[%s][%d] Cache buffer len[%d] beyond MAX_WSDATA_LEN.",
     		__func__, __LINE__, wsdata->total_len);
+    	rte_free(buffer);
     	return -1;
     }
-    tgg_ws_unit* ptail = wsdata->data_list;
-    if (!ptail) return -1;
-
-    while(ptail->next) {
-    	ptail = ptail->next;
-    }
     tgg_ws_unit* punit = (tgg_ws_unit* )dpdk_rte_malloc(sizeof(tgg_ws_unit));
-    if (!punit) return -1;
-    punit->data = data;
+    if (!punit) {
+   		rte_free(buffer);
+    	return -1;
+    }
+    punit->data = buffer;
     punit->len = len;
     punit->pos = pos;
-    ptail->next = punit;
     wsdata->total_len += len;
     wsdata->head_complete = iscomplete ? 1 : 0;
+    tgg_ws_unit* ptail = wsdata->data_list;
+    if(!ptail) {
+    	wsdata->data_list = punit;
+    } else {
+    	while(ptail->next) {
+    		ptail = ptail->next;
+    	}
+    	ptail->next = punit;
+	}
+
     return 0;
 }
     
@@ -201,13 +294,13 @@ std::string get_whole_buffer(int fd)
 	SpinLock lock(get_cli_lock());
 	std::string buffer;
 	tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zone->addr)[fd])->ws_data;
-    if (!wsdata || wsdata->data_list) {// 没有数据
+    if (!wsdata || !wsdata->data_list) {// 没有数据
         // buffer = std::string((char*)data + pos, len);
     	return buffer;
     }
     tgg_ws_unit* phead = wsdata->data_list;
     while(phead) {
-    	buffer += std::string((char*)phead->data + phead->pos, phead->len);
+    	buffer += std::string((char*)phead->data + phead->pos, phead->len - phead->pos);
     	phead = phead->next;
     }
     return buffer;
@@ -223,16 +316,16 @@ void clean_ws_buffer(int fd)
 
     tgg_ws_unit* phead = wsdata->data_list;
     while(phead) {
-        phead->len = 0;
-        phead->pos = 0;
-        memset(phead->data, 0, phead->len);
-        rte_free(phead);
         wsdata->data_list = phead->next;
+        memset(phead->data, 0, phead->len);
+        rte_free(phead->data);
+        memset(phead, 0, sizeof(tgg_ws_unit));
+        rte_free(phead);
         phead = wsdata->data_list;
     }
-    wsdata->head_complete = 0;
-    wsdata->total_len = 0;
+    memset(wsdata, 0, sizeof(tgg_ws_data));
     rte_free(wsdata);
+    (&((tgg_cli_info*)g_fd_zone->addr)[fd])->ws_data = NULL;
 }
 
 int tgg_enqueue_read(tgg_read_data* data)
@@ -386,28 +479,6 @@ int enqueue_data_single_fd(const std::string& data, int fd, int idx, int fdopt)
 	std::map<int, int> mapfdidx;
 	mapfdidx[fd] = idx;
 	return enqueue_data_batch_fd(data, mapfdidx, fdopt);
-}
-
-int tgg_init_uidgid(const std::vector<std::string>& clusterNodes, const std::string& password, const std::string& userName)
-{
-    std::map<std::string, std::set<std::string>> mapUsers;
-	int ret = GetUserWithGids(clusterNodes, mapUsers, password);
-	if (!ret) {
-		RTE_LOG(ERR, USER1, "[%s][%d] Connect redis failed.", __func__, __LINE__);
-		return ret;
-	}
-
-    std::map<std::string, std::set<std::string>>::iterator itUid = mapUsers.begin();
-    while(itUid != mapUsers.end()) {
-        std::set<std::string>::iterator itGid = itUid->second.begin();
-        while(itGid != itUid->second.end()) {
-			tgg_add_uidgid(itUid->first.c_str(), (*itGid).c_str());
-            //std::cout << "userId[" << itUid->first << "]: Gid[" << *itGid << "]" << std::endl;
-            itGid++;
-        }
-        itUid++;
-    }
-	return 0;
 }
 
 #include <sys/prctl.h>
