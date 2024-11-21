@@ -8,10 +8,11 @@
 #include "tgg_comm/tgg_common.h"
 #include "tgg_comm/tgg_struct.h"
 #include "dpdk_init.h"
-#include "cmd/WsConsumer.h"
+#include "tgg_comm/WsConsumer.h"
 #include "comm/Encrypt.hpp"
 #include "bwserver.h"
-
+#include "tgg_comm/tgg_bw_cache.h"
+#include "tgg_comm/tgg_bwcomm.h"
 
 #include <vector>
 
@@ -54,6 +55,12 @@ void tgg_process_read_data(void* arg)
 {
 	WsConsumer cons;
 	cons.ConsumerData(arg);
+
+	tgg_read_data* rdata = (tgg_read_data*)arg;
+    memset(rdata->data, 0, rdata->data_len);
+    rte_free(rdata->data);
+	memset(rdata, 0, sizeof(tgg_read_data));
+	rte_mempool_put(g_mempool_read, (void*)rdata);
 }
 
 static int tgg_process_read()
@@ -68,11 +75,12 @@ static int tgg_process_read()
 	}
 	// 等待可用线程
 	while (mt_nomore_thread() && g_run) {
-		usleep(10);
+		mt_sleep(10);
 		continue;
 	}
 	// 进程要退出了，不再启动新的线程，释放内存就退出
 	if (!g_run) {
+    	memset(rdata->data, 0, rdata->data_len);
 		rte_free(rdata->data);
 		memset(rdata, 0, sizeof(tgg_read_data));
 		rte_mempool_put(g_mempool_read, (void*)rdata);
@@ -80,6 +88,7 @@ static int tgg_process_read()
 	}
 
 	mt_start_thread((void *)tgg_process_read_data, (void *)rdata);
+
 	return 0;
 }
 
@@ -113,7 +122,7 @@ static int tgg_process_bwrcv()
 
 int tgg_gw_process(void* data)
 {
-	unsigned long long last_time = mt_time_ms();
+	// unsigned long long last_time = mt_time_ms();
 	while (g_run) {
 		// 处理客户端连接和转发数据
 		while (g_run) {
@@ -125,7 +134,7 @@ int tgg_gw_process(void* data)
 		}
 		// 处理从bw过来的数据
 		if (tgg_process_bwrcv() > 0)
-			usleep(10);
+			mt_sleep(10);
 
 		// 发送心跳
 		// unsigned long long cur_time = mt_time_ms();
@@ -211,10 +220,13 @@ void monitor_process()
 
 void tgg_process_init()
 {
-	if(tgg_init_uidgid(g_redis_clusternodes, g_redis_pwd) < 0) {
-		rte_exit(EXIT_FAILURE, "Init uidgid hash failed.\n");
-	}
+	// if(tgg_init_uidgid(g_redis_clusternodes, g_redis_pwd) < 0) {
+	// 	rte_exit(EXIT_FAILURE, "Init uidgid hash failed.\n");
+	// }
+	tgg_secondary_init();
+	tgg_iterprint_gidsbyuid();
 	initOpenSSL();
+	init_endians();
 }
 
 int main(int argc, char *argv[])
