@@ -1,3 +1,9 @@
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/fcntl.h>
 #include <rte_errno.h>
 #include <rte_ring.h>
 #include <rte_mempool.h>
@@ -5,7 +11,7 @@
 #include <rte_atomic.h>
 #include <rte_hash.h>
 #include <rte_hash_crc.h>
-#include <arpa/inet.h>
+
 #include "dpdk_init.h"
 #include "tgg_comm/tgg_struct.h"
 #include "tgg_comm/tgg_lock.h"
@@ -13,6 +19,8 @@
 const char* g_gateway_ip_str = "192.168.40.129";
 ushort g_gateway_port = 80;
 uint32_t g_gate_ip = 0;
+
+static const char* s_init_flag = "/run/lock/tgg_init";
 
 // TODO 多个lcore的情况下，必须要保证一个连接必须在一个lcore中读写(保证读写不异常)，也必须在一个process中处理(保证处理顺序)
 //		要分多个memzone存放，不同的lcore 不同的连接可能是相同的fd
@@ -270,6 +278,69 @@ struct rte_hash* init_hash(const char* hash_name, uint32_t ent_cnt, uint32_t key
 	return _hash;
 }
 
+// master初始化完成之后，要等待process初始化完成才能启动收发包的线程
+//     如果master完全启动后，process才启动，可能会导致刚开始的一段时间丢包
+static void init_flag_for_master()
+{
+    // 尝试创建用于进程锁的文件
+    int fd = open(s_init_flag, O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
+    if (fd == -1) {
+        // 如果文件已存在，说明锁已被其他进程获取
+        if (errno != EEXIST) {
+        	rte_exit(EXIT_FAILURE,
+				"Failed to open flag file[%s]:%s:%d\n",
+				s_init_flag, __func__, __LINE__);
+        }
+    }
+    close(fd);
+    // 等待process启动完成
+	while(access(s_init_flag, F_OK) == 0) {
+	    usleep(10);
+	}
+  	return;
+}
+// process初始化完成后删除标记文件，让master开始接收新的连接
+static void init_flag_for_process()
+{
+	if(access(s_init_flag, F_OK) == 0) {
+		if (!unlink(s_init_flag)) {
+			return;
+		}
+	}
+    rte_exit(EXIT_FAILURE,
+		"Failed to init flag file[%s]:%s:%d\n",
+		s_init_flag, __func__, __LINE__);
+}
+
+// 从redis读取数据更新uidgid的hash表
+static void init_uidgid_from_redis()
+{
+	pid_t pid;
+    int status;
+
+    pid = fork();
+    if (pid == -1) {
+        perror("fork error.");
+        exit(-1);
+    } else if (pid == 0) {
+        // 子进程
+        char * const argv[] = {(char*)("/data/code/f-stack/adapter/micro_thread/tgg/gwredis"), NULL};
+        if (execvp("/data/code/f-stack/adapter/micro_thread/tgg/gwredis", argv) == -1) {
+            perror("execvp error.");
+            exit(-1);
+        }
+        exit(0);
+    } else {
+        // 父进程
+    	if (waitpid(pid, &status, 0) == -1) {
+    		rte_exit(EXIT_FAILURE,
+    			"[%s][%d]Failed to init redis data, status:%d.\n", 
+    			 __func__, __LINE__, status);
+    	}
+    	printf("init uidgid from redis done : %d\n", status);
+    }
+}
+
 void tgg_master_init()
 {
 	RTE_LOG(INFO, USER1, "Init dpdk master for tgg...\n");
@@ -288,6 +359,9 @@ void tgg_master_init()
 	g_uidgid_hash = init_hash(s_uidgid_hash_name, g_fd_limit, s_id_hash_len);
 	g_idx_hash = init_hash(s_idx_hash_name, g_fd_limit, sizeof(int));
 	init_cid();
+	init_uidgid_from_redis();
+	init_flag_for_master();
+	RTE_LOG(INFO, USER1, "Init dpdk master for tgg done.\n");
 }
 
 void tgg_master_uninit()
@@ -334,6 +408,7 @@ void tgg_secondary_init()
 	g_uidgid_hash = get_hash_byname(s_uidgid_hash_name);
 	g_idx_hash = get_hash_byname(s_idx_hash_name);
 	init_cid();
+	init_flag_for_process();
 }
 void tgg_secondary_uninit()
 {
