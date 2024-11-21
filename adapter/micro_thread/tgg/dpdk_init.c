@@ -1,3 +1,4 @@
+#include <rte_errno.h>
 #include <rte_ring.h>
 #include <rte_mempool.h>
 #include <rte_malloc.h>
@@ -7,7 +8,7 @@
 #include <arpa/inet.h>
 #include "dpdk_init.h"
 #include "tgg_comm/tgg_struct.h"
-#include "tgg_comm/tgg_lock_struct.h"
+#include "tgg_comm/tgg_lock.h"
 
 const char* g_gateway_ip_str = "192.168.40.129";
 ushort g_gateway_port = 80;
@@ -16,8 +17,8 @@ uint32_t g_gate_ip = 0;
 // TODO 多个lcore的情况下，必须要保证一个连接必须在一个lcore中读写(保证读写不异常)，也必须在一个process中处理(保证处理顺序)
 //		要分多个memzone存放，不同的lcore 不同的连接可能是相同的fd
 // 		基于此，在ring中存储的结构需要增加标识入读队列的进程，以方便process在入写队列的时候做区分
-int g_fd_limit = 1000*1000;
-static int s_zone_size = g_fd_limit*sizeof(tgg_cli_info);  // 存储最多100w个fd
+uint32_t g_fd_limit = 1000*1000; // 单台服务器100W 个
+static uint32_t s_zone_size = g_fd_limit*sizeof(tgg_cli_info);  // 存储最多100w个fd
 struct rte_memzone* g_fd_zone = NULL;
 const char* s_fd_zone_name = "tgg_fd_zone";
 struct rte_memzone* g_lock_zone = NULL;
@@ -26,7 +27,7 @@ const char* s_lock_zone_name = "tgg_lock_zone";
 const char* s_read_ring_name = "tgg_read_ring";
 const char* s_bwrcv_ring_name = "tgg_bwrcv_ring";
 const char* s_write_ring_name = "tgg_write_ring";
-static int s_ring_size = 1024*8;  // 缓冲队列的长度，得是2的幂
+static uint32_t s_ring_size = 1024*8;  // 缓冲队列的长度，得是2的幂
 struct rte_ring* g_ring_read = NULL;
 struct rte_ring* g_ring_write = NULL;
 struct rte_ring* g_ring_bwrcv = NULL;
@@ -34,10 +35,10 @@ struct rte_ring* g_ring_bwrcv = NULL;
 const char* s_pool_read_name = "tgg_pool_read_name";
 const char* s_pool_write_name = "tgg_pool_write_name";
 const char* s_pool_bwrcv_name = "tgg_pool_bwrcv_name";
-static int s_mempool_size = 10000;
-static int s_mempool_read_cache = sizeof(struct st_read_data);// 单个缓存的大小待定
-static int s_mempool_write_cache = sizeof(struct st_write_data);// 单个缓存的大小待定
-static int s_mempool_bwrcv_cache = sizeof(tgg_bw_data);// 单个缓存的大小待定
+static uint32_t s_mempool_size = 10000;
+static uint32_t s_mempool_read_cache = sizeof(struct st_read_data);// 单个缓存的大小待定
+static uint32_t s_mempool_write_cache = sizeof(struct st_write_data);// 单个缓存的大小待定
+static uint32_t s_mempool_bwrcv_cache = sizeof(tgg_bw_data);// 单个缓存的大小待定
 struct rte_mempool* g_mempool_read = NULL;
 struct rte_mempool* g_mempool_write = NULL;
 struct rte_mempool* g_mempool_bwrcv = NULL;
@@ -50,11 +51,13 @@ const char* s_gid_hash_name = "tgg_gid_hash";
 const char* s_uid_hash_name = "tgg_uid_hash";
 const char* s_cid_hash_name = "tgg_cid_hash";
 const char* s_uidgid_hash_name = "tgg_uidgid_hash";
-static int s_id_hash_len = 20; // hash key 长度
+const char* s_idx_hash_name = "tgg_idx_hash";
+static uint32_t s_id_hash_len = 20; // hash key 长度
 struct rte_hash *g_gid_hash = NULL;
 struct rte_hash *g_uid_hash = NULL;
 struct rte_hash *g_cid_hash = NULL;
 struct rte_hash *g_uidgid_hash = NULL;
+struct rte_hash *g_idx_hash = NULL;  // 存放已使用的client idx
 
 
 rte_atomic32_t *shared_id_atomic_ptr = NULL;
@@ -90,6 +93,10 @@ static void init_cid()
 	// ip和端口 是固定的，只需要初始化的时候赋值就可以了
 	g_gate_ip = convert_ip2int(g_gateway_ip_str);
 	init_cid_prefix(g_gate_ip, g_gateway_port);
+	// 只要有一个进程初始化就可以了，这里选择primary进程做初始化
+	if (rte_eal_process_type() == RTE_PROC_PRIMARY) {
+		rte_atomic32_init(get_idx_lock());
+	}
 }
 
 static struct rte_memzone *
@@ -102,7 +109,7 @@ find_memzone(const char *name)
 	snprintf(mz_name, RTE_MEMZONE_NAMESIZE, "%s_%u", name, socket_id);
 	memzone = (struct rte_memzone *)rte_memzone_lookup(mz_name);
 	if (!memzone) {
-		RTE_LOG(ERR, USER1, "[%s]:[%d]memzone[%s] not found.", 
+		RTE_LOG(ERR, USER1, "[%s]:[%d]memzone[%s] not found.\n", 
 			 __func__, __LINE__, mz_name);
 		return NULL;
 	}
@@ -122,20 +129,20 @@ make_memzone(const char *name, size_t size)
 		memset(memzone->addr, 0, memzone->len);
 		rte_memzone_free(memzone);
 		memzone = NULL;
-		RTE_LOG(ERR, USER1, "[%s][%d]memzone[%s] found, but len[%lu] not match[%lu]", 
+		RTE_LOG(ERR, USER1, "[%s][%d]memzone[%s] found, but len[%lu] not match[%lu]\n", 
 			__func__, __LINE__, mz_name, memzone->len, size);
 	}
 	if (memzone == NULL) {
 		memzone = (struct rte_memzone *)rte_memzone_reserve_aligned(mz_name, size, socket_id,
-				RTE_MEMZONE_IOVA_CONTIG, RTE_CACHE_LINE_SIZE);
+				RTE_MEMZONE_2MB, RTE_CACHE_LINE_SIZE);
 		if (memzone == NULL){
 			rte_exit(EXIT_FAILURE,
-				"Can't allocate memory zone %s:%s:%d\n",
-				mz_name, __func__, __LINE__);
+				"[%s][%d] Can't allocate memory zone %s, error:%s.\n", __func__, __LINE__,
+				mz_name, rte_strerror(rte_errno));
 		}
 	}
 	memset(memzone->addr, 0, size);
-	RTE_LOG(INFO, USER1, "New zone allocated: %s",
+	RTE_LOG(INFO, USER1, "New zone allocated: %s.\n",
 		mz_name);
 	return memzone;
 }
@@ -166,7 +173,7 @@ make_mempool(const char *name, size_t units, size_t unit_size)
 		mempool = NULL;
 	}
 	if (mempool == NULL) {
-		mempool = rte_mempool_create(name,
+		mempool = rte_mempool_create(mp_name,
 			units,
 			unit_size,
 			0,
@@ -178,7 +185,7 @@ make_mempool(const char *name, size_t units, size_t unit_size)
 				mp_name, __func__, __LINE__);
 		}
 	}
-	RTE_LOG(INFO, USER1, "New mempool allocated: %s",
+	RTE_LOG(INFO, USER1, "New mempool allocated: %s.\n",
 		mp_name);
 	return mempool;
 }
@@ -190,7 +197,7 @@ find_ring(const char *name)
 	char ring_name[RTE_RING_NAMESIZE];
 	struct rte_ring *ring;
 
-	snprintf(ring_name, RTE_MEMZONE_NAMESIZE, "%s_%u", name, socket_id);
+	snprintf(ring_name, RTE_RING_NAMESIZE, "%s_%u", name, socket_id);
 	ring = rte_ring_lookup(ring_name);
 	return ring;
 }
@@ -202,14 +209,14 @@ make_ring(const char *name, size_t units)
 	char ring_name[RTE_RING_NAMESIZE];
 	struct rte_ring *ring;
 
-	snprintf(ring_name, RTE_MEMZONE_NAMESIZE, "%s_%u", name, socket_id);
+	snprintf(ring_name, RTE_RING_NAMESIZE, "%s_%u", name, socket_id);
 	ring = rte_ring_lookup(ring_name);
 	if (ring != NULL) {
 		rte_ring_free(ring);
 		ring = NULL;
 	}
 	if (ring == NULL) {
-		ring = rte_ring_create(name,
+		ring = rte_ring_create(ring_name,
 			units,
 			rte_socket_id(),
 			0);
@@ -219,7 +226,7 @@ make_ring(const char *name, size_t units)
 				ring_name, __func__, __LINE__);
 		}
 	}
-	RTE_LOG(INFO, USER1, "New ring allocated: %s",
+	RTE_LOG(INFO, USER1, "New ring allocated: %s\n",
 		ring_name);
 	return ring;
 }
@@ -231,7 +238,7 @@ struct rte_hash* get_hash_byname(const char* hash_name)
 	 
 }
 
-struct rte_hash* init_hash(const char* hash_name, int ent_cnt, int key_len)
+struct rte_hash* init_hash(const char* hash_name, uint32_t ent_cnt, uint32_t key_len)
 {
 	struct rte_hash* _hash = get_hash_byname(hash_name);
 	if (_hash) {
@@ -245,7 +252,7 @@ struct rte_hash* init_hash(const char* hash_name, int ent_cnt, int key_len)
 		.key_len = key_len,
 		.hash_func = rte_hash_crc,
 		.hash_func_init_val = 0,
-		.socket_id = rte_socket_id(),
+		.socket_id = (int)rte_socket_id(),
 		.extra_flag = RTE_HASH_EXTRA_FLAGS_EXT_TABLE | 
 						RTE_HASH_EXTRA_FLAGS_MULTI_WRITER_ADD | 
 						RTE_HASH_EXTRA_FLAGS_RW_CONCURRENCY_LF |
@@ -258,12 +265,14 @@ struct rte_hash* init_hash(const char* hash_name, int ent_cnt, int key_len)
 			"Failed to create hash table[%s]:%s:%d\n",
 			hash_name, __func__, __LINE__);
 	}
+	RTE_LOG(INFO, USER1, "New hash created: %s\n",
+		hash_name);
 	return _hash;
 }
 
 void tgg_master_init()
 {
-	RTE_LOG(INFO, USER1, "Init dpdk master for tgg...");
+	RTE_LOG(INFO, USER1, "Init dpdk master for tgg...\n");
 	// 100W个FD  32M的空间
 	g_fd_zone = make_memzone(s_fd_zone_name, s_zone_size);
 	g_lock_zone = make_memzone(s_lock_zone_name, sizeof(tgg_lock));
@@ -277,6 +286,7 @@ void tgg_master_init()
 	g_uid_hash = init_hash(s_uid_hash_name, g_fd_limit, s_id_hash_len);
 	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, s_id_hash_len);
 	g_uidgid_hash = init_hash(s_uidgid_hash_name, g_fd_limit, s_id_hash_len);
+	g_idx_hash = init_hash(s_idx_hash_name, g_fd_limit, sizeof(int));
 	init_cid();
 }
 
@@ -302,11 +312,13 @@ void tgg_master_uninit()
 	g_cid_hash = NULL;
 	rte_hash_free(g_uidgid_hash);
 	g_uidgid_hash = NULL;
+	rte_hash_free(g_idx_hash);
+	g_idx_hash = NULL;
 }
 
 void tgg_secondary_init()
 {
-	RTE_LOG(INFO, USER1, "Init dpdk secodary for tgg...");
+	RTE_LOG(INFO, USER1, "Init dpdk secodary for tgg...\n");
 	// 100W个FD  32M的空间
 	g_fd_zone = find_memzone(s_fd_zone_name);
 	g_lock_zone = find_memzone(s_lock_zone_name);
@@ -320,6 +332,8 @@ void tgg_secondary_init()
 	g_uid_hash = get_hash_byname(s_uid_hash_name);
 	g_cid_hash = get_hash_byname(s_cid_hash_name);
 	g_uidgid_hash = get_hash_byname(s_uidgid_hash_name);
+	g_idx_hash = get_hash_byname(s_idx_hash_name);
+	init_cid();
 }
 void tgg_secondary_uninit()
 {

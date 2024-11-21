@@ -52,5 +52,12 @@ int tgg_del_gid_uidgid(const char* uid, const char* gid);
 
 // 返回格式  list<string(uid)>
 std::list<std::string> tgg_get_gidsbyuid(const char* uid);
+void tgg_iterprint_gidsbyuid();
+
+
+/// 增删查  idx hash<idx, NULL>  查询全局有效clientid使用的idx
+int tgg_add_idx(int idx);
+int tgg_del_idx(int idx);
+int tgg_check_idx_exist(int idx);
 
 #endif  // __TGG_BW_CACHE_H__

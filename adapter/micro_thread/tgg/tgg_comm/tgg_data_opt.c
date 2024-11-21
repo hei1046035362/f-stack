@@ -3,7 +3,9 @@
 #include "string.h"
 #include <list>
 #include "tgg_bw_cache.h"
-#include "tgg_lock_struct.h"
+#include "tgg_lock.h"
+
+extern int g_fd_limit;
 
 // 执行bind   cid bind uid的时候需要执行这个函数
 int tgg_bind_session(int fd, const char* uid, const char* cid)
@@ -94,32 +96,4 @@ int tgg_join_group(const char* gid, const char* cid)
 		return -1;
 	}
 	return 0;
-}
-
-
-static int get_cid_idx()
-{
-	// TODO  后续要考虑自增id超过uint32_max了怎么处理，
-	int current_id_atomic = rte_atomic32_read(get_idx_lock());
-	rte_atomic32_inc(get_idx_lock());
-	return current_id_atomic;
-}
-
-extern char g_cid_str[21];  // 8位地址+4位端口+8位idx+1位结束符'\0'
-
-
-static void format_idx(int idx)
-{
-	char* ptr = &g_cid_str[12];// 前面12个已经被占用了
-	for (int j = 0; j < 4; j++) {
-		sprintf(ptr, "%02X", (idx >> (24 - j * 8)) & 0xFF);
-		ptr += 2;
-	}
-}
-
-const char* get_valid_cid()
-{
-	int idx = get_cid_idx();
-	format_idx(idx);
-	return g_cid_str;
 }
