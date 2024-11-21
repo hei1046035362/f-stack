@@ -11,7 +11,7 @@
 #include "ff_api.h"
 #include "tgg_comm/tgg_struct.h"
 #include "tgg_comm/tgg_common.h"
-#include "cmd/tgg_bwcomm.h"
+#include "tgg_comm/tgg_bwcomm.h"
 #include "cmd/CmdProcessor.h"
 #include <map>
 #include <rte_log.h>

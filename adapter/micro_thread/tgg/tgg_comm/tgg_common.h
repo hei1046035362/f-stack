@@ -2,7 +2,6 @@
 #define _TGG_COMMON_H_
 
 #include <string>
-#include <vector>
 #include <map>
 #include "tgg_struct.h"
 
@@ -19,6 +18,7 @@ int tgg_set_cli_uid(int fd, const char* uid);
 int tgg_set_cli_cid(int fd, const char* cid);
 int tgg_set_cli_reserved(int fd, const char* reserved);
 void tgg_close_cli(int fd);
+int tgg_init_cli(int fd);
 
 // 给ws操作缓存的函数  
 int cache_ws_buffer(int fd, void* data, int len, int pos = 0, int iscomplete = 1);
@@ -47,8 +47,10 @@ int tgg_bind_session(int fd);
 int tgg_free_session(int fd);
 int tgg_join_group(const char* cid);
 
+// 获取可用的idx
+int get_valid_idx();
 // 生成一个可用的cid
-const char* get_valid_cid();
+const char* get_valid_cid(int idx);
 
 
 // 清理队列
@@ -61,7 +63,5 @@ void clean_write_data(tgg_write_data* wdata);
 tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& mapfdidx, int fdopt);
 int enqueue_data_batch_fd(const std::string& data, std::map<int, int>& mapfdidx, int fdopt);
 int enqueue_data_single_fd(const std::string& data, int fd, int idx, int fdopt);
-
-int tgg_init_uidgid(const std::vector<std::string>& clusterNodes, const std::string& password, const std::string& userName = "");
 
 #endif  // _TGG_COMMON_H_

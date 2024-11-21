@@ -9,9 +9,10 @@
 #include "tgg_comm/tgg_struct.h"
 #include "dpdk_init.h"
 #include <arpa/inet.h>
+#include <tgg_comm/tgg_bw_cache.h>
 
 static const char* s_dump_file = "/var/corefiles/tgg_gw_master_core";
-
+static int s_fd_timeout = 60*1000;
 extern const char* g_rte_malloc_type;
 extern struct rte_mempool* g_mempool_read;
 extern struct rte_mempool* g_mempool_write;
@@ -87,6 +88,7 @@ static int tgg_recv_enqueue(int clt_fd, char* buf, int len, enum FD_OPT opt)
 	}
 	g_tgg_stats.en_read_stats.malloc_st++;
 	rdata->fd = clt_fd;
+	rdata->idx = tgg_get_cli_idx(clt_fd);
 	rdata->fd_opt = opt;
 	rdata->data_len = len;
 	if (rdata->data_len > 0) {
@@ -131,36 +133,46 @@ static void tgg_recv(void *arg)
 	int *p = (int *)arg;
 	int clt_fd = *p;
 	delete p;
-	char buf[64 * 1024];
-	int status = tgg_get_cli_status(clt_fd);
-	if (!(status & FD_STATUS_READYFORCONNECT )) {
-		// TODO 如果fd已经被协议栈回收并再次使用了，但是网关内关于这个fd的操作尚未完成，是否还有更好的方案？
-		// 如果上一个fd在系统中还没有操作完，那就先不让连，然后去使用其他的fd
+	if(tgg_init_cli(clt_fd) < 0) {
+		tgg_close_cli(clt_fd);
 		close(clt_fd);
 		return;
 	}
+	// tgg_set_cli_idx(0);
+	int status = tgg_get_cli_status(clt_fd);
 	while (g_run_status) {
+		char buf[64 * 1024] = {0};
 		// 1、接收数据  mt_recv在没有数据包的情况下会阻塞，让出cpu给其他的action执行
-		ret = mt_recv(clt_fd, (void *)buf, 64 * 1024, 0, -1);
-		g_tgg_stats.recv++;
-		if (ret < 0) {
-			// 连接主动断开了
-			printf("recv from client error\n");
+		ret = mt_recv(clt_fd, (void *)buf, 64 * 1024, 0, s_fd_timeout);
+		if(ret == -1 && errno == ETIME) {
+			printf("client heart beat timeout.\n");
 			break;
 		}
-		enum FD_OPT opt;
-		if (status & FD_STATUS_NEWSESSION) {
-			// 首次连接
-			status |= FD_STATUS_NEWSESSION;
-			tgg_set_cli_status(clt_fd, status);
-			opt = FD_NEW;
-		} else {
-			// 后续数据包
-			opt = FD_READ;
+		g_tgg_stats.recv++;
+		if (ret < 0) {
+			// 接收出现错误
+			printf("recv from client error:%d.\n", ret);
+			break;
 		}
+		if (!ret) {
+			// 对端主动关闭了
+			printf("recv close from client.\n");
+			break;
+		}
+		printf("recv:%s\n", (char*)buf);
+		// enum FD_OPT opt;
+		// if (!status) {
+		// 	// 首次连接
+		// 	status |= FD_STATUS_NEWSESSION;
+		// 	tgg_set_cli_status(clt_fd, status);
+		// 	opt = FD_NEW;
+		// } else {
+			// 后续数据包
+		// 	opt = FD_READ;
+		// }
 
 		// 入队列失败，内存不够了，直接退出循环关闭连接
-		if (tgg_recv_enqueue(clt_fd, buf, ret, opt) < 0)
+		if (tgg_recv_enqueue(clt_fd, buf, ret, FD_READ) < 0)
 			break;
 	}
 	// 对端主动关闭了
@@ -168,48 +180,59 @@ static void tgg_recv(void *arg)
 	status = FD_STATUS_CLOSING;
 	tgg_set_cli_status(clt_fd, status);
 	// 为确保fd正确关闭,对应的内存正确释放,就必须要入队列一个关闭的操作
-	while (tgg_recv_enqueue(clt_fd, NULL, 0, FD_CLOSE) < 0) {
+	tgg_recv_enqueue(clt_fd, NULL, 0, FD_CLOSE);
 
+	RTE_LOG(INFO, USER1, "[%s][%d] wait client[%d] close...\n", __func__, __LINE__, clt_fd);
+	// 等待连接在缓存中的数据被消费完才能关闭
+	while(tgg_get_cli_idx(clt_fd) != -1) {
+	    mt_sleep(10);
 	}
 	close(clt_fd);
+	tgg_close_cli(clt_fd);
+	RTE_LOG(INFO, USER1, "[%s][%d] client[%d] closed.\n", __func__, __LINE__, clt_fd);
 }
 
 static void tgg_do_send(tgg_write_data* wdata)
 {
-	while (wdata->lst_fd->next) {
-		int cli_fd = wdata->lst_fd->next->fd;
-		int status = tgg_get_cli_status(cli_fd);
-		// 连接已关闭就不需要发送了，直接清理空间
-		if (status & FD_STATUS_CLOSING) {
-			RTE_LOG(ERR, USER1, "[%s][%d] Connection is already closed.", __func__, __LINE__);
-			wdata->fd_opt &= FD_CLOSE;
-			goto DO_SEND_CLOSE;
-		}
+	tgg_fd_list* fd_list = wdata->lst_fd;
+	while (fd_list) {
+		int cli_fd = fd_list->fd;
+		int idx = tgg_get_cli_idx(cli_fd);
 
-		// 是否需要发送数据
-		if ((wdata->fd_opt & FD_WRITE) && 
-			(status & (FD_STATUS_NEWSESSION | FD_STATUS_CONNECTED)) ) {
-			int ret = mt_send(cli_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
-			if (ret < 0) {
-				RTE_LOG(ERR, USER1, "[%s][%d] send data to client[%d] error, ret[%d]", __func__, __LINE__, wdata->idx, ret);
-			} else {
-				g_tgg_stats.en_read_stats.enqueue++;
+		// 只有未关闭的连接才需要走以下逻辑，已经关闭的连接，不再发送数据
+		if(idx != -1) {
+			// 连接已关闭就不需要发送了，直接清理空间
+			if (idx != fd_list->idx) {
+				RTE_LOG(ERR, USER1, "[%s][%d] Idx Changed, Closing Connection[%d].\n", __func__, __LINE__, cli_fd);
+				tgg_del_idx(fd_list->idx);
+				tgg_set_cli_idx(cli_fd, -1);
+			}
+
+			// 是否需要发送数据
+			if (wdata->fd_opt & FD_WRITE) {
+				int ret = mt_send(cli_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
+				if (ret < 0) {
+					RTE_LOG(ERR, USER1, "[%s][%d] send data to client fd[%d] idx[%d] error, ret[%d]\n", 
+						__func__, __LINE__, cli_fd, wdata->idx, ret);
+				} else {
+					g_tgg_stats.en_read_stats.enqueue++;
+				}
+			}
+
+			if ( wdata->fd_opt & FD_CLOSE) {
+				RTE_LOG(INFO, USER1, "[%s][%d] Closing Connection[%d].\n", __func__, __LINE__, cli_fd);
+				tgg_del_idx(fd_list->idx);
+				tgg_set_cli_idx(cli_fd, -1);
 			}
 		}
-DO_SEND_CLOSE:
-		// 是否需关闭连接
-		if (wdata->fd_opt & FD_CLOSE) {
-			tgg_close_cli(cli_fd);
-			close(cli_fd);
-		}
-		tgg_fd_list* tmp = wdata->lst_fd->next;
-		wdata->lst_fd->next = wdata->lst_fd->next->next;
-		memset(tmp, 0, sizeof(tgg_fd_list));
-		rte_free(tmp);
+
+		wdata->lst_fd = wdata->lst_fd->next;
+		memset(fd_list, 0, sizeof(tgg_fd_list));
+		rte_free(fd_list);
+		fd_list = wdata->lst_fd;
 	}
-	memset(wdata->lst_fd, 0, sizeof(tgg_fd_list));
+	// 所有fd都发送完了之后，需要清理并回收内存
 	memset(wdata->data, 0, wdata->data_len);
-	rte_free(wdata->lst_fd);
 	rte_free(wdata->data);
 	memset(wdata, 0, sizeof(tgg_write_data));
 	rte_mempool_put(g_mempool_write, wdata);	
@@ -221,10 +244,11 @@ static void tgg_send(void *arg)
 	    tgg_write_data* wdata = NULL;
 	    if (tgg_dequeue_write(&wdata) < 0) {
 	    	// 队列空
-	    	usleep(10);
+			mt_sleep(1);
 	    	continue;
 	    }
 	    if (!wdata) {
+			mt_sleep(1);
 	    	continue;
 	    }
 
@@ -271,6 +295,12 @@ static int tgg_gw_master()
 			mt_sleep(1);
 			continue;
 		}
+		// 如果fd还在使用中，拒绝连接
+		if (tgg_get_cli_idx(clt_fd) > 0) {
+			fprintf(stderr, "socket fd[%d] still in use.\n", clt_fd);
+			close(clt_fd);
+			continue;
+		}
 		// TODO 获取ip的方式待商榷
 		// uint32_t ip_int = get_local_addr(clt_fd);
 		if (set_fd_nonblock(clt_fd) == -1) {
@@ -281,6 +311,7 @@ static int tgg_gw_master()
 		p = new int(clt_fd);
 		mt_start_thread((void *)tgg_recv, (void *)p);
 	}
+	close(fd);
 	return 0;
 }
 

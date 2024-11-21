@@ -10,10 +10,10 @@ endif
 PKGCONF ?= pkg-config
 
 DEBUG= -g
-# BINARY = libmt.a
+BINARY = gwrcv gwprc gwredis
 FF_LIBS+= $(shell $(PKGCONF) --static --libs libdpdk)
 FF_LIBS+= -L${FF_PATH}/lib -Wl,--whole-archive,-lfstack,--no-whole-archive -L$(FF_PATH)/adapter/micro_thread -lmt
-FF_LIBS+= -Wl,--no-whole-archive -lrt -lm -ldl -lcrypto -lpthread -lnuma -lhiredis
+FF_LIBS+= -Wl,--no-whole-archive -lrt -lm -ldl -lcrypto -lpthread -lnuma -lhiredis -lstdc++
 
 # Comment the following line if you are not using the gnu c compiler
 #C_ARGS = -Wall -g -fPIC -D_DEBUG
@@ -30,7 +30,7 @@ CC = g++
 
 # You shouldn't need to make any more changes below this line.
 INCCOMM=-I./valgrind -I$(FF_PATH)/lib -I$(FF_PATH)/adapter/micro_thread -I$(FF_PATH)/adapter/micro_thread/tgg
-SOURCE_FILES := $(wildcard cmd/*.c cmd/*.cpp comm/*.c comm/*.cpp tgg_comm/*.c tgg_comm/*.cpp ./*.c)
+SOURCE_FILES := $(wildcard cmd/*.c cmd/*.cpp comm/*.c comm/*.cpp tgg_comm/*.c tgg_comm/*.cpp ./*.c unittest/*.cpp)
 #.c.o:
 #	$(CC) -c $*.c
 
@@ -65,18 +65,32 @@ CRESET =  ;echo -ne \\e[m; #test -s $@
 	@$(CC) $(C_ARGS) -c -o $@ $< $(INCCOMM) $(CRESET) 
 
 clean:
-	@rm -f $(BINARY) *.a *.o rcv prc  tgg_comm/*.o cmd/*.o comm/*.o
+	@rm -f $(BINARY) *.a *.o gwrcv gwprc  tgg_comm/*.o cmd/*.o comm/*.o
 
 
-MASTER_OBJ = dpdk_init.o master.o tgg_comm/tgg_common.o tgg_comm/tgg_bw_cache.o
-PROCESS_OBJ = process.o dpdk_init.o bwserver.o cmd/CmdProcessor.o tgg_comm/tgg_bw_cache.o cmd/tgg_bwcomm.o \
-				tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o
+MASTER_OBJ = dpdk_init.o master.o tgg_comm/tgg_common.o tgg_comm/tgg_bw_cache.o \
+			tgg_comm/tgg_lock.o
 
-rcv: $(MASTER_OBJ)
+PROCESS_OBJ = process.o dpdk_init.o bwserver.o cmd/CmdProcessor.o tgg_comm/tgg_bw_cache.o\
+				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
+				tgg_comm/tgg_lock.o comm/Websocket.o comm/Encrypt.o comm/RedisClient.o \
+				tgg_comm/WsConsumer.o
+
+REDIS_OBJ = unittest/rediscli_test.o tgg_comm/tgg_bw_cache.o tgg_comm/tgg_common.o \
+			tgg_comm/tgg_data_opt.o dpdk_init.o tgg_comm/tgg_lock.o comm/Encrypt.o \
+			comm/RedisClient.o tgg_comm/tgg_bwcomm.o
+
+gwrcv: $(MASTER_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
-	@$(CC) -O -gdwarf-2 -o $@ $^ -lstdc++ -ldl -lm $(FF_LIBS) $(CRESET)
+	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl $(FF_LIBS) $(CRESET)
 
-prc: $(PROCESS_OBJ)
+gwprc: $(PROCESS_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
-	@$(CC) -O -gdwarf-2 -o $@ $^ -lstdc++ -ldl -lm -lz -lssl -lcrypto $(FF_LIBS) $(CRESET)
+	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl -lz -lssl $(FF_LIBS) $(CRESET)
 
+gwredis: $(REDIS_OBJ)
+	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
+	@$(CC) -O -gdwarf-2 -o $@ $^ -lz -lssl $(FF_LIBS) $(CRESET)
+
+
+all: gwrcv gwprc gwredis

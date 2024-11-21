@@ -1,5 +1,5 @@
 //#include "nlohmann/json.hpp"
-#include "cmd/WsConsumer.h"
+#include "tgg_comm/WsConsumer.h"
 #include <iostream>
 int main(){
         nlohmann::json j;  

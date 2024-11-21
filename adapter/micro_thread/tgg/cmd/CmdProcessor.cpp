@@ -4,11 +4,13 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
-#include "WsConsumer.h"
+#include "tgg_comm/WsConsumer.h"
 #include <rte_log.h>
-#include "tgg_bwcomm.h"
+#include "tgg_comm/tgg_bwcomm.h"
 #include "GatewayProtocal.h"
 #include "nlohmann/json.hpp"
+#include "CmdProcessor.h"
+#include "comm/Encrypt.hpp"
 
 static int s_compress_flag = 0;
 static int s_is_open_binary = 0;
@@ -38,10 +40,11 @@ int CmdWorkerConnect::ExecCmd()
 
 int CmdSendToGroup::ExecCmd()
 {
-    nlohmann::json obj = nlohmann::json::parse(jdata);
+    // nlohmann::json obj = nlohmann::json::parse(jdata);
     
-    int raw = std::stoi(obj["flag"].get<std::string>()) & FLAG_NOT_CALL_ENCODE;
-    std::string body = obj["body"].get<std::string>();
+    // int raw = std::stoi(obj["flag"].get<std::string>()) & FLAG_NOT_CALL_ENCODE;
+    // std::string body = obj["body"].get<std::string>();
+
     // if (!raw && $this->protocolAccelerate && $this->protocol) {
     //     $body = $this->preEncodeForClient($body);
     //     $raw = true;
@@ -76,13 +79,12 @@ static std::string format_data(const std::string& jdata)
             if (s_is_open_binary) {
                 result = obj["data"].get<std::string>();
             } else {
-                std::string bin = hex2bin(obj["data"].get<std::string>());
+                std::string bin = Encrypt::hex2bin(obj["data"].get<std::string>());
                 if (bin.length() <= 0) {
                     return result;
                 }
-                std::vector<uint8_t> vec = message_pack(obj["cmd"], 1, 2,
+                result = message_pack(obj["cmd"], 1, 2,
                     (uint8_t)s_compress_flag, bin);
-                result = std::string(vec.begin(), vec.end());
             }
         }
     } catch (const nlohmann::json::parse_error& e) {
