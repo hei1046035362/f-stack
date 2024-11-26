@@ -35,7 +35,7 @@ bool WsConsumer::ConnectionValid(int fd, void* data)
     this->fd = fd;
     this->data = data;
     _idx = tgg_get_cli_idx(fd);
-    if(_idx < 0) {// fd超过了可用范围
+    if(_idx <= 0) {// fd超过了可用范围
         return false;
     }
     // _status = tgg_get_cli_status(fd);

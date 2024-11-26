@@ -67,3 +67,7 @@ ff_stop_run(void)
     ff_dpdk_stop();
 }
 
+void ff_release(void)
+{
+    ff_dpdk_release();
+}
