@@ -267,7 +267,16 @@ int Websocket::ReadData(void* data, int len)
         return 1;
 }
 
-void Websocket::SendData(const std::string& data, int fd_opt) {
+void Websocket::SendONnoAuth(const std::string& data, int fd_opt)
+{
     std::string result = _EncodeWebsocketMessage(BINARY_FRAME, data);
     OnSend(result, fd_opt);
+}
+
+void Websocket::SendData(const std::string& data, int fd_opt) {
+    if(handshake) {
+        SendONnoAuth(data, fd_opt);
+    } else {
+        RTE_LOG(ERR, USER1, "[%s][%d] : Session should be authorized before send data.\n", __func__, __LINE__);
+    }
 }

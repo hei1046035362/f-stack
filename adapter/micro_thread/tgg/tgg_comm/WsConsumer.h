@@ -14,6 +14,9 @@ public:
 
     int ConsumerData(void* data);
 
+    // 后台直发客户端的数据，token校验成功后才能正常调用本接口
+    void Send2Client(const std::string& data, int fd_opt);
+
 protected:
     bool ConnectionValid(int fd, void* data);
 
@@ -27,6 +30,7 @@ protected:
 
     virtual void OnMessage(const std::string& msg);
 
+    // 这个接口只负责发送(入队列)，加解密都不做
     virtual void OnSend(const std::string& msg, int fd_opt);
 
 private:
