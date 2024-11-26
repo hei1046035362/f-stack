@@ -11,6 +11,13 @@ enum L4_TYPE
 	L4_TYPE_WEBSOCK	
 };
 
+enum AUTH_TYPE
+{
+	AUTH_TYPE_UNKNOWN = 0,
+	AUTH_TYPE_HANDLESHAKED,
+	AUTH_TYPE_TOKENCHECKED
+};
+
 // 需要对fd进行的操作类型
 enum FD_OPT
 {
