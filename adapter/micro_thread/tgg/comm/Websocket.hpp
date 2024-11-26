@@ -51,7 +51,8 @@ private:
 protected:
 
     virtual void CleanBuffer();
-
+    // ws握手前调用的发送接口
+    void SendONnoAuth(const std::string& data, int fd_opt);
 public:
     // 所有发送数据都在子类执行，这里只做websocket相关的公共操作
     virtual void OnHandShake(const std::string& response) = 0;
@@ -64,6 +65,7 @@ public:
     // return  -1 缓存失败，要关闭连接并删除源数据data 0 缓存数据，本次不处理  1 消息处理完成，需要清理缓存
     int ReadData(void* data, int len);
 
+    // ws握手成功后才能调用
     void SendData(const std::string& data, int fd_opt);
 };
 
