@@ -65,16 +65,11 @@ const char* get_valid_cid(int idx)
 void tgg_close_cli(int fd)
 {
 	SpinLock lock(get_cli_lock());
-	if (fd < 0 || fd >= g_fd_limit)	{
-		RTE_LOG(INFO, USER1, "given fd[%d] is invalid,[0,%d]",
-			fd, g_fd_limit - 1);
-		return ;
-	}
 	tgg_cli_info* cli = &((tgg_cli_info*)g_fd_zone->addr)[fd];
 	memset(cli->cid, 0, sizeof(cli->cid));
 	memset(cli->uid, 0, sizeof(cli->uid));
 	memset(cli->reserved, 0, sizeof(cli->reserved));
-	cli->idx = -1;
+	cli->idx = 0;
 	cli->authorized = 0;
 	cli->status |= FD_STATUS_CLOSING | FD_STATUS_CLOSED;
 }
@@ -82,11 +77,6 @@ void tgg_close_cli(int fd)
 int tgg_init_cli(int fd)
 {
 	SpinLock lock(get_cli_lock());
-	if (fd < 0 || fd >= g_fd_limit)	{
-		RTE_LOG(INFO, USER1, "given fd[%d] is invalid,[0,%d]",
-			fd, g_fd_limit - 1);
-		return -1;
-	}
 	tgg_cli_info* cli = &((tgg_cli_info*)g_fd_zone->addr)[fd];
 	memset(cli->cid, 0, sizeof(cli->cid));
 	memset(cli->uid, 0, sizeof(cli->uid));
@@ -106,56 +96,42 @@ int tgg_init_cli(int fd)
 int tgg_get_cli_idx(int fd)
 {
 	SpinLock lock(get_cli_lock());
-	if (fd < 0 || fd >= g_fd_limit)
-		return -1;
 	return ((tgg_cli_info*)g_fd_zone->addr)[fd].idx;	
 }
 
 int tgg_get_cli_status(int fd)
 {
 	SpinLock lock(get_cli_lock());
-	if (fd < 0 || fd >= g_fd_limit)
-		return -1;
 	return ((tgg_cli_info*)g_fd_zone->addr)[fd].status;	
 }
 
 int tgg_get_cli_authorized(int fd)
 {
 	SpinLock lock(get_cli_lock());
-	if (fd < 0 || fd >= g_fd_limit)
-		return -1;
 	return ((tgg_cli_info*)g_fd_zone->addr)[fd].authorized;	
 }
 
 std::string tgg_get_cli_uid(int fd)
 {
 	SpinLock lock(get_cli_lock());
-	if (fd < 0 || fd >= g_fd_limit)
-		return "";
 	return ((tgg_cli_info*)g_fd_zone->addr)[fd].uid;	
 }
 
 std::string tgg_get_cli_cid(int fd)
 {
 	SpinLock lock(get_cli_lock());
-	if (fd < 0 || fd >= g_fd_limit)
-		return "";
 	return ((tgg_cli_info*)g_fd_zone->addr)[fd].cid;	
 }
 
 std::string tgg_get_cli_reserved(int fd)
 {
 	SpinLock lock(get_cli_lock());
-	if (fd < 0 || fd >= g_fd_limit)
-		return "";
 	return ((tgg_cli_info*)g_fd_zone->addr)[fd].reserved;	
 }
 
 int tgg_set_cli_idx(int fd, int idx)
 {
 	SpinLock lock(get_cli_lock());
-	if (fd < 0 || fd >= g_fd_limit)
-		return -1;
 	((tgg_cli_info*)g_fd_zone->addr)[fd].idx = idx;
 	return 0;
 }
@@ -163,8 +139,6 @@ int tgg_set_cli_idx(int fd, int idx)
 int tgg_set_cli_status(int fd, int status)
 {
 	SpinLock lock(get_cli_lock());
-	if (fd < 0 || fd >= g_fd_limit)
-		return -1;
 	((tgg_cli_info*)g_fd_zone->addr)[fd].status = status;	
 	return 0;
 }
@@ -172,8 +146,6 @@ int tgg_set_cli_status(int fd, int status)
 int tgg_set_cli_authorized(int fd, int authorized)
 {
 	SpinLock lock(get_cli_lock());
-	if (fd < 0 || fd >= g_fd_limit)
-		return -1;
 	((tgg_cli_info*)g_fd_zone->addr)[fd].authorized = authorized;
 	return 0;
 }
@@ -181,8 +153,6 @@ int tgg_set_cli_authorized(int fd, int authorized)
 int tgg_set_cli_uid(int fd, const char* uid)
 {
 	SpinLock lock(get_cli_lock());
-	if (fd < 0 || fd >= g_fd_limit)
-		return -1;
 	strncpy(((tgg_cli_info*)g_fd_zone->addr)[fd].uid, uid, strlen(uid));
 	return 0;
 }
@@ -190,8 +160,6 @@ int tgg_set_cli_uid(int fd, const char* uid)
 int tgg_set_cli_cid(int fd, const char* cid)
 {
 	SpinLock lock(get_cli_lock());
-	if (fd < 0 || fd >= g_fd_limit)
-		return -1;
 	strncpy(((tgg_cli_info*)g_fd_zone->addr)[fd].cid, cid, strlen(cid));
 	return 0;
 }
@@ -199,8 +167,6 @@ int tgg_set_cli_cid(int fd, const char* cid)
 int tgg_set_cli_reserved(int fd, const char* reserved)
 {
 	SpinLock lock(get_cli_lock());
-	if (fd < 0 || fd >= g_fd_limit)
-		return -1;
 	strncpy(((tgg_cli_info*)g_fd_zone->addr)[fd].reserved, reserved, strlen(reserved));
 	return 0;
 }

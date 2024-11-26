@@ -55,6 +55,8 @@ extern __thread struct thread *pcurthread;
 
 int ff_init(int argc, char * const argv[]);
 
+void ff_release(void);
+
 void ff_run(loop_func_t loop, void *arg);
 
 void ff_stop_run(void);

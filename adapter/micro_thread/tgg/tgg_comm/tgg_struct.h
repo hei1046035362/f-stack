@@ -53,6 +53,7 @@ typedef struct st_ws_data {
 typedef struct st_cli_info {
 	int status;		// 连接是否已关闭						master 填充
 	int idx;		// 和fd一起标识唯一连接，(fd可能被重用了,但是处理方仍不知情)
+					// -1 标识关闭中，后续的数据包不再处理，0标识关闭完成并准备就绪
 	int authorized; // 连接确认
 	tgg_ws_data* ws_data;	// 缓存websocket的数据，用于处理分包的情况下
 	// int need_keep;	// 是否为长连接                     	process填充

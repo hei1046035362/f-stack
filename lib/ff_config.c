@@ -605,6 +605,8 @@ port_cfg_handler(struct ff_config *cfg, const char *section,
         }
     } else if (strcmp(name, "vip_ifname") == 0) {
         cur->vip_ifname = strdup(value);
+    } else if (strcmp(name, "nb_queues") == 0) {
+        cur->nb_queues = atoi(value);
     }
 
 #ifdef FF_IPFW

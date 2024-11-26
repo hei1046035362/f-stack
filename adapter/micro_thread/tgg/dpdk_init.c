@@ -12,6 +12,7 @@
 #include <rte_hash.h>
 #include <rte_hash_crc.h>
 
+#include "mt_api.h"
 #include "dpdk_init.h"
 #include "tgg_comm/tgg_struct.h"
 #include "tgg_comm/tgg_lock.h"
@@ -20,7 +21,7 @@ const char* g_gateway_ip_str = "192.168.40.129";
 ushort g_gateway_port = 80;
 uint32_t g_gate_ip = 0;
 
-static const char* s_init_flag = "/run/lock/tgg_init";
+// static const char* s_init_flag = "/run/lock/tgg_init";
 
 // TODO 多个lcore的情况下，必须要保证一个连接必须在一个lcore中读写(保证读写不异常)，也必须在一个process中处理(保证处理顺序)
 //		要分多个memzone存放，不同的lcore 不同的连接可能是相同的fd
@@ -105,6 +106,20 @@ static void init_cid()
 	if (rte_eal_process_type() == RTE_PROC_PRIMARY) {
 		rte_atomic32_init(get_idx_lock());
 	}
+}
+static void init_redis_flag()
+{
+	rte_atomic32_init(get_redis_init_lock());
+}
+
+static void set_redis_inited()
+{
+	rte_atomic32_inc(get_redis_init_lock());
+}
+
+static int get_redis_init_flag()
+{
+	return rte_atomic32_read(get_redis_init_lock());
 }
 
 static struct rte_memzone *
@@ -278,38 +293,40 @@ struct rte_hash* init_hash(const char* hash_name, uint32_t ent_cnt, uint32_t key
 	return _hash;
 }
 
-// master初始化完成之后，要等待process初始化完成才能启动收发包的线程
+// TODO master初始化完成之后，要等待process初始化完成才能启动收发包的线程
 //     如果master完全启动后，process才启动，可能会导致刚开始的一段时间丢包
 static void init_flag_for_master()
 {
     // 尝试创建用于进程锁的文件
-    int fd = open(s_init_flag, O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
-    if (fd == -1) {
-        // 如果文件已存在，说明锁已被其他进程获取
-        if (errno != EEXIST) {
-        	rte_exit(EXIT_FAILURE,
-				"Failed to open flag file[%s]:%s:%d\n",
-				s_init_flag, __func__, __LINE__);
-        }
-    }
-    close(fd);
-    // 等待process启动完成
-	while(access(s_init_flag, F_OK) == 0) {
-	    usleep(10);
-	}
-  	return;
+    // int fd = open(s_init_flag, O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
+    // if (fd == -1) {
+    //     // 如果文件已存在，说明锁已被其他进程获取
+    //     if (errno != EEXIST) {
+    //     	rte_exit(EXIT_FAILURE,
+	// 			"Failed to open flag file[%s]:%s:%d\n",
+	// 			s_init_flag, __func__, __LINE__);
+    //     }
+    // }
+    // close(fd);
+    // // 等待process启动完成
+	// while(access(s_init_flag, F_OK) == 0) {
+	//     usleep(10);
+	// }
+  	// return;
 }
 // process初始化完成后删除标记文件，让master开始接收新的连接
-static void init_flag_for_process()
+void init_flag_for_process()
 {
-	if(access(s_init_flag, F_OK) == 0) {
-		if (!unlink(s_init_flag)) {
-			return;
-		}
+	// if(access(s_init_flag, F_OK) == 0) {
+	// 	if (!unlink(s_init_flag)) {
+	// 		return;
+	// 	}
+	// }
+	if (get_redis_init_flag() <= 0) {
+    	prc_exit(EXIT_FAILURE,
+			"[%s][%d] redis data didn't synced yet.\n",
+			__func__, __LINE__);
 	}
-    rte_exit(EXIT_FAILURE,
-		"Failed to init flag file[%s]:%s:%d\n",
-		s_init_flag, __func__, __LINE__);
 }
 
 // 从redis读取数据更新uidgid的hash表
@@ -337,6 +354,7 @@ static void init_uidgid_from_redis()
     			"[%s][%d]Failed to init redis data, status:%d.\n", 
     			 __func__, __LINE__, status);
     	}
+        set_redis_inited();
     	printf("init uidgid from redis done : %d\n", status);
     }
 }
@@ -359,6 +377,7 @@ void tgg_master_init()
 	g_uidgid_hash = init_hash(s_uidgid_hash_name, g_fd_limit, s_id_hash_len);
 	g_idx_hash = init_hash(s_idx_hash_name, g_fd_limit, sizeof(int));
 	init_cid();
+	init_redis_flag();
 	init_uidgid_from_redis();
 	init_flag_for_master();
 	RTE_LOG(INFO, USER1, "Init dpdk master for tgg done.\n");
@@ -408,7 +427,6 @@ void tgg_secondary_init()
 	g_uidgid_hash = get_hash_byname(s_uidgid_hash_name);
 	g_idx_hash = get_hash_byname(s_idx_hash_name);
 	init_cid();
-	init_flag_for_process();
 }
 void tgg_secondary_uninit()
 {
@@ -416,4 +434,16 @@ void tgg_secondary_uninit()
 	// rte_mempool_free(g_mempool_read);
 	// rte_ring_free(g_ring_read);
 	// rte_ring_free(g_ring_write);
+	NS_MICRO_THREAD::mt_uninit_frame();
+	rte_eal_cleanup();
+}
+
+void prc_exit(int exit_code, const char* fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	rte_vlog(RTE_LOG_ERR, RTE_LOGTYPE_USER1, fmt, ap);
+	va_end(ap);
+	tgg_secondary_uninit();
+	exit(exit_code);
 }

@@ -1,7 +1,6 @@
 #ifndef __CMD_PROCESSOR_H__
 #define __CMD_PROCESSOR_H__
 
-#include "nlohmann/json.hpp"
 #include "string.h"
 #include "tgg_comm/tgg_common.h"
 

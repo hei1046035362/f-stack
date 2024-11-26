@@ -151,11 +151,12 @@ struct ff_port_cfg {
 #endif
 
     int nb_lcores;
-    int nb_slaves;
+    int nb_slaves;// 对应config中的port_list中网口的数量
     uint16_t lcore_list[DPDK_MAX_LCORE];
     uint16_t *slave_portid_list;
 
     int nb_vlan;
+    uint8_t nb_queues;// 队列数
     struct ff_vlan_cfg *vlan_cfgs[DPDK_MAX_VLAN_FILTER];
 };
 

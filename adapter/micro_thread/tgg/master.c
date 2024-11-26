@@ -19,6 +19,7 @@ extern struct rte_mempool* g_mempool_write;
 extern struct rte_ring* g_ring_read;
 extern ushort g_gateway_port;
 extern tgg_stats g_tgg_stats;
+extern int g_fd_limit;
 
 // 进程是否退出  master进程退出不需要做什么事情，但是secondary退出前必须要释放他持有的内存
 int g_run_status = 1;
@@ -134,8 +135,8 @@ static void tgg_recv(void *arg)
 	int clt_fd = *p;
 	delete p;
 	if(tgg_init_cli(clt_fd) < 0) {
-		tgg_close_cli(clt_fd);
 		close(clt_fd);
+		tgg_close_cli(clt_fd);
 		return;
 	}
 	// tgg_set_cli_idx(0);
@@ -180,7 +181,8 @@ static void tgg_recv(void *arg)
 	status = FD_STATUS_CLOSING;
 	tgg_set_cli_status(clt_fd, status);
 	// 为确保fd正确关闭,对应的内存正确释放,就必须要入队列一个关闭的操作
-	tgg_recv_enqueue(clt_fd, NULL, 0, FD_CLOSE);
+	if (ret)  // 不是对端主动关闭的情况，服务端要主动发送关闭消息
+		tgg_recv_enqueue(clt_fd, NULL, 0, FD_CLOSE);
 
 	RTE_LOG(INFO, USER1, "[%s][%d] wait client[%d] close...\n", __func__, __LINE__, clt_fd);
 	// 等待连接在缓存中的数据被消费完才能关闭
@@ -200,7 +202,7 @@ static void tgg_do_send(tgg_write_data* wdata)
 		int idx = tgg_get_cli_idx(cli_fd);
 
 		// 只有未关闭的连接才需要走以下逻辑，已经关闭的连接，不再发送数据
-		if(idx != -1) {
+		if(idx > 0) {
 			// 连接已关闭就不需要发送了，直接清理空间
 			if (idx != fd_list->idx) {
 				RTE_LOG(ERR, USER1, "[%s][%d] Idx Changed, Closing Connection[%d].\n", __func__, __LINE__, cli_fd);
@@ -292,11 +294,17 @@ static int tgg_gw_master()
 
         clt_fd = mt_accept(fd, (struct sockaddr*)&client_addr, (socklen_t*)&addr_len, -1);
 		if (clt_fd < 0) {
-			mt_sleep(1);
+			mt_sleep(10);
+			continue;
+		}
+		if (clt_fd >= g_fd_limit - 1)	{
+			RTE_LOG(INFO, USER1, "given fd[%d] is invalid,[0,%d]",
+				fd, g_fd_limit - 1);
+			mt_sleep(10);
 			continue;
 		}
 		// 如果fd还在使用中，拒绝连接
-		if (tgg_get_cli_idx(clt_fd) > 0) {
+		if (tgg_get_cli_idx(clt_fd) != 0) {
 			fprintf(stderr, "socket fd[%d] still in use.\n", clt_fd);
 			close(clt_fd);
 			continue;
@@ -322,4 +330,5 @@ int main(int argc, char *argv[])
 	tgg_master_init();
 	tgg_gw_master();
 	tgg_master_uninit();
+	mt_uninit_frame();
 }

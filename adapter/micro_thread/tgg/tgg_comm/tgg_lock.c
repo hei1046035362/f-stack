@@ -9,3 +9,5 @@ rte_rwlock_t* get_cidfd_lock() {return &(((tgg_lock*)(g_lock_zone->addr))->cidfd
 rte_rwlock_t* get_uidgid_lock() {return &(((tgg_lock*)(g_lock_zone->addr))->uidgid_lock);}
 rte_spinlock_t* get_cli_lock() {return &(((tgg_lock*)(g_lock_zone->addr))->cli_lock);}
 rte_atomic32_t* get_idx_lock() {return &(((tgg_lock*)(g_lock_zone->addr))->idx_lock);}
+rte_atomic32_t* get_redis_init_lock() {return &(((tgg_lock*)(g_lock_zone->addr))->redis_init_lock);}
+

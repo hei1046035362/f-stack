@@ -273,21 +273,15 @@ init_lcore_conf(void)
 
         int queueid = -1;
         int i;
-        for (i = 0; i < pconf->nb_lcores; i++) {
-            if (pconf->lcore_list[i] == lcore_id) {
-                queueid = i;
-            }
+        for (i = 0; i < pconf->nb_queues; i++) {
+            queueid = i;
+            printf("lcore: %u, port: %u, queue: %u\n", lcore_id, port_id, queueid);
+            uint16_t nb_rx_queue = lcore_conf.nb_rx_queue;
+            lcore_conf.rx_queue_list[nb_rx_queue].port_id = port_id;
+            lcore_conf.rx_queue_list[nb_rx_queue].queue_id = queueid;
+            lcore_conf.nb_rx_queue++;
         }
-        if (queueid < 0) {
-            continue;
-        }
-        printf("lcore: %u, port: %u, queue: %u\n", lcore_id, port_id, queueid);
-        uint16_t nb_rx_queue = lcore_conf.nb_rx_queue;
-        lcore_conf.rx_queue_list[nb_rx_queue].port_id = port_id;
-        lcore_conf.rx_queue_list[nb_rx_queue].queue_id = queueid;
-        lcore_conf.nb_rx_queue++;
-
-        lcore_conf.tx_queue_id[port_id] = queueid;
+        lcore_conf.tx_queue_id[port_id] = j;//queueid;
         lcore_conf.tx_port_id[lcore_conf.nb_tx_port] = port_id;
         lcore_conf.nb_tx_port++;
 
@@ -412,7 +406,7 @@ init_dispatch_ring(void)
     for (j = 0; j < nb_ports; j++) {
         uint16_t portid = ff_global_cfg.dpdk.portid_list[j];
         struct ff_port_cfg *pconf = &ff_global_cfg.dpdk.port_cfgs[portid];
-        int nb_queues = pconf->nb_lcores;
+        int nb_queues = pconf->nb_queues;
         if (dispatch_ring[portid] == NULL) {
             snprintf(name_buf, RTE_RING_NAMESIZE, "ring_ptr_p%d", portid);
 
@@ -599,7 +593,7 @@ init_port_start(void)
         if (i < nb_ports) {
             u_port_id = ff_global_cfg.dpdk.portid_list[i];
             pconf = &ff_global_cfg.dpdk.port_cfgs[u_port_id];
-            nb_queues = pconf->nb_lcores;
+            nb_queues = pconf->nb_queues;
             nb_slaves = pconf->nb_slaves;
 
             if (nb_slaves > 0) {
@@ -867,6 +861,12 @@ init_clock(void)
     ff_update_current_ts();
 
     return 0;
+}
+
+void
+release_clock(void)
+{
+    rte_timer_stop_sync(&freebsd_clock);
 }
 
 #if defined(FF_FLOW_ISOLATE) || defined(FF_FDIR)
@@ -1262,6 +1262,11 @@ ff_dpdk_init(int argc, char **argv)
 #endif
 
     return 0;
+}
+
+void ff_dpdk_release(void)
+{
+    release_clock();
 }
 
 static void
@@ -2092,75 +2097,77 @@ main_loop(void *arg)
 #endif
         }
 
-        idle = 1;
-        sys_tsc = 0;
-        usr_tsc = 0;
-        usr_cb_tsc = 0;
+        if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
+            idle = 1;
+            sys_tsc = 0;
+            usr_tsc = 0;
+            usr_cb_tsc = 0;
 
-        /*
-         * TX burst queue drain
-         */
-        diff_tsc = cur_tsc - prev_tsc;
-        if (unlikely(diff_tsc >= drain_tsc)) {
-            for (i = 0; i < qconf->nb_tx_port; i++) {
-                port_id = qconf->tx_port_id[i];
-                if (qconf->tx_mbufs[port_id].len == 0)
+            /*
+             * TX burst queue drain
+             */
+            diff_tsc = cur_tsc - prev_tsc;
+            if (unlikely(diff_tsc >= drain_tsc)) {
+                for (i = 0; i < qconf->nb_tx_port; i++) {
+                    port_id = qconf->tx_port_id[i];
+                    if (qconf->tx_mbufs[port_id].len == 0)
+                        continue;
+
+                    idle = 0;
+
+                    send_burst(qconf,
+                        qconf->tx_mbufs[port_id].len,
+                        port_id);
+                    qconf->tx_mbufs[port_id].len = 0;
+                }
+
+                prev_tsc = cur_tsc;
+            }
+
+            /*
+             * Read packet from RX queues
+             */
+            for (i = 0; i < qconf->nb_rx_queue; ++i) {
+                port_id = qconf->rx_queue_list[i].port_id;
+                queue_id = qconf->rx_queue_list[i].queue_id;
+                ctx = veth_ctx[port_id];
+
+#ifdef FF_KNI
+                if (enable_kni && rte_eal_process_type() == RTE_PROC_PRIMARY) {
+                    ff_kni_process(port_id, queue_id, pkts_burst, MAX_PKT_BURST);
+                }
+#endif
+
+                idle &= !process_dispatch_ring(port_id, queue_id, pkts_burst, ctx);
+
+                nb_rx = rte_eth_rx_burst(port_id, queue_id, pkts_burst,
+                    MAX_PKT_BURST);
+                if (nb_rx == 0)
                     continue;
 
                 idle = 0;
 
-                send_burst(qconf,
-                    qconf->tx_mbufs[port_id].len,
-                    port_id);
-                qconf->tx_mbufs[port_id].len = 0;
-            }
-
-            prev_tsc = cur_tsc;
-        }
-
-        /*
-         * Read packet from RX queues
-         */
-        for (i = 0; i < qconf->nb_rx_queue; ++i) {
-            port_id = qconf->rx_queue_list[i].port_id;
-            queue_id = qconf->rx_queue_list[i].queue_id;
-            ctx = veth_ctx[port_id];
-
-#ifdef FF_KNI
-            if (enable_kni && rte_eal_process_type() == RTE_PROC_PRIMARY) {
-                ff_kni_process(port_id, queue_id, pkts_burst, MAX_PKT_BURST);
-            }
-#endif
-
-            idle &= !process_dispatch_ring(port_id, queue_id, pkts_burst, ctx);
-
-            nb_rx = rte_eth_rx_burst(port_id, queue_id, pkts_burst,
-                MAX_PKT_BURST);
-            if (nb_rx == 0)
-                continue;
-
-            idle = 0;
-
-            /* Prefetch first packets */
-            for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
-                rte_prefetch0(rte_pktmbuf_mtod(
+                /* Prefetch first packets */
+                for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
+                    rte_prefetch0(rte_pktmbuf_mtod(
                         pkts_burst[j], void *));
-            }
+                }
 
-            /* Prefetch and handle already prefetched packets */
-            for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
-                rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[
+                /* Prefetch and handle already prefetched packets */
+                for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
+                    rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[
                         j + PREFETCH_OFFSET], void *));
-                process_packets(port_id, queue_id, &pkts_burst[j], 1, ctx, 0);
+                    process_packets(port_id, queue_id, &pkts_burst[j], 1, ctx, 0);
+                }
+
+                /* Handle remaining prefetched packets */
+                for (; j < nb_rx; j++) {
+                    process_packets(port_id, queue_id, &pkts_burst[j], 1, ctx, 0);
+                }
             }
 
-            /* Handle remaining prefetched packets */
-            for (; j < nb_rx; j++) {
-                process_packets(port_id, queue_id, &pkts_burst[j], 1, ctx, 0);
-            }
+            process_msg_ring(qconf->proc_id, pkts_burst);
         }
-
-        process_msg_ring(qconf->proc_id, pkts_burst);
 
         div_tsc = rte_rdtsc();
 
