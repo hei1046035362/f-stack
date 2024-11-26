@@ -57,15 +57,15 @@ bool WsConsumer::ConnectionValid(int fd, void* data)
 void WsConsumer::OnClose()
 {// 子类继承后要执行clean_buffer清理缓存
     std::string data = "\x88\x02\x03\xe8";// 关闭websocket
-    SendData(data, FD_WRITE|FD_CLOSE);
+    SendONnoAuth(data, FD_WRITE|FD_CLOSE);
     // SendData("", FD_CLOSE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
 }
 // 握手
 void WsConsumer::OnHandShake(const std::string& response)
 {
     OnSend(response, FD_WRITE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
-    tgg_set_cli_authorized(this->fd, 1);
-    SendData(message_pack(2, 1, 0, 1,get_valid_cid(this->_idx)), FD_WRITE);
+    tgg_set_cli_authorized(this->fd, AUTH_TYPE_HANDLESHAKED);
+    SendONnoAuth(message_pack(2, 1, 0, 1,get_valid_cid(this->_idx)), FD_WRITE);
 }
 
 void WsConsumer::OnPing(const std::string& response)
@@ -118,6 +118,7 @@ void WsConsumer::OnMessage(const std::string& msg)
                     // std::string res = std::string(resArray, strlen(resArray));
                     // TODO uid和cid绑定
                     CmdBindUid(this->fd, this->data, std::to_string(jtoken["user_id"].get<std::uint64_t>()));
+                    tgg_set_cli_authorized(this->fd, AUTH_TYPE_TOKENCHECKED);
                     msg_send = message_pack(jmsg["cmd"].get<std::int32_t>(),1,0,jmsg["compressFormat"], res);
                 }
                 break;
@@ -146,6 +147,15 @@ void WsConsumer::OnSend(const std::string& msg, int fd_opt)
          __func__, __LINE__, _cid.c_str(), _uid.c_str(), fd_opt);
         enqueue_data_single_fd("", this->fd, _idx, FD_CLOSE);
     }
+}
+
+void WsConsumer::Send2Client(const std::string& data, int fd_opt)
+{
+    if(tgg_get_cli_authorized(this->fd) != AUTH_TYPE_TOKENCHECKED) {
+        RTE_LOG(ERR, USER1, "[%s][%d] Send data to client should check Token at first.", __func__, __LINE__);
+        return;
+    }
+    SendData(data, fd_opt);
 }
 
 void WsConsumer::_CleanAndClose()
