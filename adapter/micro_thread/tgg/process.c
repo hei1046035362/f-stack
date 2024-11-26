@@ -38,6 +38,10 @@ const char* g_redis_pwd = "bZSCEI3VyV";
 
 void signal_handler(int signum)
 {
+	if(signum == SIGINT || signum == SIGTERM) {
+		uninit_bwserver();
+        prc_exit(0, "catched signal:%d\n", signum);
+	}
 	if (signum > SIGUSR1)
 	{
 		pid_t pid = signum - SIGUSR1;
@@ -152,12 +156,13 @@ void fork_oneprocess(pid_t* ppid, void* data)
 	pid_t pid = fork();
     
     if (pid < 0) {
-        perror("创建子进程失败");
-        exit(EXIT_FAILURE);
+        perror("Fork failed.");
+        prc_exit(EXIT_FAILURE, "Fork failed.\n");
+        // exit(EXIT_FAILURE);
     } else if (pid == 0) {
         // 子进程
         tgg_gw_process(data);
-        exit(0); // 子进程完成后退出
+        prc_exit(0, "child exit.\n");
     } else {
         // 父进程
         *ppid = pid;
@@ -218,15 +223,34 @@ void monitor_process()
 
 }
 
+void tgg_sig_init()
+{
+	if (signal(SIGINT, signal_handler) == SIG_ERR) {
+        perror("Error setting signal handler");
+        prc_exit(-1, "Error setting signal handler");
+    }
+	if (signal(SIGTERM, signal_handler) == SIG_ERR) {
+        perror("Error setting signal handler");
+        prc_exit(-1, "Error setting signal handler");
+    }
+
+}
+
 void tgg_process_init()
 {
 	// if(tgg_init_uidgid(g_redis_clusternodes, g_redis_pwd) < 0) {
 	// 	rte_exit(EXIT_FAILURE, "Init uidgid hash failed.\n");
 	// }
+	tgg_sig_init();
 	tgg_secondary_init();
 	tgg_iterprint_gidsbyuid();
 	initOpenSSL();
 	init_endians();
+}
+
+void tgg_process_uninit()
+{
+	tgg_secondary_uninit();	
 }
 
 int main(int argc, char *argv[])
@@ -234,9 +258,10 @@ int main(int argc, char *argv[])
 	init_core(s_dump_file);
 	mt_init_frame(argc, argv);
 	tgg_process_init();
+	init_flag_for_process();
 	tgg_gw_process(NULL);
 	init_bwserver();
 	uninit_bwserver();
 	// TODO 进程退出时要回收资源
-	//tgg_process_uninit();
+	tgg_process_uninit();
 }

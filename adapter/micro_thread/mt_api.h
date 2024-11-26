@@ -112,6 +112,8 @@ void* mt_get_msg_private();
 
 bool mt_init_frame(int argc=0, char * const argv[]=NULL);
 
+void mt_uninit_frame(void);
+
 void mt_set_stack_size(unsigned int bytes);
 
 int mt_recvfrom(int fd, void *buf, int len, int flags, struct sockaddr *from, socklen_t *fromlen, int timeout);
