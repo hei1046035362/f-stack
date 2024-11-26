@@ -580,6 +580,11 @@ bool mt_init_frame(int argc, char * const argv[])
     return MtFrame::Instance()->InitFrame();
 }
 
+void mt_uninit_frame(void)
+{
+    ff_release();
+}
+
 void mt_set_stack_size(unsigned int bytes)
 {
     ThreadPool::SetDefaultStackSize(bytes);
