@@ -35,7 +35,7 @@ bool WsConsumer::ConnectionValid(int fd, void* data)
     this->fd = fd;
     this->data = data;
     _idx = tgg_get_cli_idx(fd);
-    if(_idx <= 0) {// fd超过了可用范围
+    if(_idx < 0) {// fd超过了可用范围
         return false;
     }
     // _status = tgg_get_cli_status(fd);
@@ -56,8 +56,13 @@ bool WsConsumer::ConnectionValid(int fd, void* data)
 
 void WsConsumer::OnClose()
 {// 子类继承后要执行clean_buffer清理缓存
+    if (tgg_get_cli_authorized(this->fd) == AUTH_TYPE_TOKENCHECKED) {
+        // 尚未绑定的连接不需要解绑  TOTO 检查绑定过程中失败的是否有清理
+        CmdUnBindUid ubuid(this->fd, this->data, "");
+        ubuid.ExecCmd();// 解绑，从hash表中删除连接
+    }
     std::string data = "\x88\x02\x03\xe8";// 关闭websocket
-    SendONnoAuth(data, FD_WRITE|FD_CLOSE);
+    SendONnoAuth(data, FD_WRITE | FD_CLOSE);
     // SendData("", FD_CLOSE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
 }
 // 握手
@@ -65,7 +70,9 @@ void WsConsumer::OnHandShake(const std::string& response)
 {
     OnSend(response, FD_WRITE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
     tgg_set_cli_authorized(this->fd, AUTH_TYPE_HANDLESHAKED);
-    SendONnoAuth(message_pack(2, 1, 0, 1,get_valid_cid(this->_idx)), FD_WRITE);
+    const char* scid = get_valid_cid(this->_idx);
+    tgg_set_cli_cid(this->fd, scid);
+    SendONnoAuth(message_pack(2, 1, 0, 1, scid), FD_WRITE);
 }
 
 void WsConsumer::OnPing(const std::string& response)
@@ -110,14 +117,22 @@ void WsConsumer::OnMessage(const std::string& msg)
                         goto OnMessageEnd;
                     }
                     nlohmann::json jtoken = nlohmann::json::parse(decryptor);
+                    std::string s_uid = std::to_string(jtoken["user_id"].get<std::uint64_t>());
+                    s_uid.resize(20);
+                    // TODO uid和cid绑定
+                    CmdBindUid buid(this->fd, this->data, s_uid);
+                    if(buid.ExecCmd() == -1) {
+                        RTE_LOG(ERR, USER1, "[%s][%d] add uid[%s] failed, closing connection...",
+                            __func__, __LINE__, s_uid.c_str());
+                        _CleanAndClose();
+                        return;
+                    }
                     // char resArray[32] = {0};
                     std::string res = "bind ";
-                    res += std::to_string(jtoken["user_id"].get<std::uint64_t>());
+                    res += s_uid;
                     res += "\n";
                     // sprintf(resArray, "bind %lu\n", jtoken["user_id"].get<std::uint64_t>());
                     // std::string res = std::string(resArray, strlen(resArray));
-                    // TODO uid和cid绑定
-                    CmdBindUid(this->fd, this->data, std::to_string(jtoken["user_id"].get<std::uint64_t>()));
                     tgg_set_cli_authorized(this->fd, AUTH_TYPE_TOKENCHECKED);
                     msg_send = message_pack(jmsg["cmd"].get<std::int32_t>(),1,0,jmsg["compressFormat"], res);
                 }
@@ -141,8 +156,12 @@ OnMessageEnd:
 
 void WsConsumer::OnSend(const std::string& msg, int fd_opt)
 {
+    // 连接已关闭或尚未建立
+    if(tgg_get_cli_idx(this->fd) < 0)
+        return;
+
     std::cout << "OnSend:" << Encrypt::bin2hex(msg) << std::endl;
-    if (enqueue_data_single_fd(msg, this->fd, _idx, fd_opt) < 0) {
+    if (enqueue_data_single_fd(msg, this->fd, _idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
         RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%s,uid:%s,opt:%d",
          __func__, __LINE__, _cid.c_str(), _uid.c_str(), fd_opt);
         enqueue_data_single_fd("", this->fd, _idx, FD_CLOSE);
@@ -161,9 +180,7 @@ void WsConsumer::Send2Client(const std::string& data, int fd_opt)
 void WsConsumer::_CleanAndClose()
 {
     // idx小于0说明已经发送过关闭的消息了
-    if(tgg_get_cli_idx(this->fd) >= 0) {
-        OnClose();
-    }
+    OnClose();
     _CleanData();
 }
 

@@ -60,6 +60,12 @@ namespace NS_MICRO_THREAD {
 #define DEFAULT_STACK_SIZE  STACK_PAD_SIZE * 1024
 #define DEFAULT_THREAD_NUM  5000
 #define MAX_THREAD_NUM  800000
+#define MAX_FD_COUNT 100000
+
+enum FF_FD_STAT {
+    FF_FD_OPEN = 0,
+    FF_FD_CLOSE = 1
+};
 
 typedef unsigned long long  utime64_t;
 typedef void (*ThreadStart)(void*);
@@ -205,9 +211,7 @@ public:
     ThreadLink _entry;
     ThreadLink _sub_entry;
 
-    virtual utime64_t HeapValue() {
-        return GetWakeupTime();
-    };
+    virtual utime64_t HeapValue();
 
     virtual void Run(void);    
 
@@ -216,6 +220,7 @@ public:
     };
     void AddFd(KqueuerObj* efpd) {
         TAILQ_INSERT_TAIL(&_fdset, efpd, _entry);
+        _fd = efpd->GetOsfd();
     };
     void AddFdList(KqObjList* fdset) {
         TAILQ_CONCAT(&_fdset, fdset, _entry);
@@ -295,6 +300,7 @@ private:
     MicroThread* _parent;
     ThreadStart _start;
     void* _args;
+    int   _fd;
 
 };
 typedef std::set<MicroThread*> ThreadSet;
@@ -326,9 +332,9 @@ class DefaultLogAdapter :public LogAdapter
 public:
 
 
-    bool CheckDebug(){ return false;};
-    bool CheckTrace(){ return false;};
-    bool CheckError(){ return false;};
+    bool CheckDebug(){ return true;};
+    bool CheckTrace(){ return true;};
+    bool CheckError(){ return true;};
 
     inline void LogDebug(char* fmt, ...){
         va_list args;
@@ -436,6 +442,8 @@ public:
     static int recv(int fd, void *buf, int len, int flags, int timeout);
 
     static ssize_t send(int fd, const void *buf, size_t nbyte, int flags, int timeout);
+
+    static void close(int fd);
 
     static void sleep(int ms);
 
