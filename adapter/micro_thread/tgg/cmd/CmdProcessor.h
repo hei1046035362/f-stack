@@ -127,7 +127,7 @@ public:
 
 	CmdBindUid(int fd, void* data, const std::string& jdata):CmdBaseProcessor(fd, data, jdata) {}
 	~CmdBindUid() {}
-    virtual int ExecCmd() { return 0; }
+    virtual int ExecCmd();
 };
 
 class CmdUnBindUid : public CmdBaseProcessor {
@@ -135,7 +135,7 @@ public:
 
 	CmdUnBindUid(int fd, void* data, const std::string& jdata):CmdBaseProcessor(fd, data, jdata) {}
 	~CmdUnBindUid() {}
-    int ExecCmd() { return 0; }
+    int ExecCmd();
 };
 
 class CmdSendToUid : public CmdBaseProcessor {

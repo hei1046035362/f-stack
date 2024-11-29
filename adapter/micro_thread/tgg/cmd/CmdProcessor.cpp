@@ -67,7 +67,15 @@ int CmdSendToGroup::ExecCmd()
     return -1;
 }
 
+int CmdBindUid::ExecCmd()
+{
+    return tgg_bind_session(this->fd, this->jdata.c_str(), tgg_get_cli_cid(this->fd).c_str());
+}
 
+int CmdUnBindUid::ExecCmd()
+{
+    return tgg_free_session(this->fd);
+}
 
 
 static std::string format_data(const std::string& jdata)

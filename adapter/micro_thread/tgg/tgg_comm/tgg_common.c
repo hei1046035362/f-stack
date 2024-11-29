@@ -69,7 +69,7 @@ void tgg_close_cli(int fd)
 	memset(cli->cid, 0, sizeof(cli->cid));
 	memset(cli->uid, 0, sizeof(cli->uid));
 	memset(cli->reserved, 0, sizeof(cli->reserved));
-	cli->idx = 0;
+	cli->idx = TGG_FD_CLOSED;
 	cli->authorized = 0;
 	cli->status |= FD_STATUS_CLOSING | FD_STATUS_CLOSED;
 }
@@ -153,6 +153,7 @@ int tgg_set_cli_authorized(int fd, int authorized)
 int tgg_set_cli_uid(int fd, const char* uid)
 {
 	SpinLock lock(get_cli_lock());
+	memset(((tgg_cli_info*)g_fd_zone->addr)[fd].uid, 0, sizeof(tgg_cli_info::uid));
 	strncpy(((tgg_cli_info*)g_fd_zone->addr)[fd].uid, uid, strlen(uid));
 	return 0;
 }
@@ -160,6 +161,7 @@ int tgg_set_cli_uid(int fd, const char* uid)
 int tgg_set_cli_cid(int fd, const char* cid)
 {
 	SpinLock lock(get_cli_lock());
+	memset(((tgg_cli_info*)g_fd_zone->addr)[fd].cid, 0, sizeof(tgg_cli_info::cid));
 	strncpy(((tgg_cli_info*)g_fd_zone->addr)[fd].cid, cid, strlen(cid));
 	return 0;
 }
@@ -167,6 +169,7 @@ int tgg_set_cli_cid(int fd, const char* cid)
 int tgg_set_cli_reserved(int fd, const char* reserved)
 {
 	SpinLock lock(get_cli_lock());
+	memset(((tgg_cli_info*)g_fd_zone->addr)[fd].reserved, 0, sizeof(tgg_cli_info::reserved));
 	strncpy(((tgg_cli_info*)g_fd_zone->addr)[fd].reserved, reserved, strlen(reserved));
 	return 0;
 }

@@ -16,6 +16,7 @@
 #include "dpdk_init.h"
 #include "tgg_comm/tgg_struct.h"
 #include "tgg_comm/tgg_lock.h"
+#include "tgg_comm/tgg_common.h"
 
 const char* g_gateway_ip_str = "192.168.40.129";
 ushort g_gateway_port = 80;
@@ -363,8 +364,13 @@ void tgg_master_init()
 {
 	RTE_LOG(INFO, USER1, "Init dpdk master for tgg...\n");
 	// 100W个FD  32M的空间
-	g_fd_zone = make_memzone(s_fd_zone_name, s_zone_size);
 	g_lock_zone = make_memzone(s_lock_zone_name, sizeof(tgg_lock));
+	init_cid();
+	g_fd_zone = make_memzone(s_fd_zone_name, s_zone_size);
+	for (uint32_t i = 0; i < g_fd_limit; i++) {
+		// 所有fd的初始状态设置为
+		tgg_set_cli_idx(i, TGG_FD_CLOSED);
+	}
 	g_ring_read = make_ring(s_read_ring_name, s_ring_size);
 	g_ring_write = make_ring(s_write_ring_name, s_ring_size);
 	g_ring_bwrcv = make_ring(s_bwrcv_ring_name, s_ring_size);
@@ -376,7 +382,6 @@ void tgg_master_init()
 	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, s_id_hash_len);
 	g_uidgid_hash = init_hash(s_uidgid_hash_name, g_fd_limit, s_id_hash_len);
 	g_idx_hash = init_hash(s_idx_hash_name, g_fd_limit, sizeof(int));
-	init_cid();
 	init_redis_flag();
 	init_uidgid_from_redis();
 	init_flag_for_master();

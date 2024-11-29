@@ -630,6 +630,11 @@ ssize_t mt_send(int fd, const void *buf, size_t nbyte, int flags, int timeout)
     return MtFrame::send(fd, buf, nbyte, flags, timeout);
 }
 
+void mt_close(int fd)
+{
+    MtFrame::close(fd);
+}
+
 void mt_sleep(int ms)
 {
     MtFrame::sleep(ms); 

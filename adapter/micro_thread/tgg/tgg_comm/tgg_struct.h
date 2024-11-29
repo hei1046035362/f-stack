@@ -4,6 +4,15 @@
 #include <netinet/in.h>
 // #define CACHE_LINE_SIZE 64
 #define SECRET_KEY_LEN 20
+
+#define TGG_CID_LEN 24
+#define TGG_UID_LEN 24
+#define TGG_GID_LEN 24
+
+
+#define TGG_FD_CLOSING -1
+#define TGG_FD_CLOSED -2
+
 // 应用层协议类型
 enum L4_TYPE
 {
@@ -65,8 +74,8 @@ typedef struct st_cli_info {
 	tgg_ws_data* ws_data;	// 缓存websocket的数据，用于处理分包的情况下
 	// int need_keep;	// 是否为长连接                     	process填充
 	// int l4_type;	// 应用层协议类型，http/websocket		process填充
-	char cid[20];	// client id 							process 填充
-	char uid[20];	// user id 							process 填充
+	char cid[TGG_CID_LEN];	// client id 							process 填充
+	char uid[TGG_UID_LEN];	// user id 							process 填充
 	char reserved[128];	// reserved
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_cli_info;
 
@@ -147,7 +156,7 @@ typedef tgg_fd_list tgg_uid_data;
 
 
 typedef struct st_list_iddata {
-	char data[20];
+	char data[TGG_GID_LEN];
 	struct st_list_iddata* next;
 } tgg_list_id;
 

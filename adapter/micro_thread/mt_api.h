@@ -132,6 +132,8 @@ ssize_t mt_recv(int fd, void *buf, int len, int flags, int timeout);
 
 ssize_t mt_send(int fd, const void *buf, size_t nbyte, int flags, int timeout);
 
+void mt_close(int fd);
+
 int mt_wait_events(int fd, int events, int timeout);
 
 void* mt_start_thread(void* entry, void* args);

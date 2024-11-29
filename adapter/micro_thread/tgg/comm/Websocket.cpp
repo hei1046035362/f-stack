@@ -31,7 +31,9 @@ std::string Websocket::_HandleHandshake(const std::string& request)
             break;
         }
     }
-
+    if(web_key.empty()) {
+        return "";
+    }
     std::string accept_key = _GenerateAcceptKey(web_key);
 
         // 构建握手响应

@@ -149,6 +149,11 @@ static void tgg_recv(void *arg)
 			printf("client heart beat timeout.\n");
 			break;
 		}
+		if(ret == -4) {
+			// 主动断开连接
+			RTE_LOG(ERR, USER1, "[%s][%d] closing connection affected.\n", __func__, __LINE__);
+			break;
+		}
 		g_tgg_stats.recv++;
 		if (ret < 0) {
 			// 接收出现错误
@@ -186,8 +191,10 @@ static void tgg_recv(void *arg)
 
 	RTE_LOG(INFO, USER1, "[%s][%d] wait client[%d] close...\n", __func__, __LINE__, clt_fd);
 	// 等待连接在缓存中的数据被消费完才能关闭
-	while(tgg_get_cli_idx(clt_fd) != -1) {
+	int index = 1000;// TODO 防止因process宕机丢包导致无法停止的问题，10s这个时间待商榷
+	while(tgg_get_cli_idx(clt_fd) != TGG_FD_CLOSING && index > 0) {
 	    mt_sleep(10);
+	    index--;
 	}
 	close(clt_fd);
 	tgg_close_cli(clt_fd);
@@ -202,18 +209,22 @@ static void tgg_do_send(tgg_write_data* wdata)
 		int idx = tgg_get_cli_idx(cli_fd);
 
 		// 只有未关闭的连接才需要走以下逻辑，已经关闭的连接，不再发送数据
-		if(idx > 0) {
-			// 连接已关闭就不需要发送了，直接清理空间
-			if (idx != fd_list->idx) {
+		if(idx >= 0) {
+			// 新的连接旧的数据就不要发送了，直接清理空间
+			if (idx != fd_list->idx) {// 后台推送给前端时，可能会出现这种情况
 				RTE_LOG(ERR, USER1, "[%s][%d] Idx Changed, Closing Connection[%d].\n", __func__, __LINE__, cli_fd);
-				tgg_del_idx(fd_list->idx);
-				tgg_set_cli_idx(cli_fd, -1);
+				// tgg_del_idx(fd_list->idx);
+				// tgg_set_cli_idx(cli_fd, TGG_FD_CLOSING);
+				continue;
 			}
 
 			// 是否需要发送数据
 			if (wdata->fd_opt & FD_WRITE) {
 				int ret = mt_send(cli_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
-				if (ret < 0) {
+				if (ret == -4) {
+					// 主动断开连接
+					RTE_LOG(ERR, USER1, "[%s][%d] closing connection affected.\n", __func__, __LINE__);
+				} else if (ret < 0) {
 					RTE_LOG(ERR, USER1, "[%s][%d] send data to client fd[%d] idx[%d] error, ret[%d]\n", 
 						__func__, __LINE__, cli_fd, wdata->idx, ret);
 				} else {
@@ -224,7 +235,8 @@ static void tgg_do_send(tgg_write_data* wdata)
 			if ( wdata->fd_opt & FD_CLOSE) {
 				RTE_LOG(INFO, USER1, "[%s][%d] Closing Connection[%d].\n", __func__, __LINE__, cli_fd);
 				tgg_del_idx(fd_list->idx);
-				tgg_set_cli_idx(cli_fd, -1);
+				tgg_set_cli_idx(cli_fd, TGG_FD_CLOSING);
+				mt_close(cli_fd);
 			}
 		}
 
@@ -304,7 +316,7 @@ static int tgg_gw_master()
 			continue;
 		}
 		// 如果fd还在使用中，拒绝连接
-		if (tgg_get_cli_idx(clt_fd) != 0) {
+		if (tgg_get_cli_idx(clt_fd) != TGG_FD_CLOSED) {
 			fprintf(stderr, "socket fd[%d] still in use.\n", clt_fd);
 			close(clt_fd);
 			continue;
