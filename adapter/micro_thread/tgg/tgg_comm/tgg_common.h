@@ -43,9 +43,14 @@ void* dpdk_rte_malloc(int size);
 
 
 // 业务侧接口
-int tgg_bind_session(int fd);
+// 新接入连接
+int tgg_bind_session(int fd, const char* uid, const char* cid);
+// 连接断开
 int tgg_free_session(int fd);
-int tgg_join_group(const char* cid);
+// 加入组
+int tgg_join_group(const char* gid, const char* cid);
+// 退出组
+int tgg_exit_group(const char* gid, const char* cid);
 
 // 获取可用的idx
 int get_valid_idx();
