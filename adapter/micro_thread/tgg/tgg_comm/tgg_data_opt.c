@@ -119,6 +119,9 @@ int tgg_join_group(const char* gid, const char* cid)
 		return -1;
 	}
 	std::string uid = tgg_get_cli_uid(fd);
+	if(uid.empty()) {
+		return -1;
+	}
 	if (tgg_add_uidgid(uid.c_str(), gid) < 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, uid[%s] gid[%s] cid[%s].", 
 			__func__, __LINE__, uid.c_str(), gid, cid);

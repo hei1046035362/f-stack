@@ -48,7 +48,7 @@ std::string Websocket::_HandleHandshake(const std::string& request)
     return response.str();
 }
 
-std::string Websocket::_EncodeWebsocketMessage(int opcode, const std::string& message)
+std::string Websocket::EncodeWebsocketMessage(int opcode, const std::string& message)
 {
     std::vector<uint8_t> frame;
     frame.push_back(0b10000000|opcode); // FIN + opcode (text frame)
@@ -70,7 +70,7 @@ std::string Websocket::_EncodeWebsocketMessage(int opcode, const std::string& me
     return std::string(frame.begin(), frame.end());
 }
 
-std::string Websocket::_DecodeWebsocketMessage(const std::vector<uint8_t>& frame)
+std::string Websocket::DecodeWebsocketMessage(const std::vector<uint8_t>& frame)
 {
     if (frame.size() < 2) {
         throw std::runtime_error("Frame too short.");
@@ -131,7 +131,7 @@ Websocket::_GetWsFrame(unsigned char *in_buffer, size_t buf_len,
             if (buf_len < 4)
                 return INCOMPLETE_DATA;
             memcpy(&tmp16, in_buffer + pos, 2);
-            payload_len = ntohs(tmp16);
+            payload_len = big_endian() ? ntohs(tmp16) : tmp16;
             pos += 2;
         } else if (length_field == 127) { /* msglen is 64bit */
             int i;
@@ -271,7 +271,7 @@ int Websocket::ReadData(void* data, int len)
 
 void Websocket::SendONnoAuth(const std::string& data, int fd_opt)
 {
-    std::string result = _EncodeWebsocketMessage(BINARY_FRAME, data);
+    std::string result = EncodeWebsocketMessage(BINARY_FRAME, data);
     OnSend(result, fd_opt);
 }
 

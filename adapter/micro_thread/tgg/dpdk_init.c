@@ -62,7 +62,6 @@ const char* s_uid_hash_name = "tgg_uid_hash";
 const char* s_cid_hash_name = "tgg_cid_hash";
 const char* s_uidgid_hash_name = "tgg_uidgid_hash";
 const char* s_idx_hash_name = "tgg_idx_hash";
-static uint32_t s_id_hash_len = 20; // hash key 长度
 struct rte_hash *g_gid_hash = NULL;
 struct rte_hash *g_uid_hash = NULL;
 struct rte_hash *g_cid_hash = NULL;
@@ -80,7 +79,10 @@ static uint32_t convert_ip2int(const char* ip)
         fprintf(stderr, "Invalid IP address format.\n");
         exit(-1);
     }
-    return ntohl(ipaddr.s_addr);
+    if(big_endian()) {
+    	return ntohl(ipaddr.s_addr);
+    }
+    return ipaddr.s_addr;
 }
 // 初始化cid的前缀  16进制的8位ip+4位port
 static void init_cid_prefix(uint32_t ip, ushort port)
@@ -355,8 +357,14 @@ static void init_uidgid_from_redis()
     			"[%s][%d]Failed to init redis data, status:%d.\n", 
     			 __func__, __LINE__, status);
     	}
-        set_redis_inited();
-    	printf("init uidgid from redis done : %d\n", status);
+    	if(!status) {
+        	set_redis_inited();
+    		printf("init uidgid from redis done : %d\n", status);
+    	} else {
+    		rte_exit(EXIT_FAILURE,
+    			"[%s][%d]Failed to init redis data, status:%d.\n", 
+    			 __func__, __LINE__, status);
+    	}
     }
 }
 
@@ -377,10 +385,10 @@ void tgg_master_init()
 	g_mempool_read = make_mempool(s_pool_read_name, s_mempool_size, s_mempool_read_cache);
 	g_mempool_write = make_mempool(s_pool_write_name, s_mempool_size, s_mempool_write_cache);
 	g_mempool_bwrcv = make_mempool(s_pool_bwrcv_name, s_mempool_size, s_mempool_bwrcv_cache);
-	g_gid_hash = init_hash(s_gid_hash_name, g_fd_limit, s_id_hash_len);
-	g_uid_hash = init_hash(s_uid_hash_name, g_fd_limit, s_id_hash_len);
-	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, s_id_hash_len);
-	g_uidgid_hash = init_hash(s_uidgid_hash_name, g_fd_limit, s_id_hash_len);
+	g_gid_hash = init_hash(s_gid_hash_name, g_fd_limit, TGG_GID_LEN);
+	g_uid_hash = init_hash(s_uid_hash_name, g_fd_limit, TGG_UID_LEN);
+	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, TGG_CID_LEN);
+	g_uidgid_hash = init_hash(s_uidgid_hash_name, g_fd_limit, TGG_UID_LEN);
 	g_idx_hash = init_hash(s_idx_hash_name, g_fd_limit, sizeof(int));
 	init_redis_flag();
 	init_uidgid_from_redis();

@@ -74,7 +74,7 @@ MASTER_OBJ = dpdk_init.o master.o tgg_comm/tgg_common.o tgg_comm/tgg_bw_cache.o 
 PROCESS_OBJ = process.o dpdk_init.o bwserver.o cmd/CmdProcessor.o tgg_comm/tgg_bw_cache.o\
 				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
 				tgg_comm/tgg_lock.o comm/Websocket.o comm/Encrypt.o comm/RedisClient.o \
-				tgg_comm/WsConsumer.o
+				tgg_comm/WsConsumer.o comm/Serialize.o
 
 REDIS_OBJ = unittest/rediscli_test.o tgg_comm/tgg_bw_cache.o tgg_comm/tgg_common.o \
 			tgg_comm/tgg_data_opt.o dpdk_init.o tgg_comm/tgg_lock.o comm/Encrypt.o \

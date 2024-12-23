@@ -44,7 +44,7 @@ uint32_t get_local_addr(int sockfd)
      // printf("ip str:%s\n", ip_str);
      struct in_addr ip_addr;
      inet_pton(AF_INET, ip_str, &ip_addr);
-     uint32_t ip_decimal = ntohl(ip_addr.s_addr);
+     uint32_t ip_decimal = big_endian() ? ntohl(ip_addr.s_addr) : ip_addr.s_addr;
      printf("IP address in decimal: %u\n", ip_decimal);
      return ip_decimal;
 }
@@ -279,7 +279,7 @@ static int tgg_gw_master()
 	struct sockaddr_in addr;
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = INADDR_ANY;
-	addr.sin_port = htons(g_gateway_port);
+	addr.sin_port = big_endian() ? htons(g_gateway_port) : g_gateway_port;
 
 	int fd = create_tcp_sock();
 	if (fd < 0) {

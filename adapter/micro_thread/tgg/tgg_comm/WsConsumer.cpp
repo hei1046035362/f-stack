@@ -6,6 +6,7 @@
 #include "cmd/CmdProcessor.h"
 #include "WsConsumer.h"
 #include "comm/Encrypt.hpp"
+#include "tgg_comm/tgg_bw_cache.h"
 
 
 int WsConsumer::ConsumerData(void* data)
@@ -58,11 +59,12 @@ void WsConsumer::OnClose()
 {// 子类继承后要执行clean_buffer清理缓存
     if (tgg_get_cli_authorized(this->fd) == AUTH_TYPE_TOKENCHECKED) {
         // 尚未绑定的连接不需要解绑  TOTO 检查绑定过程中失败的是否有清理
-        CmdUnBindUid ubuid(this->fd, this->data, "");
+        nlohmann::json obj;
+        CmdUnBindUid ubuid(this->fd, this->data, obj);
         ubuid.ExecCmd();// 解绑，从hash表中删除连接
     }
     std::string data = "\x88\x02\x03\xe8";// 关闭websocket
-    SendONnoAuth(data, FD_WRITE | FD_CLOSE);
+    SendONnoAuth(data, FD_WRITE);
     // SendData("", FD_CLOSE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
 }
 // 握手
@@ -70,13 +72,23 @@ void WsConsumer::OnHandShake(const std::string& response)
 {
     OnSend(response, FD_WRITE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
     tgg_set_cli_authorized(this->fd, AUTH_TYPE_HANDLESHAKED);
-    const char* scid = get_valid_cid(this->_idx);
-    tgg_set_cli_cid(this->fd, scid);
-    SendONnoAuth(message_pack(2, 1, 0, 1, scid), FD_WRITE);
+    std::string scid = get_valid_cid(this->_idx);
+    tgg_set_cli_cid(this->fd, scid.c_str());
+    std::string sendData;
+    if (message_pack(2, 1, 0, 1, scid, sendData) < 0)
+    {
+        RTE_LOG(ERR, USER1, "[%s][%d] message_pack cid[%s] failed.\r\n", 
+            __func__, __LINE__, scid.c_str());
+        _CleanAndClose();
+        return;
+    }
+    SendONnoAuth(sendData, FD_WRITE);
 }
 
 void WsConsumer::OnPing(const std::string& response)
 {
+    std::string result = EncodeWebsocketMessage(PONG_FRAME, response);
+    OnSend(result, FD_WRITE);
 }
 
 void WsConsumer::OnPong(const std::string& response)
@@ -85,22 +97,30 @@ void WsConsumer::OnPong(const std::string& response)
 
 void WsConsumer::OnMessage(const std::string& msg)
 {
+    // TODO 不解析消息，直接转发给bw
     if(msg.empty()) {
         RTE_LOG(ERR, USER1, "[%s][%d] msg can't be empty.", __func__, __LINE__);
-        return;
+        goto OnMessageEnd;
     }
     try {
         std::string msg_send;
-        std::string message = message_unpack(msg);
-        if(message.empty()) {
+        std::string message;
+        if(message_unpack(msg, message) < 0) {
             RTE_LOG(ERR, USER1, "[%s][%d] message_unpack msg failed,data:%s\r\n", 
                 __func__, __LINE__, Encrypt::bin2hex(msg).c_str());
-            return;
+            goto OnMessageEnd;
         }
         nlohmann::json jmsg = nlohmann::json::parse(message);
+        int cmd = jmsg["cmd"].get<std::int32_t>();
+        int compress = jmsg["compressFormat"].get<std::int32_t>();
         switch(jmsg["cmd"].get<std::int32_t>()) {
             case 0:// 心跳
-                msg_send = message_pack(jmsg["cmd"],1,1,jmsg["compressFormat"].get<std::int32_t>(),"");
+                if (message_pack(cmd , 1, 1, compress, "", msg_send)) {
+                    RTE_LOG(ERR, USER1, "[%s][%d] message_pack msg failed.\r\n", 
+                        __func__, __LINE__);
+                        goto OnMessageEnd;
+                }
+                printf("send heart beat:%s\n", Encrypt::bin2hex(msg_send).c_str());
                 break;
             case 1:// 通信消息
                 {
@@ -120,7 +140,7 @@ void WsConsumer::OnMessage(const std::string& msg)
                     std::string s_uid = std::to_string(jtoken["user_id"].get<std::uint64_t>());
                     s_uid.resize(20);
                     // TODO uid和cid绑定
-                    CmdBindUid buid(this->fd, this->data, s_uid);
+                    CmdBindUid buid(this->fd, this->data, jtoken);
                     if(buid.ExecCmd() == -1) {
                         RTE_LOG(ERR, USER1, "[%s][%d] add uid[%s] failed, closing connection...",
                             __func__, __LINE__, s_uid.c_str());
@@ -134,11 +154,21 @@ void WsConsumer::OnMessage(const std::string& msg)
                     // sprintf(resArray, "bind %lu\n", jtoken["user_id"].get<std::uint64_t>());
                     // std::string res = std::string(resArray, strlen(resArray));
                     tgg_set_cli_authorized(this->fd, AUTH_TYPE_TOKENCHECKED);
-                    msg_send = message_pack(jmsg["cmd"].get<std::int32_t>(),1,0,jmsg["compressFormat"], res);
+                    if (message_pack(jmsg["cmd"].get<std::int32_t>() , 1 , 0,
+                        jmsg["compressFormat"], res, msg_send) < 0) {
+                        // 数据封包失败
+                        RTE_LOG(ERR, USER1, "[%s][%d] message_unpack msg failed,data:%s\r\n", 
+                            __func__, __LINE__, res.c_str());
+                        goto OnMessageEnd;
+                    }
                 }
                 break;
             default:
-                msg_send = message_pack(0,1,0,jmsg["compressFormat"],"message error~\n");
+                if (message_pack(0,1,0,jmsg["compressFormat"],"message error~\n", msg_send) < 0) {
+                    RTE_LOG(ERR, USER1, "[%s][%d] message_pack msg failed.\r\n", 
+                        __func__, __LINE__);
+                        goto OnMessageEnd;
+                }
                 break;
         }
         // msg_send = std::string(vec.begin(), vec.end());
@@ -168,14 +198,103 @@ void WsConsumer::OnSend(const std::string& msg, int fd_opt)
     }
 }
 
-void WsConsumer::Send2Client(const std::string& data, int fd_opt)
+void WsConsumer::Send2Client(const char* cid, const std::string& data, int fd_opt)
 {
-    if(tgg_get_cli_authorized(this->fd) != AUTH_TYPE_TOKENCHECKED) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Send data to client should check Token at first.", __func__, __LINE__);
+    int fd = tgg_get_fdbycid(cid);
+    if(fd < 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] client[%s] not exist.", __func__, __LINE__, cid);
         return;
     }
-    SendData(data, fd_opt);
+    int idx = tgg_get_cli_idx(fd);
+    if(idx < 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] client[%s] already closed.", __func__, __LINE__, cid);
+        return;
+    }
+    if(tgg_get_cli_authorized(fd) != AUTH_TYPE_TOKENCHECKED) {
+        RTE_LOG(ERR, USER1, "[%s][%d] Send data to client[%s] should check Token at first.",
+            __func__, __LINE__, cid);
+        return;
+    }
+    std::string sendData;
+    // 打包封装到
+    if (message_pack(2, 1, 0, 1, data, sendData) < 0)
+    {
+        RTE_LOG(ERR, USER1, "[%s][%d] message_pack data[%s] failed.\r\n", 
+            __func__, __LINE__, data.c_str());
+        return;
+    }
+
+    std::cout << "send data["<< cid <<"]:" << Encrypt::bin2hex(sendData) << std::endl;
+    if (enqueue_data_single_fd(sendData, fd, idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
+        RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%s,opt:%d",
+         __func__, __LINE__, cid, fd_opt);
+    }
 }
+
+void WsConsumer::BatchSend2Client(std::list<std::string> cids, const std::string& data, int fd_opt)
+{
+    std::list<int> lstFds;
+    std::list<std::string>::iterator itCid = cids.begin();
+    while(itCid != cids.end()) {
+        int fd = tgg_get_fdbycid((*itCid).c_str());
+        if(fd < 0) {
+            RTE_LOG(INFO, USER1, "[%s][%d] client[%s] not exist.", __func__, __LINE__, (*itCid).c_str());
+            continue;
+        }
+        lstFds.push_back(fd);
+        itCid++;
+    }
+    WsConsumer::BatchSend2Client(lstFds, data, fd_opt);
+}
+
+void WsConsumer::BatchSend2Client(std::list<int> fds, const std::string& data, int fd_opt)
+{
+    if(fds.size() <= 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] fd list can't be empty.\r\n", 
+            __func__, __LINE__);
+        return;
+    }
+    std::map<int, int> mapFdidx;
+    std::list<int>::iterator itFd = fds.begin();
+    while(itFd != fds.end()) {
+        int idx = tgg_get_cli_idx(*itFd);
+        if(idx < 0) {
+            std::string sCid = tgg_get_cli_cid(*itFd);
+            RTE_LOG(INFO, USER1, "[%s][%d] client[%s] already closed.\n", __func__, __LINE__, sCid.c_str());
+            itFd++;
+            continue;
+        }
+        if(tgg_get_cli_authorized(*itFd) != AUTH_TYPE_TOKENCHECKED) {
+            std::string sCid = tgg_get_cli_cid(*itFd);
+            RTE_LOG(INFO, USER1, "[%s][%d] Send data to client[%s] should check Token at first.\n",
+                __func__, __LINE__, sCid.c_str());
+            itFd++;
+            continue;
+        }
+        mapFdidx[*itFd] = idx;
+        itFd++;
+    }
+    if(mapFdidx.size() <= 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] no live fd found for.\r\n", 
+            __func__, __LINE__);
+        return;
+    }
+    std::string sendData;
+    // 打包封装
+    if (message_pack(2, 1, 0, 1, data, sendData) < 0)
+    {
+        RTE_LOG(ERR, USER1, "[%s][%d] message_pack data[%s] failed.\r\n", 
+            __func__, __LINE__, data.c_str());
+        return;
+    }
+    
+    std::cout << "send group data:" << Encrypt::bin2hex(sendData) << std::endl;
+    if (enqueue_data_batch_fd(sendData, mapFdidx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
+        RTE_LOG(ERR, USER1, "[%s][%d] Batch Enqueue data Failed\n",
+         __func__, __LINE__);
+    }
+}
+
 
 void WsConsumer::_CleanAndClose()
 {

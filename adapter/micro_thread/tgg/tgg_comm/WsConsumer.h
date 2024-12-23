@@ -2,6 +2,7 @@
 #define __WS_CONSUMER_H__
 #include "comm/Websocket.hpp"
 #include <string>
+#include <list>
 
 
 class WsConsumer : Websocket
@@ -15,7 +16,13 @@ public:
     int ConsumerData(void* data);
 
     // 后台直发客户端的数据，token校验成功后才能正常调用本接口
-    void Send2Client(const std::string& data, int fd_opt);
+    static void Send2Client(const char* cid, const std::string& data, int fd_opt);
+
+    // 批量发送接口
+    static void BatchSend2Client(std::list<std::string> cids, const std::string& data, int fd_opt);
+
+    // 批量发送接口
+    static void BatchSend2Client(std::list<int> fds, const std::string& data, int fd_opt);
 
 protected:
     bool ConnectionValid(int fd, void* data);

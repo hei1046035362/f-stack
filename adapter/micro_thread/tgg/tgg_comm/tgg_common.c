@@ -23,6 +23,29 @@ extern char g_cid_str[21];  // 8位地址+4位端口+8位idx+1位结束符'\0'
 tgg_stats g_tgg_stats = {0};
 
 
+static bool s_big_endian = false;
+
+union EndiannessTester {
+    int integer;
+    char bytes[sizeof(int)];
+};
+
+void init_endians()
+{
+    union EndiannessTester tester;
+    tester.integer = 1;
+    if (tester.bytes[0] == 1) {
+        s_big_endian = true;
+    } 
+}
+
+bool big_endian()
+{
+    return s_big_endian;
+}
+
+
+
 int get_valid_idx()
 {
 	int looptimes = 2;
@@ -47,20 +70,15 @@ int get_valid_idx()
 	return current_id_atomic;
 }
 
-static void format_idx(int idx)
+std::string get_valid_cid(int idx)
 {
-	char* ptr = &g_cid_str[12];// 前面12个已经被占用了
-	for (int j = 0; j < 4; j++) {
-		sprintf(ptr, "%02X", (idx >> (24 - j * 8)) & 0xFF);
-		ptr += 2;
-	}
+	std::string scid(g_cid_str, TGG_IPPORT_LEN);
+    std::string rsp;
+    rsp.resize(sizeof(int));
+    memcpy(const_cast<char* >(rsp.data()), &idx, sizeof(int));
+    return scid + rsp;
 }
 
-const char* get_valid_cid(int idx)
-{
-	format_idx(idx);
-	return g_cid_str;
-}
 
 void tgg_close_cli(int fd)
 {
@@ -339,6 +357,7 @@ int tgg_dequeue_bwrcv(tgg_bw_data** data)
 void clean_bw_data(tgg_bw_data* bdata)
 {
     if (bdata->data) {
+    	memset(bdata->data, 0, bdata->data_len);
         rte_free(bdata->data);
     }
     memset(bdata, 0, sizeof(tgg_bw_data));
@@ -348,6 +367,7 @@ void clean_bw_data(tgg_bw_data* bdata)
 void clean_read_data(tgg_read_data* rdata)
 {
     if (rdata->data) {
+    	memset(rdata->data, 0, rdata->data_len);
         rte_free(rdata->data);
     }
     memset(rdata, 0, sizeof(tgg_read_data));
@@ -357,6 +377,7 @@ void clean_read_data(tgg_read_data* rdata)
 void clean_write_data(tgg_write_data* wdata)
 {
     if (wdata->data) {
+    	memset(wdata->data, 0, wdata->data_len);
         rte_free(wdata->data);
     }
     memset(wdata, 0, sizeof(tgg_write_data));
@@ -424,6 +445,12 @@ add_data_failed:
 
 int enqueue_data_batch_fd(const std::string& data, std::map<int, int>& mapfdidx, int fdopt)
 {
+	if(mapfdidx.size() <= 0) {
+		// fd列表为空
+		RTE_LOG(ERR, USER1, "[%s][%d] mapfdidx is empty.", 
+			__func__, __LINE__);
+		return 0;
+	}
 	tgg_write_data* wdata = format_send_data(data, mapfdidx, fdopt);
 	if (!wdata) {
 		RTE_LOG(ERR, USER1, "[%s][%d] Format send data failed.", 
