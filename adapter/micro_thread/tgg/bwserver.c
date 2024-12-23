@@ -1,14 +1,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+// #include <unistd.h>
+// #include <sys/types.h>
+// #include <sys/socket.h>
+// #include <arpa/inet.h>
+// #include <sys/select.h>
+// #include <errno.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/select.h>
+#include <errno.h> 
 #include <sys/time.h>
+#include <pthread.h>
 
 #include "bwserver.h"
-#include "ff_api.h"
+// #include "ff_api.h"
+#include "mt_sys_hook.h"
 #include "tgg_comm/tgg_struct.h"
 #include "tgg_comm/tgg_common.h"
 #include "tgg_comm/tgg_bwcomm.h"
@@ -22,7 +30,7 @@
 #define BUFFER_SIZE 1024
 #define MAX_CLIENTS 10
 
-
+extern int g_run;
 static 	pthread_t s_bwserver_thread;
 
 extern std::map<int, tgg_bw_info*> g_map_bwinfo;
@@ -34,8 +42,9 @@ void tgg_process_bwrcv_data(void* arg)
 {
     tgg_bw_data* bdata = (tgg_bw_data*)arg;
     // tgg_bw_info* binfo = g_map_bwinfo[bdata->fd];
-    CmdBaseProcessor* pro = get_cmd_processor(bdata->fd, arg);
-    pro->ExecCmd();
+    exec_cmd_processor(bdata->fd, arg);
+    // pro->ExecCmd();
+    clean_bw_data(bdata);
     // TODO BW断开后，之前没有处理完的事情是否要继续处理
     // if (bdata->fd_opt & FD_CLOSE || 
     //     binfo->idx != bdata->idx ||
@@ -47,49 +56,61 @@ void tgg_process_bwrcv_data(void* arg)
 
 static void* bwserver_routine(void* data)
 {
-	int server_socket, client_sockets[MAX_CLIENTS];
-    struct sockaddr_in server_addr, client_addr;
-    socklen_t client_addr_len;
+    ff_unset_hook_flag();
+    int server_socket, client_sockets[MAX_CLIENTS], max_fd, i;
+    struct sockaddr_in server_addr;
+    int opt = 1;
     char buffer[BUFFER_SIZE];
     fd_set read_fds;
-    int max_fd;
-    int i;
+    int addrlen = sizeof(server_addr);
+
+    // 初始化所有客户端套接字为 0
+    for (i = 0; i < MAX_CLIENTS; i++) {
+        client_sockets[i] = 0;
+    }
 
     // 创建服务器套接字
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_socket < 0) {
+    if (server_socket <= 0) {
         perror("Error opening socket");
         exit(1);
+    }
+
+    // 设置地址可重用
+    if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
     }
 
     // 初始化服务器地址结构
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(PORT);
+    server_addr.sin_port = big_endian() ? htons(PORT) : PORT;
 
-    // 绑定套接字到指定端口
+    // 绑定套接字
     if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("Error on binding");
         exit(1);
     }
 
     // 开始监听连接请求
-    listen(server_socket, 5);
-
-    // 初始化客户端套接字数组
-    for (i = 0; i < MAX_CLIENTS; i++) {
-        client_sockets[i] = 0;
+    if (listen(server_socket, 5) == -1) {
+        perror("Error on listen.");
+        exit(1);
     }
 
-    max_fd = server_socket;
+    struct timeval timeout;
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
 
-    while (1) {
+    while (g_run) {
         // 清空文件描述符集合
         FD_ZERO(&read_fds);
 
         // 将服务器套接字加入集合
         FD_SET(server_socket, &read_fds);
+        max_fd = server_socket;
 
         // 将已连接的客户端套接字加入集合
         for (i = 0; i < MAX_CLIENTS; i++) {
@@ -102,15 +123,18 @@ static void* bwserver_routine(void* data)
         }
 
         // 使用 select 等待可读事件
-        int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
-        if (activity < 0) {
+        int activity = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
+        if (activity < 0 && (errno != EINTR)) {
             perror("Error in select");
             exit(1);
+        } else if(!activity) {
+            // 超过预定时间，且没有可读事件
+            continue;
         }
 
         // 检查服务器套接字是否有新连接请求
         if (FD_ISSET(server_socket, &read_fds)) {
-            int new_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len);
+            int new_socket = accept(server_socket, (struct sockaddr *)&server_addr, (socklen_t*)&addrlen);
             if (new_socket < 0) {
                 perror("Error on accept");
                 continue;
@@ -119,17 +143,20 @@ static void* bwserver_routine(void* data)
             // 找到一个空闲的位置存储新连接的套接字
             for (i = 0; i < MAX_CLIENTS; i++) {
                 if (client_sockets[i] == 0) {
-                    tgg_bw_info* bwinfo = get_valid_bwinfo_by_fd(new_socket);
-                    bwinfo->idx = ++s_idx;
-                    bwinfo->status = FD_STATUS_NEWSESSION;
-                    if (get_connection_info(new_socket, bwinfo->ip_str, &bwinfo->port) < 0) {
+                    if (new_bw_session(new_socket) < 0) {
+                        RTE_LOG(ERR, USER1, "[%s][%d] Add new BW session failed.\n", __func__, __LINE__);
                         close(new_socket);
-                        delete(bwinfo);
                     } else {
+                        // 新建回话成功后才保存fd
                         client_sockets[i] = new_socket;
                     }
                     break;
                 }
+            }
+            // 超过允许的连接总数，直接拒绝连接
+            if(i >= MAX_CLIENTS) {
+                RTE_LOG(ERR, USER1, "[%s][%d] Accept new session failed, Holding fds is overflow.\n", __func__, __LINE__);
+                close(new_socket);
             }
         }
 
@@ -141,30 +168,42 @@ static void* bwserver_routine(void* data)
                 int bytes_read = read(client_socket, buffer, BUFFER_SIZE - 1);
                 tgg_bw_data* bdata = NULL;
                 if (rte_mempool_get(g_mempool_bwrcv, (void**)&bdata) < 0) {
-                    RTE_LOG(ERR, USER1, "[%s][%d] Get mem from bwrcv mempool failed.", __func__, __LINE__);
+                    RTE_LOG(ERR, USER1, "[%s][%d] Get mem from bwrcv mempool failed.\n", __func__, __LINE__);
+                    free_bw_session(client_socket);
+                    close(client_socket);
                     continue;
                 }
                 bdata->fd = client_socket;
                 if (bytes_read <= 0) {
                     bdata->fd_opt = FD_CLOSE;
                     // BW断开连接
+                    free_bw_session(client_socket);
                     close(client_socket);
                     client_sockets[i] = 0;
+                    clean_bw_data(bdata);
+                    RTE_LOG(ERR, USER1, "[%s][%d] 1 connection closed, fd[%d].\n", __func__, __LINE__, client_socket);
+                    continue;
                 } else {
-                    RTE_LOG(ERR, USER1, "[%s][%d] Received from BW %d: %s", __func__, __LINE__, i, buffer);
+                    RTE_LOG(ERR, USER1, "[%s][%d] Received from BW %d: %s\n", __func__, __LINE__, i, buffer);
                     bdata->data = dpdk_rte_malloc(bytes_read);
-                    if (!bdata->data)
-                    {
-                        rte_free(bdata);
+                    if (!bdata->data) {
+                        clean_bw_data(bdata);
                         continue;
                     }
                     bdata->fd_opt = FD_READ;
                     bdata->data_len = bytes_read;
+                    memcpy(bdata->data, buffer, bytes_read);
                     // 暂时没有上行的业务
                     // write(client_socket, buffer, strlen(buffer));
                 }
                 if(tgg_enqueue_bwrcv(bdata) < 0) {
-                    rte_mempool_put(g_mempool_bwrcv, bdata);
+                    clean_bw_data(bdata);
+                    // if (bdata->data) {
+                    //     memset(bdata->data, 0, bytes_read);
+                    //     rte_free(bdata->data);
+                    // }
+                    // memset(bdata, 0, sizeof(tgg_bw_data));
+                    // rte_mempool_put(g_mempool_bwrcv, bdata);
                 }
             }
         }
@@ -177,17 +216,20 @@ static void* bwserver_routine(void* data)
 
 int init_bwserver()
 {
-	return ff_pthread_create(&s_bwserver_thread, NULL, &bwserver_routine, NULL);
+	return pthread_create(&s_bwserver_thread, NULL, &bwserver_routine, NULL);
 }
 
 void uninit_bwserver()
 {
 	void* retval = NULL;
-	if (ff_pthread_join(s_bwserver_thread, &retval) < 0) {
+	if (pthread_join(s_bwserver_thread, &retval) < 0) {
 		perror("join thread failed.");
 	}
     std::map<int, tgg_bw_info*>::iterator it_info = g_map_bwinfo.begin();
     while(it_info != g_map_bwinfo.end()) {
         delete(it_info->second);
+        it_info->second = NULL;
+        it_info++;
     }
+    g_map_bwinfo.clear();
 }

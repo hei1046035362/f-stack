@@ -3,6 +3,7 @@
 
 #include <string>
 #include <list>
+#include <map>
 
 template<typename type>
 void iter_del_list(type* iddata)
@@ -31,24 +32,31 @@ int tgg_add_gid(const char* gid, int fd, int idx);
 int tgg_del_gid(const char* gid);
 int tgg_del_fd4gid(const char* gid, int fd, int idx);
 // 返回格式  list<string(fd:uid)>
-std::list<std::string> tgg_get_gidconst (char* gid);
+int tgg_get_fdsbygid(const char* gid, std::list<std::string>& lst_fd);
+// 获取所有在线的分组
+int tgg_get_allonlinegids(std::list<std::string>& lst_gid);
 
 /// 增删查  uid  hash<uid, list<fd,idx> >
 int tgg_add_uid(const char* uid, int fd, int idx);
 int tgg_del_uid(const char* uid);
 int tgg_del_fd4uid(const char* uid, int fd, int idx);
 // 返回格式  list<string(fd:uid)>
-std::list<std::string> tgg_get_fdsbyuid(const char* uid);
+int tgg_get_fdsbyuid(const char* uid, std::list<std::string>& lst_fd);
 
-/// 增删查  cid hash<uid, fd>
+/// 增删查  cid hash<cid, fd>
 int tgg_add_cid(const char* cid, int fd);
 int tgg_del_cid(const char* cid);
 int tgg_get_fdbycid(const char* cid);
+int tgg_get_allonlinecids(std::list<std::string>& lst_cids);
+int tgg_get_allfds(std::list<int>& lst_fds);
 
 /// 增删查  uid->gid映射 hash<uid, list<gid> >
 int tgg_add_uidgid(const char* uid, const char* gid);
 int tgg_del_uid_uidgid(const char* uid);
+// 删除指定uid下的gid
 int tgg_del_gid_uidgid(const char* uid, const char* gid);
+// 遍历删除所有uid中的指定gid
+void tgg_del_gid_uidgid(const char* gid);
 
 // 返回格式  list<string(uid)>
 int tgg_get_gidsbyuid(const char* uid, std::list<std::string>& lst_gid);

@@ -5,6 +5,10 @@
 #include <map>
 #include "tgg_struct.h"
 
+void init_endians();
+
+bool big_endian();
+
 int tgg_get_cli_idx(int fd);
 int tgg_get_cli_status(int fd);
 int tgg_get_cli_authorized(int fd);
@@ -54,9 +58,9 @@ int tgg_exit_group(const char* gid, const char* cid);
 
 // 获取可用的idx
 int get_valid_idx();
-// 生成一个可用的cid
-const char* get_valid_cid(int idx);
 
+// 通过idx生成cid
+std::string get_valid_cid(int idx);
 
 // 清理队列
 void clean_bw_data(tgg_bw_data* bdata);

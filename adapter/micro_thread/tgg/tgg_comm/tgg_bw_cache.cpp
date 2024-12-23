@@ -60,12 +60,6 @@ static int tgg_hash_add_key_value(const rte_hash* hash, const char* key, int fd)
             return -1;
         }
         *value = fd;
-        // int ret = rte_hash_add_key_data(hash, key, value);
-        // if (ret < 0) {
-        //     *value = 0;
-        //     RTE_LOG(ERR, USER1, "[%s][%d]add key[%s] failed:%d.", __func__, __LINE__, key, ret);
-        //     return ret;
-        // }
     }
 
     return 0;
@@ -130,18 +124,8 @@ static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int 
     return 0;
 }
 
-// int tgg_exit_hash_key(const rte_hash* hash, const char* key)
-// {
-//     int ret = rte_hash_lookup_with_hash(hash, key, rte_hash_crc(key, strlen(key), 0));
-//     if (ret < 0) {
-//         RTE_LOG(ERR, USER1, "[%s][%d] hash key[%s] not exist:%d\n", __func__, __LINE__, key, ret);
-//         return -1;
-//     }
-//     return 0;
-// }
-
 // 获取hash value/list
-static void* tgg_hash_get_key(const rte_hash* hash, const char* key)
+static void* tgg_hash_get_value(const rte_hash* hash, const char* key)
 {
     int ret = rte_hash_lookup_with_hash(hash, key, rte_hash_crc(key, strlen(key), 0));
     if (ret < 0) {
@@ -160,7 +144,7 @@ static void* tgg_hash_get_key(const rte_hash* hash, const char* key)
 // 删除整个key
 static int tgg_hash_del_key(const rte_hash* hash, const char* key, tgg_free_id_data fp)
 {
-    tgg_gid_data* pdata = (tgg_gid_data*)tgg_hash_get_key(hash, key);
+    tgg_gid_data* pdata = (tgg_gid_data*)tgg_hash_get_value(hash, key);
     if (!pdata)
         return -EINVAL;
 
@@ -208,6 +192,13 @@ static int tgg_hash_del_fdlst4key(const rte_hash* hash, const char* key, int fd,
             pdata = pdata->next;
         }
     }
+    if(!pdata->next) {
+        // 没有元素了，就把key也删除
+        // TODO 有没有更好的方式，不用重复创建相同的key
+        memset(pdata, 0, sizeof(tgg_fd_list));
+        rte_free(pdata);
+        rte_hash_del_key_with_hash(hash, key, rte_hash_crc(key, strlen(key), 0));
+    }
 
     return 0;
 }
@@ -239,9 +230,37 @@ static int tgg_hash_del_idlst4key(const rte_hash* hash, const char* key, const c
             pdata = pdata->next;
         }
     }
-
+    if(!pdata->next) {
+        // 没有元素了，就把key也删除
+        // TODO 有没有更好的方式，不用重复创建相同的key
+        memset(pdata, 0, sizeof(tgg_list_id));
+        rte_free(pdata);
+        rte_hash_del_key_with_hash(hash, key, rte_hash_crc(key, strlen(key), 0));
+    }
     return 0;
 }
+
+static int tgg_hash_get_allkeys(const rte_hash* hash, std::list<std::string>& lst_items)
+{
+    char* key = NULL;
+    int* value = NULL;
+    uint32_t next = 0;
+    int ret = 0;
+    while (1) {
+        ret = rte_hash_iterate(hash, (const void**)&key, (void**)&value, &next);
+        if (-ENOENT == ret) {
+            printf("iter to the end.\n");
+            break;
+        } else if (ret < 0) {
+            printf("catch an error\n");
+            return -1;
+        }
+        lst_items.push_back(key);
+    }
+    return 0;
+}
+
+
 
 #define APROPRIAT_HASH_KEY(key, len)\
     char _key[len] = {0};\
@@ -256,11 +275,11 @@ int tgg_add_gid(const char* gid, int fd, int idx)
     return tgg_hash_add_keywithfdlst(g_gid_hash, _key, fd, idx);
 }
 
-int tgg_get_gid(const char* gid, std::list<std::string>& lst_fd)
+int tgg_get_fdsbygid(const char* gid, std::list<std::string>& lst_fd)
 {
     APROPRIAT_HASH_KEY(gid, TGG_GID_LEN);
     ReadLock lock(get_gidfd_lock());
-    tgg_gid_data* value = (tgg_gid_data*)tgg_hash_get_key(g_gid_hash, _key);
+    tgg_gid_data* value = (tgg_gid_data*)tgg_hash_get_value(g_gid_hash, _key);
     if(!value) {
         return -1;
     }
@@ -269,6 +288,7 @@ int tgg_get_gid(const char* gid, std::list<std::string>& lst_fd)
                             std::string(":") + 
                             std::to_string(value->next->idx);
         lst_fd.push_back(item);
+        value = value->next;
     }
     return 0;
 }
@@ -287,6 +307,12 @@ int tgg_del_fd4gid(const char* gid, int fd, int idx)
     APROPRIAT_HASH_KEY(gid, TGG_GID_LEN);
     WriteLock lock(get_gidfd_lock());
     return tgg_hash_del_fdlst4key(g_gid_hash, _key, fd, idx);
+}
+
+int tgg_get_allonlinegids(std::list<std::string>& lst_gid)
+{
+    WriteLock lock(get_gidfd_lock());
+    return tgg_hash_get_allkeys(g_gid_hash, lst_gid);
 }
 
 /// 增删查  uid 用户id 
@@ -314,11 +340,11 @@ int tgg_del_fd4uid(const char* uid, int fd, int idx)
     return tgg_hash_del_fdlst4key(g_uid_hash, _key, fd, idx);
 }
 
-int tgg_get_uid(const char* uid, std::list<std::string>& lst_fd)
+int tgg_get_fdsbyuid(const char* uid, std::list<std::string>& lst_fd)
 {
     APROPRIAT_HASH_KEY(uid, TGG_UID_LEN);
     ReadLock lock(get_uidfd_lock());
-    tgg_uid_data* value = (tgg_uid_data*)tgg_hash_get_key(g_uid_hash, _key);
+    tgg_uid_data* value = (tgg_uid_data*)tgg_hash_get_value(g_uid_hash, _key);
     if(!value) {
         return -1;
     }
@@ -327,6 +353,7 @@ int tgg_get_uid(const char* uid, std::list<std::string>& lst_fd)
                             std::string(":") + 
                             std::to_string(value->next->idx);
         lst_fd.push_back(item);
+        value = value->next;
     }
     return 0;
 }
@@ -359,12 +386,43 @@ int tgg_get_fdbycid(const char* cid)
 {
     APROPRIAT_HASH_KEY(cid, TGG_CID_LEN);
     ReadLock lock(get_cidfd_lock());
-    int* value = (int*)tgg_hash_get_key(g_cid_hash, _key);
+    int* value = (int*)tgg_hash_get_value(g_cid_hash, _key);
     if(!value) {
         return -1;
     }
     return *value;
 }
+
+int tgg_get_allonlinecids(std::list<std::string>& lst_cids)
+{
+    WriteLock lock(get_cidfd_lock());
+    return tgg_hash_get_allkeys(g_cid_hash, lst_cids);
+}
+
+int tgg_get_allfds(std::list<int>& lst_fds)
+{
+    char* key = NULL;
+    int* value = NULL;
+    uint32_t next = 0;
+    int ret = 0;
+    while (1) {
+        WriteLock lock(get_cidfd_lock());
+        ret = rte_hash_iterate(g_cid_hash, (const void**)&key, (void**)&value, &next);
+        if (-ENOENT == ret) {
+            printf("iter to the end.\n");
+            break;
+        } else if (ret < 0) {
+            printf("catch an error\n");
+            return -1;
+        }
+        if(!value) {
+            continue;
+        }
+        lst_fds.push_back(*value);
+    }
+    return 0;
+}
+
 
 int tgg_add_uidgid(const char* uid, const char* gid)
 {
@@ -444,11 +502,52 @@ int tgg_del_gid_uidgid(const char* uid, const char* gid)
     return tgg_hash_del_idlst4key(g_uidgid_hash, _key, gid);
 }
 
+void tgg_del_gid_uidgid(const char* gid)
+{
+    if(!gid || strlen(gid) <= 0) {
+        return;
+    }
+    std::list<std::string> lst_fd;
+    ReadLock lock(get_uidgid_lock());
+    char* key = NULL;
+    tgg_gid_list* value = NULL;
+    uint32_t next = 0;
+    int ret = 0;
+    while (1) {
+        ret = rte_hash_iterate(g_uidgid_hash, (const void**)&key, (void**)&value, &next);
+        if (-ENOENT == ret) {
+            break;
+        }
+        else if (ret < 0) {
+            printf("tgg_del_gid_uidgid catch an error\n");
+            break;
+        }
+        if(!value) {
+            printf("key[%s]'s value is empty\n", key);
+            break;
+        }
+        printf("uid:%s\n", key);
+        tgg_gid_list* tmp = value;
+        while (tmp->next) {
+            int len = strlen(gid) > strlen(tmp->next->data) ? strlen(tmp->next->data) : strlen(gid);
+            if(!strncmp(tmp->next->data, gid, len)) {
+                tgg_gid_list* cur = tmp->next;
+                tmp->next = tmp->next->next;
+                memset(cur, 0, sizeof(tgg_gid_list));
+                rte_free(cur);
+            } else {
+                tmp->next = tmp->next->next;
+            }
+        }
+    }
+}
+
+
 int tgg_get_gidsbyuid(const char* uid, std::list<std::string>& lst_gid)
 {
     APROPRIAT_HASH_KEY(uid, TGG_UID_LEN);
     ReadLock lock(get_uidgid_lock());
-    tgg_gid_list* value = (tgg_gid_list*)tgg_hash_get_key(g_uidgid_hash, _key);
+    tgg_gid_list* value = (tgg_gid_list*)tgg_hash_get_value(g_uidgid_hash, _key);
     if(!value) {
         RTE_LOG(ERR, USER1, "[%s][%d] uid [%s] not exist.\n", __func__, __LINE__, uid);
         return -1;
