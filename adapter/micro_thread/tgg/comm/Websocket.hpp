@@ -15,8 +15,8 @@ public:
 protected:
     int fd;
     int handshake;
-private:
 
+protected:
     enum WebSocketFrameType {
         ERROR_FRAME = 0xFF,
         INCOMPLETE_DATA = 0xFE,
@@ -31,16 +31,12 @@ private:
         PING_FRAME = 0x9,
         PONG_FRAME = 0xA
     };
+private:
 
     // 生成websocket连接的唯一键
     std::string _GenerateAcceptKey(const std::string& key);
 
     std::string _HandleHandshake(const std::string& request);
-
-    std::string _EncodeWebsocketMessage(int opcode, const std::string& message);
-
-    std::string _DecodeWebsocketMessage(const std::vector<uint8_t>& frame);
-
         
     /* parse base frame according to
      * https://www.rfc-editor.org/rfc/rfc6455#section-5.2
@@ -67,6 +63,11 @@ public:
 
     // ws握手成功后才能调用
     void SendData(const std::string& data, int fd_opt);
+
+
+    static std::string EncodeWebsocketMessage(int opcode, const std::string& message);
+
+    static std::string DecodeWebsocketMessage(const std::vector<uint8_t>& frame);
 };
 
 
