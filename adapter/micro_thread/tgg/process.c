@@ -17,8 +17,7 @@
 #include <vector>
 
 
-static int g_run = 1;
-
+int g_run = 1;
 static const char* s_dump_file = "/var/corefiles/tgg_gw_process_core";
 static pid_data *s_pids = NULL;
 static int s_pid_count = 0;
@@ -39,8 +38,11 @@ const char* g_redis_pwd = "bZSCEI3VyV";
 void signal_handler(int signum)
 {
 	if(signum == SIGINT || signum == SIGTERM) {
-		uninit_bwserver();
-        prc_exit(0, "catched signal:%d\n", signum);
+		if(g_run) {
+			g_run = 0;
+			uninit_bwserver();
+        	prc_exit(0, "catched signal:%d\n", signum);
+		}
 	}
 	if (signum > SIGUSR1)
 	{
@@ -259,9 +261,11 @@ int main(int argc, char *argv[])
 	mt_init_frame(argc, argv);
 	tgg_process_init();
 	init_flag_for_process();
-	tgg_gw_process(NULL);
 	init_bwserver();
+	tgg_gw_process(NULL);
 	uninit_bwserver();
 	// TODO 进程退出时要回收资源
 	tgg_process_uninit();
+	printf("\n-----------main end----------\n");
+	return 0;
 }

@@ -94,6 +94,8 @@ enum GatewayProtocal {
     // 当websocket握手时触发，只有websocket协议支持此命令字
     CMD_ON_WEBSOCKET_CONNECT = 205,
 
+    CMD_MAX_INDEX,
+
     // 包体是标量
     FLAG_BODY_IS_SCALAR = 0x01,
 

@@ -9,9 +9,11 @@
 #define TGG_UID_LEN 24
 #define TGG_GID_LEN 24
 
+#define TGG_IPPORT_LEN 12
 
 #define TGG_FD_CLOSING -1
 #define TGG_FD_CLOSED -2
+#define TGG_FD_NOTEXIST -3
 
 // 应用层协议类型
 enum L4_TYPE
@@ -86,9 +88,10 @@ typedef struct st_bw_info {
 	int idx;		// 和fd共同标识唯一一个连接(fd是可重用的)
 	int load;		// BW的负载情况，用于计算负载均衡
 	int authorized; // 连接确认
-    unsigned short port;
-    char ip_str[INET_ADDRSTRLEN];
-    char secretKey[SECRET_KEY_LEN];
+	int lastupdattime;
+    	unsigned short port;
+    	char ip_str[INET_ADDRSTRLEN];
+    	char secretKey[SECRET_KEY_LEN];
 } tgg_bw_info;
 
 // TODO list 存储BW的fd
@@ -99,7 +102,7 @@ typedef struct st_read_data {
 	int fd;			// socket fd
 	int fd_opt;
 	int idx;
-	int data_len;
+	unsigned int data_len;
 	void* data;		// 携带的数据
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_read_data;
 
@@ -115,7 +118,7 @@ typedef struct st_write_data {
 	tgg_fd_list* lst_fd;			// socket fd(可能存在同时发多个fd)
 	int fd_opt;		// 对fd的操作类型(写/关闭)
 	int idx;
-	int data_len;
+	unsigned int data_len;
 	void* data;		// 携带的数据
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_write_data;
 
@@ -169,6 +172,22 @@ typedef struct st_tgg_cid_data {
 	// struct st_list_gid* lst_gid;  // 考虑使用时直接从redis获取
 } tgg_cid_data;
 
+
+
+// bw和gw通信协议头，固定长度部分 28字节
+typedef struct __attribute__((__packed__)) st_bwprotocal {
+        unsigned int pack_len;
+        unsigned char cmd;
+        unsigned int local_ip;
+        unsigned short local_port;
+        unsigned int client_ip;
+        unsigned short client_port;
+        unsigned int connection_id;
+        unsigned char flag;
+        unsigned short gateway_port;
+        unsigned int ext_len;
+        char data[0];                   /// 柔性数组，不占长度，只作为标识数据部分的起始位置
+} tgg_bw_protocal;
 
 
 #endif // _TGG_STRUCT_H_
