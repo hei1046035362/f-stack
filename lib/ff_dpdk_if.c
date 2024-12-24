@@ -2379,6 +2379,7 @@ main_loop(void *arg)
         }
 
         process_msg_ring(qconf->proc_id, pkts_burst);
+
 #ifdef FF_LOOPBACK_SUPPORT
         ff_swi_net_excute();
 #endif
