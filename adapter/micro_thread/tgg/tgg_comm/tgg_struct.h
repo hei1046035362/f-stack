@@ -5,6 +5,8 @@
 // #define CACHE_LINE_SIZE 64
 #define SECRET_KEY_LEN 20
 
+#define MAX_LCORE_COUNT 20	// 最大允许的 lcore个数
+
 #define TGG_CID_LEN 24
 #define TGG_UID_LEN 24
 #define TGG_GID_LEN 24
@@ -76,6 +78,9 @@ typedef struct st_cli_info {
 	tgg_ws_data* ws_data;	// 缓存websocket的数据，用于处理分包的情况下
 	// int need_keep;	// 是否为长连接                     	process填充
 	// int l4_type;	// 应用层协议类型，http/websocket		process填充
+	int ip;
+	unsigned short port;
+	int bwfd;		// 绑定的bw
 	char cid[TGG_CID_LEN];	// client id 							process 填充
 	char uid[TGG_UID_LEN];	// user id 							process 填充
 	char reserved[128];	// reserved
@@ -100,6 +105,7 @@ typedef struct st_bw_info {
 // master收到数据后传给process处理，入队列时填充
 typedef struct st_read_data {
 	int fd;			// socket fd
+	int coreid;		// coreid
 	int fd_opt;
 	int idx;
 	unsigned int data_len;
@@ -108,7 +114,7 @@ typedef struct st_read_data {
 
 // list<fd>
 typedef struct st_tgg_fd_list {
-	int fd;
+	int fdid;// 存储在hash表中的是fdid，在线程或进程之间传递时是fd
 	int idx;
 	struct st_tgg_fd_list* next;
 } tgg_fd_list;
