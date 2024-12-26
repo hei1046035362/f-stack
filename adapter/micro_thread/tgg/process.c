@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include "mt_incl.h"
-#include "micro_thread.h"
+// #include "mt_incl.h"
+// #include "micro_thread.h"
 #include <rte_mempool.h>
 #include <rte_malloc.h>
 #include <sys/wait.h>
@@ -41,6 +41,7 @@ void signal_handler(int signum)
 		if(g_run) {
 			g_run = 0;
 			uninit_bwserver();
+			rte_eal_cleanup();
         	prc_exit(0, "catched signal:%d\n", signum);
 		}
 	}
@@ -80,10 +81,10 @@ static int tgg_process_read()
 		return 0;
 	}
 	// 等待可用线程
-	while (mt_nomore_thread() && g_run) {
-		mt_sleep(10);
-		continue;
-	}
+	// while (mt_nomore_thread() && g_run) {
+	// 	mt_sleep(10);
+	// 	continue;
+	// }
 	// 进程要退出了，不再启动新的线程，释放内存就退出
 	if (!g_run) {
     	memset(rdata->data, 0, rdata->data_len);
@@ -93,7 +94,7 @@ static int tgg_process_read()
 		return -1;
 	}
 
-	mt_start_thread((void *)tgg_process_read_data, (void *)rdata);
+	// mt_start_thread((void *)tgg_process_read_data, (void *)rdata);
 
 	return 0;
 }
@@ -109,10 +110,10 @@ static int tgg_process_bwrcv()
 		return 0;
 	}
 	// 等待可用线程
-	while (mt_nomore_thread() && g_run) {
-		usleep(10);
-		continue;
-	}
+	// while (mt_nomore_thread() && g_run) {
+	// 	usleep(10);
+	// 	continue;
+	// }
 	// 进程要退出了，不再启动新的线程，释放内存就退出
 	if (!g_run) {
 		rte_free(bdata->data);
@@ -121,7 +122,7 @@ static int tgg_process_bwrcv()
 		return -1;
 	}
 
-	mt_start_thread((void *)tgg_process_bwrcv_data, (void *)bdata);
+	// mt_start_thread((void *)tgg_process_bwrcv_data, (void *)bdata);
 	return 0;
 }
 
@@ -252,13 +253,40 @@ void tgg_process_init()
 
 void tgg_process_uninit()
 {
-	tgg_secondary_uninit();	
+	rte_eal_cleanup();
+	// tgg_secondary_uninit();	
+}
+
+static void prc_dpdk_eal_init(int argc, char **argv)
+{
+	char c_flag[] = "-c1";
+	char n_flag[] = "-n4";
+	char mp_flag[] = "--proc-type=secondary";
+	char log_flag[] = "--log-level=6";
+	char *argp[argc + 4];
+	uint16_t nb_ports;
+
+	argp[0] = argv[0];
+	argp[1] = c_flag;
+	argp[2] = n_flag;
+	argp[3] = mp_flag;
+	argp[4] = log_flag;
+
+	for (i = 1; i < argc; i++)
+		argp[i + 4] = argv[i];
+
+	argc += 4;
+
+	ret = rte_eal_init(argc, argp);
+	if (ret < 0)
+		rte_panic("Cannot init EAL\n");
 }
 
 int main(int argc, char *argv[])
 {
 	init_core(s_dump_file);
-	mt_init_frame(argc, argv);
+	prc_dpdk_eal_init(argc, argv);
+	// mt_init_frame(argc, argv);
 	tgg_process_init();
 	init_flag_for_process();
 	init_bwserver();

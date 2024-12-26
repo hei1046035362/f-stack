@@ -28,7 +28,7 @@ void iter_del_idlist(void* iddata)
 }
 
 // 针对key-value的hash
-static int tgg_hash_add_key_value(const rte_hash* hash, const char* key, int fd)
+static int tgg_hash_add_key_value(const rte_hash* hash, const char* key, int fdid)
 {
     if (strlen(key) != 20) {
         RTE_LOG(ERR, USER1, "[%s][%d]add key failed,check if key[%s] is correct.\n", __func__, __LINE__, key);
@@ -46,7 +46,7 @@ static int tgg_hash_add_key_value(const rte_hash* hash, const char* key, int fd)
             RTE_LOG(ERR, USER1, "[%s][%d]add key[%s] failed:%d.\n", __func__, __LINE__, key, ret);
             return -1;
         }
-        *value = fd;
+        *value = fdid;
         int ret = rte_hash_add_key_with_hash_data(hash, key, rte_hash_crc(key, strlen(key), 0), value);
         if (ret < 0) {
             RTE_LOG(ERR, USER1, "[%s][%d]add key[%s] failed:%d.\n", __func__, __LINE__, key, ret);
@@ -59,14 +59,14 @@ static int tgg_hash_add_key_value(const rte_hash* hash, const char* key, int fd)
             RTE_LOG(ERR, USER1, "[%s][%d]Get key[%s] data failed:%d\n", __func__, __LINE__, key, ret);
             return -1;
         }
-        *value = fd;
+        *value = fdid;
     }
 
     return 0;
 }
 
 // 针对key-list的hash
-static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int fd, int idx)
+static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int fdid, int idx)
 {
     int ret = rte_hash_lookup_with_hash(hash, key, rte_hash_crc(key, strlen(key), 0));
     tgg_fd_list* pdata = NULL;
@@ -82,7 +82,7 @@ static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int 
             return -1;
         }
         pdata->next->idx = idx;
-        pdata->next->fd = fd;
+        pdata->next->fdid = fdid;
         pdata->next->next = NULL;
         int ret = rte_hash_add_key_with_hash_data(hash, key, rte_hash_crc(key, strlen(key), 0), pdata);
         if (ret < 0) {
@@ -104,7 +104,7 @@ static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int 
         pdata = value->next;
         while (pdata->next) {
             // TODO 对于已存在的fd+idx是否要比较，可能会有性能损耗
-            if(pdata->next->idx == idx && pdata->next->fd == fd) {
+            if(pdata->next->idx == idx && pdata->next->fdid == fdid) {
                 break;
             }
             pdata = pdata->next;
@@ -117,7 +117,7 @@ static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int 
             return -1;
         }
         tmp->idx = idx;
-        tmp->fd = fd;
+        tmp->fdid = fdid;
         tmp->next = NULL;
         pdata->next = tmp;
     }
@@ -166,7 +166,7 @@ static int tgg_hash_del_key(const rte_hash* hash, const char* key, tgg_free_id_d
 }
 
 // 删除hash value为list中的单个元素,list节点中的值为fd和idx两个元素
-static int tgg_hash_del_fdlst4key(const rte_hash* hash, const char* key, int fd, int idx)
+static int tgg_hash_del_fdlst4key(const rte_hash* hash, const char* key, int fdid, int idx)
 {
     int ret = rte_hash_lookup_with_hash(hash, key, rte_hash_crc(key, strlen(key), 0));
     if (ret < 0) {
@@ -182,7 +182,7 @@ static int tgg_hash_del_fdlst4key(const rte_hash* hash, const char* key, int fd,
     tgg_fd_list* pdata = value->next;
     while (pdata->next) {
         // TODO 对于已存在的fd+idx是否要比较，可能会有性能损耗
-        if(pdata->next->idx == idx && pdata->next->fd == fd) {
+        if(pdata->next->idx == idx && pdata->next->fdid == fdid) {
             tgg_fd_list* tmp = pdata->next->next;
             memset(pdata->next, 0, sizeof(tgg_fd_list));
             rte_free(pdata->next);
@@ -267,12 +267,12 @@ static int tgg_hash_get_allkeys(const rte_hash* hash, std::list<std::string>& ls
     memcpy(_key, key, strlen(key))
 
 /// 增删查  gid
-int tgg_add_gid(const char* gid, int fd, int idx)
+int tgg_add_gid(const char* gid, int fdid, int idx)
 {
-    RTE_LOG(INFO, USER1, "[%s][%d] add gid[%s] fd[%d] idx[%d].\n", __func__, __LINE__, gid, fd, idx);
+    RTE_LOG(INFO, USER1, "[%s][%d] add gid[%s] fdid[%d] idx[%d].\n", __func__, __LINE__, gid, fdid, idx);
     WriteLock lock(get_gidfd_lock());
     APROPRIAT_HASH_KEY(gid, TGG_GID_LEN);
-    return tgg_hash_add_keywithfdlst(g_gid_hash, _key, fd, idx);
+    return tgg_hash_add_keywithfdlst(g_gid_hash, _key, fdid, idx);
 }
 
 int tgg_get_fdsbygid(const char* gid, std::list<std::string>& lst_fd)
@@ -284,7 +284,7 @@ int tgg_get_fdsbygid(const char* gid, std::list<std::string>& lst_fd)
         return -1;
     }
     while (value->next) {
-        std::string item = std::to_string(value->next->fd) + 
+        std::string item = std::to_string(value->next->fdid) + 
                             std::string(":") + 
                             std::to_string(value->next->idx);
         lst_fd.push_back(item);
@@ -295,18 +295,18 @@ int tgg_get_fdsbygid(const char* gid, std::list<std::string>& lst_fd)
 
 int tgg_del_gid(const char* gid)
 {
-    RTE_LOG(INFO, USER1, "[%s][%d] iter del fd for gid[%s].\n", __func__, __LINE__, gid);
+    RTE_LOG(INFO, USER1, "[%s][%d] iter del fdid for gid[%s].\n", __func__, __LINE__, gid);
     APROPRIAT_HASH_KEY(gid, TGG_GID_LEN);
     WriteLock lock(get_gidfd_lock());
     return tgg_hash_del_key(g_gid_hash, _key, iter_del_fdlist);
 }
 
-int tgg_del_fd4gid(const char* gid, int fd, int idx)
+int tgg_del_fd4gid(const char* gid, int fdid, int idx)
 {
-    RTE_LOG(INFO, USER1, "[%s][%d] del fd[%d] idx[%d] for gid[%s].\n", __func__, __LINE__, fd, idx, gid);
+    RTE_LOG(INFO, USER1, "[%s][%d] del fdid[%d] idx[%d] for gid[%s].\n", __func__, __LINE__, fdid, idx, gid);
     APROPRIAT_HASH_KEY(gid, TGG_GID_LEN);
     WriteLock lock(get_gidfd_lock());
-    return tgg_hash_del_fdlst4key(g_gid_hash, _key, fd, idx);
+    return tgg_hash_del_fdlst4key(g_gid_hash, _key, fdid, idx);
 }
 
 int tgg_get_allonlinegids(std::list<std::string>& lst_gid)
@@ -316,28 +316,28 @@ int tgg_get_allonlinegids(std::list<std::string>& lst_gid)
 }
 
 /// 增删查  uid 用户id 
-int tgg_add_uid(const char* uid, int fd, int idx)
+int tgg_add_uid(const char* uid, int fdid, int idx)
 {
-    RTE_LOG(INFO, USER1, "[%s][%d] add uid[%s] fd[%d] idx[%d].\n", __func__, __LINE__, uid, fd, idx);
+    RTE_LOG(INFO, USER1, "[%s][%d] add uid[%s] fdid[%d] idx[%d].\n", __func__, __LINE__, uid, fdid, idx);
     APROPRIAT_HASH_KEY(uid, TGG_UID_LEN);
     WriteLock lock(get_uidfd_lock());
-    return tgg_hash_add_keywithfdlst(g_uid_hash, _key, fd, idx);
+    return tgg_hash_add_keywithfdlst(g_uid_hash, _key, fdid, idx);
 }
 
 int tgg_del_uid(const char* uid)
 {
-    RTE_LOG(INFO, USER1, "[%s][%d] iter del fd for uid[%s].\n", __func__, __LINE__, uid);
+    RTE_LOG(INFO, USER1, "[%s][%d] iter del fdid for uid[%s].\n", __func__, __LINE__, uid);
     APROPRIAT_HASH_KEY(uid, TGG_UID_LEN);
     WriteLock lock(get_uidfd_lock());
     return tgg_hash_del_key(g_uid_hash, _key, iter_del_fdlist);
 }
 
-int tgg_del_fd4uid(const char* uid, int fd, int idx)
+int tgg_del_fd4uid(const char* uid, int fdid, int idx)
 {
-    RTE_LOG(INFO, USER1, "[%s][%d] del fd[%d] idx[%d] for uid[%s].\n", __func__, __LINE__, fd, idx, uid);
+    RTE_LOG(INFO, USER1, "[%s][%d] del fdid[%d] idx[%d] for uid[%s].\n", __func__, __LINE__, fdid, idx, uid);
     APROPRIAT_HASH_KEY(uid, TGG_UID_LEN);
     WriteLock lock(get_uidfd_lock());
-    return tgg_hash_del_fdlst4key(g_uid_hash, _key, fd, idx);
+    return tgg_hash_del_fdlst4key(g_uid_hash, _key, fdid, idx);
 }
 
 int tgg_get_fdsbyuid(const char* uid, std::list<std::string>& lst_fd)
@@ -349,7 +349,7 @@ int tgg_get_fdsbyuid(const char* uid, std::list<std::string>& lst_fd)
         return -1;
     }
     while (value->next) {
-        std::string item = std::to_string(value->next->fd) + 
+        std::string item = std::to_string(value->next->fdid) + 
                             std::string(":") + 
                             std::to_string(value->next->idx);
         lst_fd.push_back(item);
@@ -359,12 +359,12 @@ int tgg_get_fdsbyuid(const char* uid, std::list<std::string>& lst_fd)
 }
 
 /// 增删查  cid
-int tgg_add_cid(const char* cid, int fd)
+int tgg_add_cid(const char* cid, int fdid)
 {
     APROPRIAT_HASH_KEY(cid, TGG_CID_LEN);
-    RTE_LOG(INFO, USER1, "[%s][%d] add cid[%s] fd[%d].\n", __func__, __LINE__, cid, fd);
+    RTE_LOG(INFO, USER1, "[%s][%d] add cid[%s] fdid[%d].\n", __func__, __LINE__, cid, fdid);
     WriteLock lock(get_cidfd_lock());
-    return tgg_hash_add_key_value(g_cid_hash, _key, fd);
+    return tgg_hash_add_key_value(g_cid_hash, _key, fdid);
 }
 
 static void free_ciddata(void* data)
@@ -377,7 +377,7 @@ static void free_ciddata(void* data)
 int tgg_del_cid(const char* cid)
 {
     APROPRIAT_HASH_KEY(cid, TGG_CID_LEN);
-    RTE_LOG(INFO, USER1, "[%s][%d] del fd for cid[%s].\n", __func__, __LINE__, cid);
+    RTE_LOG(INFO, USER1, "[%s][%d] del fdid for cid[%s].\n", __func__, __LINE__, cid);
     WriteLock lock(get_cidfd_lock());
     return tgg_hash_del_key(g_cid_hash, _key, free_ciddata);
 }

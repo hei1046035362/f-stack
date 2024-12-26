@@ -10,11 +10,14 @@
 #include <unistd.h>
 #include <iostream>
 
-extern struct rte_memzone* g_fd_zone;
 extern int g_fd_limit;
+extern struct rte_memzone* g_fd_zones[MAX_LCORE_COUNT];
 extern struct rte_ring* g_ring_read;
-extern struct rte_ring* g_ring_write;
-extern struct rte_ring* g_ring_bwrcv;
+extern struct rte_ring* g_ring_cliprcs[MAX_LCORE_COUNT];// 客户端上行
+extern struct rte_ring* g_ring_writes[MAX_LCORE_COUNT];
+extern struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT];
+extern struct rte_ring* g_ring_trans;
+
 extern struct rte_mempool* g_mempool_read;
 extern struct rte_mempool* g_mempool_write;
 extern struct rte_mempool* g_mempool_bwrcv;
@@ -80,10 +83,10 @@ std::string get_valid_cid(int idx)
 }
 
 
-void tgg_close_cli(int fd)
+void tgg_close_cli(int core_id, int fd)
 {
 	SpinLock lock(get_cli_lock());
-	tgg_cli_info* cli = &((tgg_cli_info*)g_fd_zone->addr)[fd];
+	tgg_cli_info* cli = &((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd];
 	memset(cli->cid, 0, sizeof(cli->cid));
 	memset(cli->uid, 0, sizeof(cli->uid));
 	memset(cli->reserved, 0, sizeof(cli->reserved));
@@ -92,10 +95,10 @@ void tgg_close_cli(int fd)
 	cli->status |= FD_STATUS_CLOSING | FD_STATUS_CLOSED;
 }
 
-int tgg_init_cli(int fd)
+int tgg_init_cli(int core_id, int fd, uint32_t ip, ushort port)
 {
 	SpinLock lock(get_cli_lock());
-	tgg_cli_info* cli = &((tgg_cli_info*)g_fd_zone->addr)[fd];
+	tgg_cli_info* cli = &((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd];
 	memset(cli->cid, 0, sizeof(cli->cid));
 	memset(cli->uid, 0, sizeof(cli->uid));
 	memset(cli->reserved, 0, sizeof(cli->reserved));
@@ -107,92 +110,116 @@ int tgg_init_cli(int fd)
 		return -1;
 	}
 	cli->authorized = 0;
+	cli->ip = ip;
+	cli->port = port;
 	cli->status = FD_STATUS_READYFORCONNECT;
 	return 0;
 }
 
-int tgg_get_cli_idx(int fd)
+int tgg_get_cli_idx(int core_id, int fd)
 {
 	SpinLock lock(get_cli_lock());
-	return ((tgg_cli_info*)g_fd_zone->addr)[fd].idx;	
+	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].idx;	
 }
 
-int tgg_get_cli_status(int fd)
+int tgg_get_cli_status(int core_id, int fd)
 {
 	SpinLock lock(get_cli_lock());
-	return ((tgg_cli_info*)g_fd_zone->addr)[fd].status;	
+	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].status;	
 }
 
-int tgg_get_cli_authorized(int fd)
+int tgg_get_cli_authorized(int core_id, int fd)
 {
 	SpinLock lock(get_cli_lock());
-	return ((tgg_cli_info*)g_fd_zone->addr)[fd].authorized;	
+	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].authorized;	
+}
+uint32_t tgg_get_cli_ip(int core_id, int fd)
+{
+	SpinLock lock(get_cli_lock());
+	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].ip;
+}
+ushort tgg_get_cli_port(int core_id, int fd)
+{
+	SpinLock lock(get_cli_lock());
+	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].port;	
 }
 
-std::string tgg_get_cli_uid(int fd)
+std::string tgg_get_cli_uid(int core_id, int fd)
 {
 	SpinLock lock(get_cli_lock());
-	return ((tgg_cli_info*)g_fd_zone->addr)[fd].uid;	
+	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].uid;	
 }
 
-std::string tgg_get_cli_cid(int fd)
+std::string tgg_get_cli_cid(int core_id, int fd)
 {
 	SpinLock lock(get_cli_lock());
-	return ((tgg_cli_info*)g_fd_zone->addr)[fd].cid;	
+	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].cid;	
 }
 
-std::string tgg_get_cli_reserved(int fd)
+std::string tgg_get_cli_reserved(int core_id, int fd)
 {
 	SpinLock lock(get_cli_lock());
-	return ((tgg_cli_info*)g_fd_zone->addr)[fd].reserved;	
+	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].reserved;	
 }
 
-int tgg_set_cli_idx(int fd, int idx)
+int tgg_set_cli_idx(int core_id, int fd, int idx)
 {
 	SpinLock lock(get_cli_lock());
-	((tgg_cli_info*)g_fd_zone->addr)[fd].idx = idx;
+	((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].idx = idx;
 	return 0;
 }
 
-int tgg_set_cli_status(int fd, int status)
+int tgg_set_cli_status(int core_id, int fd, int status)
 {
 	SpinLock lock(get_cli_lock());
-	((tgg_cli_info*)g_fd_zone->addr)[fd].status = status;	
+	((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].status = status;	
 	return 0;
 }
 
-int tgg_set_cli_authorized(int fd, int authorized)
+int tgg_set_cli_authorized(int core_id, int fd, int authorized)
 {
 	SpinLock lock(get_cli_lock());
-	((tgg_cli_info*)g_fd_zone->addr)[fd].authorized = authorized;
+	((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].authorized = authorized;
+	return 0;
+}
+int tgg_set_cli_ip(int core_id, int fd, uint32_t ip)
+{
+	SpinLock lock(get_cli_lock());
+	((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].ip = ip;
+	return 0;
+}
+int tgg_set_cli_port(int core_id, int fd, ushort port)
+{
+	SpinLock lock(get_cli_lock());
+	((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].port = port;
 	return 0;
 }
 
-int tgg_set_cli_uid(int fd, const char* uid)
+int tgg_set_cli_uid(int core_id, int fd, const char* uid)
 {
 	SpinLock lock(get_cli_lock());
-	memset(((tgg_cli_info*)g_fd_zone->addr)[fd].uid, 0, sizeof(tgg_cli_info::uid));
-	strncpy(((tgg_cli_info*)g_fd_zone->addr)[fd].uid, uid, strlen(uid));
+	memset(((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].uid, 0, sizeof(tgg_cli_info::uid));
+	strncpy(((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].uid, uid, strlen(uid));
 	return 0;
 }
 
-int tgg_set_cli_cid(int fd, const char* cid)
+int tgg_set_cli_cid(int core_id, int fd, const char* cid)
 {
 	SpinLock lock(get_cli_lock());
-	memset(((tgg_cli_info*)g_fd_zone->addr)[fd].cid, 0, sizeof(tgg_cli_info::cid));
-	strncpy(((tgg_cli_info*)g_fd_zone->addr)[fd].cid, cid, strlen(cid));
+	memset(((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].cid, 0, sizeof(tgg_cli_info::cid));
+	strncpy(((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].cid, cid, strlen(cid));
 	return 0;
 }
 
-int tgg_set_cli_reserved(int fd, const char* reserved)
+int tgg_set_cli_reserved(int core_id, int fd, const char* reserved)
 {
 	SpinLock lock(get_cli_lock());
-	memset(((tgg_cli_info*)g_fd_zone->addr)[fd].reserved, 0, sizeof(tgg_cli_info::reserved));
-	strncpy(((tgg_cli_info*)g_fd_zone->addr)[fd].reserved, reserved, strlen(reserved));
+	memset(((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].reserved, 0, sizeof(tgg_cli_info::reserved));
+	strncpy(((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].reserved, reserved, strlen(reserved));
 	return 0;
 }
 
-int cache_ws_buffer(int fd, void* data, int len, int pos, int iscomplete)
+int cache_ws_buffer(int core_id, int fd, void* data, int len, int pos, int iscomplete)
 {
 	char* buffer = (char*)dpdk_rte_malloc(len);
 	if(!buffer) {
@@ -200,7 +227,7 @@ int cache_ws_buffer(int fd, void* data, int len, int pos, int iscomplete)
 	}
 	memcpy(buffer, data, len);
 	SpinLock lock(get_cli_lock());
-	tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zone->addr)[fd])->ws_data;
+	tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data;
     if (!wsdata) {// 第一次缓存
     	wsdata = (tgg_ws_data*)dpdk_rte_malloc(sizeof(tgg_ws_data));
     	if (!wsdata) {
@@ -219,7 +246,7 @@ int cache_ws_buffer(int fd, void* data, int len, int pos, int iscomplete)
     	wsdata->data_list->next = NULL;
     	wsdata->total_len = len;
 	    wsdata->head_complete = iscomplete ? 1 : 0;
-	    (&((tgg_cli_info*)g_fd_zone->addr)[fd])->ws_data = wsdata;
+	    (&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data = wsdata;
 	    return 0;
 
     }
@@ -252,11 +279,11 @@ int cache_ws_buffer(int fd, void* data, int len, int pos, int iscomplete)
     return 0;
 }
     
-std::string get_one_frame_buffer(int fd, void* data, int len)
+std::string get_one_frame_buffer(int core_id, int fd, void* data, int len)
 {
 	SpinLock lock(get_cli_lock());
 	std::string buffer;
-	tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zone->addr)[fd])->ws_data;
+	tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data;
     if (!wsdata || wsdata->data_list) {// 没有数据
     	buffer = std::string((char*)data, len);
     	return buffer;
@@ -276,11 +303,11 @@ std::string get_one_frame_buffer(int fd, void* data, int len)
     return buffer;
 }
 
-std::string get_whole_buffer(int fd)
+std::string get_whole_buffer(int core_id, int fd)
 {
 	SpinLock lock(get_cli_lock());
 	std::string buffer;
-	tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zone->addr)[fd])->ws_data;
+	tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data;
     if (!wsdata || !wsdata->data_list) {// 没有数据
         // buffer = std::string((char*)data + pos, len);
     	return buffer;
@@ -293,10 +320,10 @@ std::string get_whole_buffer(int fd)
     return buffer;
 }
 
-void clean_ws_buffer(int fd)
+void clean_ws_buffer(int core_id, int fd)
 {
 	SpinLock lock(get_cli_lock());
-    tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zone->addr)[fd])->ws_data;
+    tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data;
     if (!wsdata) {// 没有数据
         return;
     }
@@ -312,7 +339,7 @@ void clean_ws_buffer(int fd)
     }
     memset(wsdata, 0, sizeof(tgg_ws_data));
     rte_free(wsdata);
-    (&((tgg_cli_info*)g_fd_zone->addr)[fd])->ws_data = NULL;
+    (&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data = NULL;
 }
 
 int tgg_enqueue_read(tgg_read_data* data)
@@ -328,31 +355,58 @@ int tgg_dequeue_read(tgg_read_data** data)
 	return rte_ring_dequeue(g_ring_read, (void**)data);
 }
 
-int tgg_enqueue_write(tgg_write_data* data)
+int tgg_enqueue_cliprc(int core_id, tgg_read_data* data)
 {
-	return rte_ring_enqueue(g_ring_write, data);
+	return rte_ring_enqueue(g_ring_cliprcs[core_id], data);
 }
 
-int tgg_dequeue_write(tgg_write_data** data)
+int tgg_dequeue_cliprc(int core_id, tgg_read_data** data)
 {
-	if (rte_ring_empty(g_ring_write)) {
+	if (rte_ring_empty(g_ring_cliprcs[core_id])) {
 		return -ENOENT;
 	}
-	return rte_ring_dequeue(g_ring_write, (void**)data);
+	return rte_ring_dequeue(g_ring_cliprcs[core_id], (void**)data);
 }
 
-int tgg_enqueue_bwrcv(tgg_bw_data* data)
+int tgg_enqueue_write(int core_id, tgg_write_data* data)
 {
-	return rte_ring_enqueue(g_ring_bwrcv, data);
+	return rte_ring_enqueue(g_ring_writes[core_id], data);
 }
 
-int tgg_dequeue_bwrcv(tgg_bw_data** data)
+int tgg_dequeue_write(int core_id, tgg_write_data** data)
 {
-	if (rte_ring_empty(g_ring_bwrcv)) {
+	if (rte_ring_empty(g_ring_writes[core_id])) {
 		return -ENOENT;
 	}
-	return rte_ring_dequeue(g_ring_bwrcv, (void**)data);
+	return rte_ring_dequeue(g_ring_writes[core_id], (void**)data);
 }
+
+int tgg_enqueue_trans(tgg_bw_data* data)
+{
+	return rte_ring_enqueue(g_ring_trans, data);
+}
+
+int tgg_dequeue_trans(tgg_bw_data** data)
+{
+	if (rte_ring_empty(g_ring_trans)) {
+		return -ENOENT;
+	}
+	return rte_ring_dequeue(g_ring_trans, (void**)data);
+}
+
+int tgg_enqueue_bwrcv(int core_id, tgg_bw_data* data)
+{
+	return rte_ring_enqueue(g_ring_bwrcvs[core_id], data);
+}
+
+int tgg_dequeue_bwrcv(int core_id, tgg_bw_data** data)
+{
+	if (rte_ring_empty(g_ring_bwrcvs[core_id])) {
+		return -ENOENT;
+	}
+	return rte_ring_dequeue(g_ring_bwrcvs[core_id], (void**)data);
+}
+
 
 void clean_bw_data(tgg_bw_data* bdata)
 {
@@ -404,7 +458,7 @@ tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& m
             // TODO 如果只有一个失败了，其他的是不是可以继续发送，而不是全部都不发了
 			goto add_data_failed;
 		}
-		pcur->fd = it->first;
+		pcur->fdid = it->first;
 		pcur->idx = it->second;
 		if (!tail) {
 			tail = pcur;
@@ -443,7 +497,7 @@ add_data_failed:
 	return NULL;
 }
 
-int enqueue_data_batch_fd(const std::string& data, std::map<int, int>& mapfdidx, int fdopt)
+int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, int>& mapfdidx, int fdopt)
 {
 	if(mapfdidx.size() <= 0) {
 		// fd列表为空
@@ -458,7 +512,7 @@ int enqueue_data_batch_fd(const std::string& data, std::map<int, int>& mapfdidx,
 		return -1;
 	}
 	int idx = 10;
-	while (tgg_enqueue_write(wdata) < 0 && idx-- > 0 ) {
+	while (tgg_enqueue_write(core_id, wdata) < 0 && idx-- > 0 ) {
 		usleep(10);
 	}
 	if (idx <= 0) {
@@ -470,11 +524,11 @@ int enqueue_data_batch_fd(const std::string& data, std::map<int, int>& mapfdidx,
 
 }
 
-int enqueue_data_single_fd(const std::string& data, int fd, int idx, int fdopt)
+int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx, int fdopt)
 {
 	std::map<int, int> mapfdidx;
 	mapfdidx[fd] = idx;
-	return enqueue_data_batch_fd(data, mapfdidx, fdopt);
+	return enqueue_data_batch_fd(core_id, data, mapfdidx, fdopt);
 }
 
 #include <sys/prctl.h>

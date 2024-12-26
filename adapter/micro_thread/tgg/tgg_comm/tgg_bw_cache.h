@@ -27,24 +27,24 @@ void iter_del_fdlist(void* iddata);
 
 void iter_del_idlist(void* iddata);
 
-/// 增删查  gid hash<gid, list<fd> >
-int tgg_add_gid(const char* gid, int fd, int idx);
+/// 增删查  gid hash<gid, list<fdid> >
+int tgg_add_gid(const char* gid, int fdid, int idx);
 int tgg_del_gid(const char* gid);
-int tgg_del_fd4gid(const char* gid, int fd, int idx);
-// 返回格式  list<string(fd:uid)>
+int tgg_del_fd4gid(const char* gid, int fdid, int idx);
+// 返回格式  list<string(fdid:uid)>
 int tgg_get_fdsbygid(const char* gid, std::list<std::string>& lst_fd);
 // 获取所有在线的分组
 int tgg_get_allonlinegids(std::list<std::string>& lst_gid);
 
-/// 增删查  uid  hash<uid, list<fd,idx> >
-int tgg_add_uid(const char* uid, int fd, int idx);
+/// 增删查  uid  hash<uid, list<fdid,idx> >
+int tgg_add_uid(const char* uid, int fdid, int idx);
 int tgg_del_uid(const char* uid);
-int tgg_del_fd4uid(const char* uid, int fd, int idx);
-// 返回格式  list<string(fd:uid)>
+int tgg_del_fd4uid(const char* uid, int fdid, int idx);
+// 返回格式  list<string(fdid:uid)>
 int tgg_get_fdsbyuid(const char* uid, std::list<std::string>& lst_fd);
 
-/// 增删查  cid hash<cid, fd>
-int tgg_add_cid(const char* cid, int fd);
+/// 增删查  cid hash<cid, fdid>
+int tgg_add_cid(const char* cid, int fdid);
 int tgg_del_cid(const char* cid);
 int tgg_get_fdbycid(const char* cid);
 int tgg_get_allonlinecids(std::list<std::string>& lst_cids);
