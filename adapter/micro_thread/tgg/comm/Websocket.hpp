@@ -13,6 +13,7 @@ public:
     ~Websocket() {}
     void InitWebsocket(int fd, int handshake) {this->fd = fd; this->handshake = handshake;}
 protected:
+    int core_id;
     int fd;
     int handshake;
 

@@ -193,7 +193,7 @@ Websocket::_GetWsFrame(unsigned char *in_buffer, size_t buf_len,
 
 void Websocket::CleanBuffer()
 {
-    clean_ws_buffer(this->fd);
+    clean_ws_buffer(this->core_id, this->fd);
 }
 
 
@@ -211,7 +211,7 @@ int Websocket::ReadData(void* data, int len)
         int type;
         unsigned char *payload;
         size_t msg_len, in_len, header_sz;
-        std::string completedata = get_one_frame_buffer(this->fd, data, len);
+        std::string completedata = get_one_frame_buffer(this->core_id, this->fd, data, len);
         unsigned char* input = (unsigned char*)(completedata.c_str());
         in_len = completedata.length();
 
@@ -220,7 +220,7 @@ int Websocket::ReadData(void* data, int len)
                 /* incomplete data received, wait for next chunk */
                 // 数据不完整，先缓存起来，等待下一个包，一个websocket包分在两个分片中  buflen<packetlen
                 // 也就是还没有缓存一个完整的websocket包，不用解析，等待下一个包进来拼接在一起
-            if (cache_ws_buffer(this->fd, input, len, 0, 0)) {
+            if (cache_ws_buffer(this->core_id, this->fd, input, len, 0, 0)) {
                 RTE_LOG(ERR, USER1, "[%s][%d] Cache buffer failed.", __func__, __LINE__);
                 // 缓存失败的话，一个包缓存补上，前面的包就不完整，全部丢弃
                 return -1;
@@ -229,11 +229,11 @@ int Websocket::ReadData(void* data, int len)
         }
         header_sz = payload - input;
 
-        if (cache_ws_buffer(this->fd, input, len, header_sz) < 0) {
+        if (cache_ws_buffer(this->core_id, this->fd, input, len, header_sz) < 0) {
             RTE_LOG(ERR, USER1, "[%s][%d] Cache buffer failed.", __func__, __LINE__);
             return -1;
         }
-        std::string buffer = get_whole_buffer(this->fd);
+        std::string buffer = get_whole_buffer(this->core_id, this->fd);
         switch (type) {
             case TEXT_FRAME:
             case BINARY_FRAME:

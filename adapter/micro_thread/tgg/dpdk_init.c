@@ -27,35 +27,59 @@ uint32_t g_gate_ip = 0;
 // TODO 多个lcore的情况下，必须要保证一个连接必须在一个lcore中读写(保证读写不异常)，也必须在一个process中处理(保证处理顺序)
 //		要分多个memzone存放，不同的lcore 不同的连接可能是相同的fd
 // 		基于此，在ring中存储的结构需要增加标识入读队列的进程，以方便process在入写队列的时候做区分
-uint32_t g_fd_limit = 1000*1000; // 单台服务器100W 个
-static uint32_t s_zone_size = g_fd_limit*sizeof(tgg_cli_info);  // 存储最多100w个fd
-struct rte_memzone* g_fd_zone = NULL;
-const char* s_fd_zone_name = "tgg_fd_zone";
+// 解决方案，每个数据包增加唯一链接标识 fdid = (fd << 8) & (lcore_id & 0xf)
+//     原因 lcore_id最大为cpu核数，左移8位即一个字节做多能标识256核，足够了
+int g_core_id;// 记录当前core_id
+
+/// 连接管理的fd数组
+uint32_t g_fd_limit = 10*1000; // 单个进程10W 个fd
+static uint32_t s_zone_size = g_fd_limit*sizeof(tgg_cli_info);  // 单个进程存储最多10w个fd
+struct rte_memzone* g_fd_zones[MAX_LCORE_COUNT] = {NULL};
+const char* fd_zone_name_prev = "tgg_fd_zone";
+
+/// 进程锁
 struct rte_memzone* g_lock_zone = NULL;
 const char* s_lock_zone_name = "tgg_lock_zone";
 
+/// 五组队列
+// 队列名
 const char* s_read_ring_name = "tgg_read_ring";
-const char* s_bwrcv_ring_name = "tgg_bwrcv_ring";
-const char* s_write_ring_name = "tgg_write_ring";
+const char* s_trans_ring_name = "tgg_trans_ring";
+const char* write_ring_name_prev = "tgg_write_ring";
+const char* cliprc_ring_name_prev = "tgg_cliprc_ring";
+const char* bwrcv_ring_name_prev = "tgg_bwrcv_ring";
+// 队列长度
 static uint32_t s_ring_size = 1024*8;  // 缓冲队列的长度，得是2的幂
-struct rte_ring* g_ring_read = NULL;
-struct rte_ring* g_ring_write = NULL;
-struct rte_ring* g_ring_bwrcv = NULL;
+// 队列对象
+struct rte_ring* g_ring_read = NULL;// lcore cli上行
+struct rte_ring* g_ring_cliprcs[MAX_LCORE_COUNT] = {NULL};// 客户端上行
+struct rte_ring* g_ring_writes[MAX_LCORE_COUNT] = {NULL};// 客户端下行
+struct rte_ring* g_ring_trans = NULL;// 上行透传
+struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT] = {NULL};// BW上行
 
-const char* s_pool_read_name = "tgg_pool_read_name";
-const char* s_pool_write_name = "tgg_pool_write_name";
-const char* s_pool_bwrcv_name = "tgg_pool_bwrcv_name";
+
+/// 三个内存池
+// 内存池名称
+const char* s_pool_read_name = "tgg_pool_read_name";// 客户端上行 和 上行prc共用
+const char* s_pool_write_name = "tgg_pool_write_name";// 客户端下行
+const char* s_pool_bwrcv_name = "tgg_pool_bwrcv_name";// 客户端上行透传 和 bw上行共用
+// 内存池大小
 static uint32_t s_mempool_size = 10000;
+// 每个内存池单个内存块儿的大小
 static uint32_t s_mempool_read_cache = sizeof(struct st_read_data);// 单个缓存的大小待定
 static uint32_t s_mempool_write_cache = sizeof(struct st_write_data);// 单个缓存的大小待定
 static uint32_t s_mempool_bwrcv_cache = sizeof(tgg_bw_data);// 单个缓存的大小待定
+// 内存池对下你给
 struct rte_mempool* g_mempool_read = NULL;
 struct rte_mempool* g_mempool_write = NULL;
 struct rte_mempool* g_mempool_bwrcv = NULL;
 
+
+/// 调用rte_malloc使用的名称
 const char* g_rte_malloc_type = "tgg_dpdk_malloc";
 
-// 存储uid -> fd 的hash表
+/// 五个hash表
+// 存储uid -> fd 的hash表 
 // 在process入写队列时，方便通过uid直接找到fd
 const char* s_gid_hash_name = "tgg_gid_hash";
 const char* s_uid_hash_name = "tgg_uid_hash";
@@ -68,8 +92,7 @@ struct rte_hash *g_cid_hash = NULL;
 struct rte_hash *g_uidgid_hash = NULL;
 struct rte_hash *g_idx_hash = NULL;  // 存放已使用的client idx
 
-
-rte_atomic32_t *shared_id_atomic_ptr = NULL;
+// 创建全局唯一cid时使用的缓冲区，防止频繁申请和释放内存
 char g_cid_str[21] = {0};  // 8位地址+4位端口+8位idx+1位结束符'\0'
 
 static uint32_t convert_ip2int(const char* ip)
@@ -374,14 +397,36 @@ void tgg_master_init()
 	// 100W个FD  32M的空间
 	g_lock_zone = make_memzone(s_lock_zone_name, sizeof(tgg_lock));
 	init_cid();
-	g_fd_zone = make_memzone(s_fd_zone_name, s_zone_size);
-	for (uint32_t i = 0; i < g_fd_limit; i++) {
-		// 所有fd的初始状态设置为
-		tgg_set_cli_idx(i, TGG_FD_CLOSED);
+	for (uint32_t i = 0; i < rte_lcore_count(); i++) {
+		char zone_name[256] = {};
+		sprintf(zone_name, "%s_%d", fd_zone_name_prev, i);
+		g_fd_zones[i] = make_memzone(zone_name, s_zone_size);
+		for (uint32_t j = 0; j < g_fd_limit; j++) {
+			// 所有fd的初始状态设置为
+			tgg_set_cli_idx(i, j, TGG_FD_CLOSED);
+		}
+
+		// cli 处理队列
+		char cliprc_ring_name[256] = {};
+		sprintf(cliprc_ring_name, "%s_%d", cliprc_ring_name_prev, i);
+		g_ring_cliprcs[i] = make_ring(cliprc_ring_name, s_ring_size);
+
+		// cli 发送队列
+		char write_ring_name[256] = {};
+		sprintf(write_ring_name, "%s_%d", write_ring_name_prev, i);
+		g_ring_writes[i] = make_ring(write_ring_name, s_ring_size);
+
+		// bw 接收
+		char bwrcv_ring_name[256] = {};
+		sprintf(bwrcv_ring_name, "%s_%d", bwrcv_ring_name_prev, i);
+		g_ring_bwrcvs[i] = make_ring(bwrcv_ring_name, s_ring_size);
+
 	}
+	// cli 接收队列
 	g_ring_read = make_ring(s_read_ring_name, s_ring_size);
-	g_ring_write = make_ring(s_write_ring_name, s_ring_size);
-	g_ring_bwrcv = make_ring(s_bwrcv_ring_name, s_ring_size);
+	// cli上行透传
+	g_ring_trans = make_ring(s_trans_ring_name, s_ring_size);
+
 	g_mempool_read = make_mempool(s_pool_read_name, s_mempool_size, s_mempool_read_cache);
 	g_mempool_write = make_mempool(s_pool_write_name, s_mempool_size, s_mempool_write_cache);
 	g_mempool_bwrcv = make_mempool(s_pool_bwrcv_name, s_mempool_size, s_mempool_bwrcv_cache);
@@ -398,18 +443,25 @@ void tgg_master_init()
 
 void tgg_master_uninit()
 {
-	rte_memzone_free(g_fd_zone);
-	g_fd_zone = NULL;
+	for (uint32_t i = 0; i < rte_lcore_count(); i++) {
+		rte_memzone_free(g_fd_zones[i]);
+		g_fd_zones[i] = NULL;
+
+		rte_ring_free(g_ring_writes[i]);
+		g_ring_writes[i] = NULL;
+		rte_ring_free(g_ring_cliprcs[i]);
+		g_ring_writes[i] = NULL;
+		rte_ring_free(g_ring_bwrcvs[i]);
+		g_ring_writes[i] = NULL;
+	}
 	rte_memzone_free(g_lock_zone);
 	g_lock_zone = NULL;
 	rte_mempool_free(g_mempool_read);
 	g_mempool_read = NULL;
 	rte_ring_free(g_ring_read);
 	g_ring_read = NULL;
-	rte_ring_free(g_ring_write);
-	g_ring_write = NULL;
-	rte_ring_free(g_ring_bwrcv);
-	g_ring_bwrcv = NULL;
+	rte_ring_free(g_ring_trans);
+	g_ring_trans = NULL;
 	rte_hash_free(g_uid_hash);
 	g_uid_hash = NULL;
 	rte_hash_free(g_gid_hash);
@@ -422,15 +474,28 @@ void tgg_master_uninit()
 	g_idx_hash = NULL;
 }
 
+void init_multi_for_secondary()
+{
+	for (uint32_t i = 0; i < rte_lcore_count(); i++) {
+		// 初始化cli数组的zones
+		char zone_name[256] = {};
+		sprintf(zone_name, "%s_%d", fd_zone_name_prev, i);
+		g_fd_zones[i] = find_memzone(zone_name);
+		// 初始化发送队列ring
+		char ring_name[256] = {};
+		sprintf(ring_name, "%s_%d", write_ring_name_prev, i);
+		g_ring_writes[i] = find_ring(ring_name);
+	}
+}
+
 void tgg_secondary_init()
 {
 	RTE_LOG(INFO, USER1, "Init dpdk secodary for tgg...\n");
 	// 100W个FD  32M的空间
-	g_fd_zone = find_memzone(s_fd_zone_name);
+	init_multi_for_secondary();
 	g_lock_zone = find_memzone(s_lock_zone_name);
 	g_ring_read = find_ring(s_read_ring_name);
-	g_ring_write = find_ring(s_write_ring_name);
-	g_ring_bwrcv = find_ring(s_bwrcv_ring_name);
+	g_ring_trans = find_ring(s_trans_ring_name);
 	g_mempool_read = find_mempool(s_pool_read_name);
 	g_mempool_write = find_mempool(s_pool_write_name);
 	g_mempool_bwrcv = find_mempool(s_pool_bwrcv_name);
@@ -441,15 +506,46 @@ void tgg_secondary_init()
 	g_idx_hash = get_hash_byname(s_idx_hash_name);
 	init_cid();
 }
+
 void tgg_secondary_uninit()
 {
-	// rte_memzone_free(g_fd_zone);
 	// rte_mempool_free(g_mempool_read);
 	// rte_ring_free(g_ring_read);
-	// rte_ring_free(g_ring_write);
 	NS_MICRO_THREAD::mt_uninit_frame();
 	rte_eal_cleanup();
 }
+
+void tgg_cliprc_init()
+{
+	for (uint32_t i = 0; i < rte_lcore_count(); i++) {
+		char ring_name[256] = {};
+		sprintf(ring_name, "%s_%d", cliprc_ring_name_prev, i);
+		g_ring_cliprcs[i] = find_ring(ring_name);
+	}
+	tgg_secondary_init();
+}
+
+void tgg_cliprc_uninit()
+{
+	rte_eal_cleanup();
+}
+
+// bw 消息处理进程处理dpdk操作相关数据结构初始化
+void tgg_bwprc_init(int bwcount)
+{
+	for (int i = 0; i < bwcount; i++) {
+		char ring_name[256] = {};
+		sprintf(ring_name, "%s_%d", bwrcv_ring_name_prev, i);
+		g_ring_bwrcvs[i] = find_ring(ring_name);
+	}
+	//tgg_secondary_init();
+}
+
+void tgg_bwprc_uninit(int bwcount)
+{
+	rte_eal_cleanup();
+}
+
 
 void prc_exit(int exit_code, const char* fmt, ...)
 {
