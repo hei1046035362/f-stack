@@ -17,10 +17,12 @@
 #include "tgg_comm/tgg_struct.h"
 #include "tgg_comm/tgg_lock.h"
 #include "tgg_comm/tgg_common.h"
+#include "tgg_comm/tgg_conf.h"
 
 const char* g_gateway_ip_str = "192.168.40.129";
 ushort g_gateway_port = 80;
 uint32_t g_gate_ip = 0;
+int g_bwwkkey_len = 64; // ip最多为8个F，woker_key待定
 
 // static const char* s_init_flag = "/run/lock/tgg_init";
 
@@ -32,10 +34,16 @@ uint32_t g_gate_ip = 0;
 int g_core_id;// 记录当前core_id
 
 /// 连接管理的fd数组
-uint32_t g_fd_limit = 10*1000; // 单个进程10W 个fd
+uint32_t g_fd_limit = 10*10000; // 单个进程10W 个fd
 static uint32_t s_zone_size = g_fd_limit*sizeof(tgg_cli_info);  // 单个进程存储最多10w个fd
 struct rte_memzone* g_fd_zones[MAX_LCORE_COUNT] = {NULL};
 const char* fd_zone_name_prev = "tgg_fd_zone";
+
+/// bw连接状态记录的fd数组
+uint32_t g_bwfdx_limit = 10*10000; // 单个进程1W 个fd
+static uint32_t s_bwzone_size = g_bwfdx_limit*sizeof(int);  // 单个进程存储最多10w个fd
+struct rte_memzone* g_bwfdx_zones[MAX_LCORE_COUNT] = {NULL};
+const char* bwfdx_zone_name_prev = "tgg_bwfd_zone";
 
 /// 进程锁
 struct rte_memzone* g_lock_zone = NULL;
@@ -48,14 +56,19 @@ const char* s_trans_ring_name = "tgg_trans_ring";
 const char* write_ring_name_prev = "tgg_write_ring";
 const char* cliprc_ring_name_prev = "tgg_cliprc_ring";
 const char* bwrcv_ring_name_prev = "tgg_bwrcv_ring";
+const char* bwsnd_ring_name_prev = "tgg_bwsnd_ring";
 // 队列长度
 static uint32_t s_ring_size = 1024*8;  // 缓冲队列的长度，得是2的幂
 // 队列对象
-struct rte_ring* g_ring_read = NULL;// lcore cli上行
+struct rte_ring* g_ring_read = NULL;// lcore cli上行  暂时不用了
+struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT] = {NULL};// BW上行  暂时不用
+
+// 当前实际使用的队列
 struct rte_ring* g_ring_cliprcs[MAX_LCORE_COUNT] = {NULL};// 客户端上行
 struct rte_ring* g_ring_writes[MAX_LCORE_COUNT] = {NULL};// 客户端下行
 struct rte_ring* g_ring_trans = NULL;// 上行透传
-struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT] = {NULL};// BW上行
+struct rte_ring* g_ring_bwsnds[MAX_LCORE_COUNT] = {NULL};// BW下行
+
 
 
 /// 三个内存池
@@ -86,11 +99,21 @@ const char* s_uid_hash_name = "tgg_uid_hash";
 const char* s_cid_hash_name = "tgg_cid_hash";
 const char* s_uidgid_hash_name = "tgg_uidgid_hash";
 const char* s_idx_hash_name = "tgg_idx_hash";
+const char* s_bwfdx_hash_name = "tgg_bwfdx_hash";
+const char* s_bwwkkey_hash_name = "tgg_bwwkkey_hash";
+
+
 struct rte_hash *g_gid_hash = NULL;
 struct rte_hash *g_uid_hash = NULL;
 struct rte_hash *g_cid_hash = NULL;
 struct rte_hash *g_uidgid_hash = NULL;
-struct rte_hash *g_idx_hash = NULL;  // 存放已使用的client idx
+
+struct rte_hash *g_idx_hash = NULL;  // 存放已使用的client idx，idx会在指定的数字内循环，直到找到一个可用的
+									//  客户端的连接需要在不同的进程中保留状态码，而fd是可重用的
+									/// 所以需要一个idx来代替fd作为唯一键，在判断状态的时候确定连接的唯一性
+// bwserver持有
+struct rte_hash *g_bwfdx_hash = NULL;  // 用于服务端连接的负载均衡，存放正在使用的bwfd, 确定客户端的数据要发送到哪个服务端
+struct rte_hash *g_bwwkkey_hash = NULL;  // 存放正在使用的bw的worker key
 
 // 创建全局唯一cid时使用的缓冲区，防止频繁申请和释放内存
 char g_cid_str[21] = {0};  // 8位地址+4位端口+8位idx+1位结束符'\0'
@@ -422,6 +445,20 @@ void tgg_master_init()
 		g_ring_bwrcvs[i] = make_ring(bwrcv_ring_name, s_ring_size);
 
 	}
+	for (uint32_t i = 0; i < TggConfigure::instance->get_bwsvr_count() ; i++) {
+		// bwfd zone
+		char zone_name[256] = {};
+		sprintf(zone_name, "%s_%d", bwfdx_zone_name_prev, i);
+		g_bwfdx_zones[i] = make_memzone(zone_name, s_bwzone_size);
+		for (uint32_t j = 0; j < g_bwfdx_limit; j++) {
+			// 所有fd的初始状态设置为0
+			tgg_set_bwfdx(i, j, 0);
+		}
+		// bw 发送
+		char bwsnd_ring_name[256] = {};
+		sprintf(bwsnd_ring_name, "%s_%d", bwsnd_ring_name_prev, i);
+		g_ring_bwsnds[i] = make_ring(bwsnd_ring_name, s_ring_size);
+	}
 	// cli 接收队列
 	g_ring_read = make_ring(s_read_ring_name, s_ring_size);
 	// cli上行透传
@@ -435,6 +472,8 @@ void tgg_master_init()
 	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, TGG_CID_LEN);
 	g_uidgid_hash = init_hash(s_uidgid_hash_name, g_fd_limit, TGG_UID_LEN);
 	g_idx_hash = init_hash(s_idx_hash_name, g_fd_limit, sizeof(int));
+	g_bwfdx_hash = init_hash(s_bwfdx_hash_name, g_fd_limit, sizeof(int));
+	g_bwwkkey_hash = init_hash(s_bwwkkey_hash_name, g_fd_limit, g_bwwkkey_len);
 	init_redis_flag();
 	init_uidgid_from_redis();
 	init_flag_for_master();
@@ -454,6 +493,13 @@ void tgg_master_uninit()
 		rte_ring_free(g_ring_bwrcvs[i]);
 		g_ring_writes[i] = NULL;
 	}
+	for (uint32_t i = 0; i < TggConfigure::instance->get_bwsvr_count(); i++) {
+		rte_memzone_free(g_bwfdx_zones[i]);
+		g_bwfdx_zones[i] = NULL;
+		// bw 发送
+		rte_ring_free(g_ring_bwsnds[i]);
+		g_ring_bwsnds[i] = NULL;
+	}
 	rte_memzone_free(g_lock_zone);
 	g_lock_zone = NULL;
 	rte_mempool_free(g_mempool_read);
@@ -472,6 +518,10 @@ void tgg_master_uninit()
 	g_uidgid_hash = NULL;
 	rte_hash_free(g_idx_hash);
 	g_idx_hash = NULL;
+	rte_hash_free(g_bwfdx_hash);
+	g_bwfdx_hash = NULL;
+	rte_hash_free(g_bwwkkey_hash);
+	g_bwwkkey_hash = NULL;
 }
 
 void init_multi_for_secondary()
@@ -485,6 +535,16 @@ void init_multi_for_secondary()
 		char ring_name[256] = {};
 		sprintf(ring_name, "%s_%d", write_ring_name_prev, i);
 		g_ring_writes[i] = find_ring(ring_name);
+	}
+	for (uint32_t i = 0; i < TggConfigure::instance->get_bwsvr_count(); i++) {
+		// 初始化bwfdx数组的zones
+		char zone_name[256] = {};
+		sprintf(zone_name, "%s_%d", bwfdx_zone_name_prev, i);
+		g_bwfdx_zones[i] = find_memzone(zone_name);
+		// bw 发送
+		char bwsnd_ring_name[256] = {};
+		sprintf(bwsnd_ring_name, "%s_%d", bwsnd_ring_name_prev, i);
+		g_ring_bwsnds[i] = find_memzone(bwsnd_ring_name, s_ring_size);
 	}
 }
 
@@ -504,6 +564,8 @@ void tgg_secondary_init()
 	g_cid_hash = get_hash_byname(s_cid_hash_name);
 	g_uidgid_hash = get_hash_byname(s_uidgid_hash_name);
 	g_idx_hash = get_hash_byname(s_idx_hash_name);
+	g_bwfdx_hash = get_hash_byname(s_bwfdx_hash_name);
+	g_bwwkkey_hash = get_hash_byname(s_bwwkkey_hash_name);
 	init_cid();
 }
 

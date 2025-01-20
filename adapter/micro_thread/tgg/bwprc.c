@@ -8,43 +8,58 @@
 #include "tgg_comm/tgg_common.h"
 #include "tgg_comm/tgg_struct.h"
 #include "dpdk_init.h"
-#include "tgg_comm/WsConsumer.h"
+#include "tgg_comm/tgg_transport.h"
 #include "comm/Encrypt.hpp"
-#include "bwserver.h"
+#include "tgg_comm/tgg_bwserver.h"
 #include "tgg_comm/tgg_bw_cache.h"
 #include "tgg_comm/tgg_bwcomm.h"
-
+#include "tgg_comm/tgg_conf.h"
 #include <vector>
-
+#include "tgg_comm/tgg_cliprc.h"
+// 绝对路径
+const char* f_stack_ini = "/data/code/f-stack/config.ini"
 
 int g_run = 1;
-static const char* s_dump_file = "/var/corefiles/tgg_gw_process_core";
+static const char* s_dump_file = "/var/corefiles/tgg_gw_bwprc_core";
 static pid_data *s_pids = NULL;
 static int s_pid_count = 0;
 static unsigned long long s_heart_beat_interval = 5*1000; // 心跳间隔5s
+int g_prc_id = -1;
 
 extern const char* g_rte_malloc_type;
 extern struct rte_mempool* g_mempool_read;
 extern struct rte_mempool* g_mempool_write;
 extern struct rte_mempool* g_mempool_bwrcv;
 
-std::vector<std::string> g_redis_clusternodes = {
-    "54.241.112.155:7001",
-    "54.241.112.155:7002",
-};
-const char* g_redis_pwd = "bZSCEI3VyV";
-
-
 void signal_handler(int signum)
 {
 	if(signum == SIGINT || signum == SIGTERM) {
 		if(g_run) {
 			g_run = 0;
-			uninit_bwserver();
-			rte_eal_cleanup();
-        	prc_exit(0, "catched signal:%d\n", signum);
+			// uninit_bwserver();
+			// rte_eal_cleanup();
+        	// prc_exit(0, "catched signal:%d\n", signum);
 		}
 	}
+	if (signum == SIGCHLD) {
+        int status;
+        pid_t terminated_pid;
+        while ((terminated_pid = waitpid(-1, &status, WNOHANG)) > 0) {
+            if (WIFEXITED(status)) {
+            	// 正常退出暂时不管，正常退出资源一般都正常回收了
+                printf("Child %d exited normally with status %d\n", terminated_pid, WEXITSTATUS(status));
+            } else if (WIFSIGNALED(status)) {
+                printf("Child %d terminated by signal %d\n", terminated_pid, WTERMSIG(status));
+				for (int i = 0; i < s_pid_count; ++i)
+				{
+					if(terminated_pid == s_pids[i].pid) {
+        				tgg_set_bw_prcstatus(i, 0);
+        				tgg_init_bwfdx_prc(g_prc_id);
+					}
+				}
+            }
+        }
+    }
 	if (signum > SIGUSR1)
 	{
 		pid_t pid = signum - SIGUSR1;
@@ -58,47 +73,6 @@ void signal_handler(int signum)
 	}
 }
 
-void tgg_process_read_data(void* arg)
-{
-	WsConsumer cons;
-	cons.ConsumerData(arg);
-
-	tgg_read_data* rdata = (tgg_read_data*)arg;
-    memset(rdata->data, 0, rdata->data_len);
-    rte_free(rdata->data);
-	memset(rdata, 0, sizeof(tgg_read_data));
-	rte_mempool_put(g_mempool_read, (void*)rdata);
-}
-
-static int tgg_process_read()
-{
-	tgg_read_data* rdata = NULL;
-	if (tgg_dequeue_read(&rdata) < 0) {
-	    // 队列空
-		return 1;
-	}
-	if (!rdata) {
-		return 0;
-	}
-	// 等待可用线程
-	// while (mt_nomore_thread() && g_run) {
-	// 	mt_sleep(10);
-	// 	continue;
-	// }
-	// 进程要退出了，不再启动新的线程，释放内存就退出
-	if (!g_run) {
-    	memset(rdata->data, 0, rdata->data_len);
-		rte_free(rdata->data);
-		memset(rdata, 0, sizeof(tgg_read_data));
-		rte_mempool_put(g_mempool_read, (void*)rdata);
-		return -1;
-	}
-
-	// mt_start_thread((void *)tgg_process_read_data, (void *)rdata);
-
-	return 0;
-}
-
 static int tgg_process_bwrcv()
 {
 	tgg_bw_data* bdata = NULL;
@@ -109,53 +83,18 @@ static int tgg_process_bwrcv()
 	if (!bdata) {
 		return 0;
 	}
-	// 等待可用线程
-	// while (mt_nomore_thread() && g_run) {
-	// 	usleep(10);
-	// 	continue;
-	// }
-	// 进程要退出了，不再启动新的线程，释放内存就退出
 	if (!g_run) {
 		rte_free(bdata->data);
 		memset(bdata, 0, sizeof(tgg_bw_data));
 		rte_mempool_put(g_mempool_bwrcv, (void*)bdata);
 		return -1;
 	}
-
-	// mt_start_thread((void *)tgg_process_bwrcv_data, (void *)bdata);
 	return 0;
 }
 
-
-int tgg_gw_process(void* data)
+void fork_oneprocess(void* data)
 {
-	// unsigned long long last_time = mt_time_ms();
-	while (g_run) {
-		// 处理客户端连接和转发数据
-		while (g_run) {
-			// 优先保证客户端能上报
-			if (tgg_process_read() > 0)
-			{
-				break;
-			}
-		}
-		// 处理从bw过来的数据
-		if (tgg_process_bwrcv() > 0)
-			mt_sleep(10);
-
-		// 发送心跳
-		// unsigned long long cur_time = mt_time_ms();
-		// if (cur_time > last_time + s_heart_beat_interval) {
-		// 	last_time = cur_time;
-		// 	// 向父进程发送 SIGUSR1 信号
-    	// 	kill(getppid(), SIGUSR1 + getpid());
-		// }
-	}
-	return 0;
-}
-
-void fork_oneprocess(pid_t* ppid, void* data)
-{
+   	g_prc_id = *((int*)data);
 	pid_t pid = fork();
     
     if (pid < 0) {
@@ -164,11 +103,43 @@ void fork_oneprocess(pid_t* ppid, void* data)
         // exit(EXIT_FAILURE);
     } else if (pid == 0) {
         // 子进程
-        tgg_gw_process(data);
+
+        // 启动之前，先清理数据，防止上次异常退出导致资源没有正常清理
+        tgg_init_bwfdx_prc(g_prc_id);
+
+        for(int i = 0; i < ; i++)
+        {
+      		// read操作的协程
+            task_t * task = (task_t*)calloc( 1,sizeof(task_t) );
+            task->fd = -1;
+            co_create( &(task->co),NULL,read_routine,task );
+            co_resume( task->co );
+        }
+
+        // write操作的协程
+        co_create( &(task->co),NULL,write_routine,data );
+        co_resume( task->co );
+
+        stCoRoutine_t *accept_co = NULL;
+        co_create( &accept_co,NULL,accept_routine,0 );
+        co_resume( accept_co );
+
+        // 协程启动完后，把进程的状态设置为正在运行
+        tgg_set_bw_prcstatus(g_prc_id, 1);
+
+        // 开始协程循环
+        co_eventloop( co_get_epoll_ct(),0,0 );
+
+
+		// init_bwserver();
+		// tgg_gw_process(NULL);
+		uninit_bwserver();
         prc_exit(0, "child exit.\n");
     } else {
         // 父进程
-        *ppid = pid;
+        // s_pids[g_prc_id].idx = g_prc_id;
+        s_pids[g_prc_id].pid = pid;
+        // *ppid = pid;
     }
 }
 
@@ -178,7 +149,7 @@ void fork_processes()
     
     // 创建子进程
     for (int i = 0; i < s_pid_count; i++) {
-    	fork_oneprocess(&(s_pids[i].pid), &i);
+    	fork_oneprocess(&i);
     }
 }
 
@@ -213,7 +184,7 @@ void monitor_process()
                 // 子进程已结束
                 printf("子进程 (PID: %d) 已结束.\n", s_pids[i].pid);
                 // 重新创建
-                fork_oneprocess(&s_pids[i].pid, &i);
+                fork_oneprocess(&i);
                 // pids[i] = s_pids[--s_pid_count]; // 移除已结束的子进程
                 // i--; // 调整索引，以便正确检查下一个进程
             }
@@ -236,14 +207,20 @@ void tgg_sig_init()
         perror("Error setting signal handler");
         prc_exit(-1, "Error setting signal handler");
     }
+    // 子进程退出
+    struct sigaction sa;
+    sa.sa_handler = child_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+	if (sigaction(SIGCHLD, &sa, NULL) == SIG_ERR) {
+        perror("Error setting signal handler");
+        prc_exit(-1, "Error setting signal handler");
+    }
 
 }
 
 void tgg_process_init()
 {
-	// if(tgg_init_uidgid(g_redis_clusternodes, g_redis_pwd) < 0) {
-	// 	rte_exit(EXIT_FAILURE, "Init uidgid hash failed.\n");
-	// }
 	tgg_sig_init();
 	tgg_secondary_init();
 	tgg_iterprint_gidsbyuid();
@@ -254,7 +231,6 @@ void tgg_process_init()
 void tgg_process_uninit()
 {
 	rte_eal_cleanup();
-	// tgg_secondary_uninit();	
 }
 
 static void prc_dpdk_eal_init(int argc, char **argv)
@@ -282,16 +258,45 @@ static void prc_dpdk_eal_init(int argc, char **argv)
 		rte_panic("Cannot init EAL\n");
 }
 
+
 int main(int argc, char *argv[])
 {
 	init_core(s_dump_file);
+	std::string 
+	if (tgg_init_config(argc, argv) < 0) {
+		printf("init config error.");
+		return -1;
+	}
 	prc_dpdk_eal_init(argc, argv);
 	// mt_init_frame(argc, argv);
 	tgg_process_init();
 	init_flag_for_process();
-	init_bwserver();
-	tgg_gw_process(NULL);
-	uninit_bwserver();
+
+
+
+	g_listen_fd = create_tcp_socket( port,ip,true );
+    listen( g_listen_fd,1024 );
+    if(g_listen_fd==-1){
+        printf("Port %d is in use\n", port);
+        return -1;
+    }
+    printf("listen %d %s:%d\n",g_listen_fd,ip,port);
+
+    set_non_block( g_listen_fd );
+
+
+
+    // 启动bwserver服务进程组
+	fork_processes();
+	// 启动透传线程
+	init_bwtrans();
+	// init_bwserver();
+	// 主进程循环监控 bwserver服务进程组，循环
+	monitor_process();
+	// 主进程结束，开始销毁资源
+	uninit_bwtrans();
+	// tgg_gw_process(NULL);
+	// uninit_bwserver();
 	// TODO 进程退出时要回收资源
 	tgg_process_uninit();
 	printf("\n-----------main end----------\n");
