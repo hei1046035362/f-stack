@@ -27,8 +27,9 @@ constexpr bool is_scalar()
 class BwPackageHandler {
 public:
     // 获取整个包的buffer，对应encode函数   外部需要填充bwdata->flag和bwdata->cmd 两个字段，ip和port默认都是不填的，可选
-    static std::string encode(tgg_bw_protocal* bwdata, const std::string& extend_data, const std::string& body,
-        const std::string& local_ip = "", const std::string& client_ip = "") {
+    static void encode(std::string &result, const tgg_bw_protocal* bwdata, 
+        const std::string& body, const std::string& extend_data = "")
+     {
         // bwdata->flag = (body.find_first_not_of("0123456789") == std::string::npos);
         // std::string encode_body = body;
         // if (!bwdata->flag) {
@@ -38,7 +39,6 @@ public:
         bwdata->ext_len = extend_data.length() > 0 ? extend_data.length() : 0;
         bwdata->pack_len = sizeof(tgg_bw_protocal) + bwdata->ext_len + body.size();
 
-        std::string result;
         result.resize(bwdata->pack_len);
         // 拼接ext_data和body
         if (bwdata->ext_len > 0) {
@@ -46,9 +46,11 @@ public:
         }
         result.replace(sizeof(tgg_bw_protocal) + bwdata->ext_len, body.size(), body.c_str());
 
-        bwdata->local_ip = inet_addr(local_ip.c_str());
-        bwdata->client_ip = inet_addr(client_ip.c_str());
+        // bwdata->local_ip = inet_addr(local_ip.c_str());
+        // bwdata->client_ip = inet_addr(client_ip.c_str());
         if(big_endian()) {
+            bwdata->local_ip = htonl(bwdata->local_ip);
+            bwdata->client_ip = htonl(bwdata->client_ip);
             bwdata->pack_len = htonl(bwdata->pack_len);
             bwdata->local_port = htons(bwdata->local_port);
             bwdata->client_port = htons(bwdata->client_port);

@@ -23,11 +23,11 @@
 #define MAX_FD_COUNT 100000
 #endif
 
-std::map<int, tgg_bw_info*> g_map_bwinfo;
-std::set<int> g_set_bwidx;
-std::mutex g_map_bwinfo_mtx;
-std::mutex g_set_bwidx_mtx;
-std::atomic<int> s_atomic_idx(0);
+// std::map<int, tgg_bw_info*> g_map_bwinfo;
+// std::set<int> g_set_bwidx;
+// std::mutex g_map_bwinfo_mtx;
+// std::mutex g_set_bwidx_mtx;
+// std::atomic<int> s_atomic_idx(0);
 
 int get_connection_info(int fd, const char* ip, unsigned short* port)
 {
@@ -45,26 +45,26 @@ int get_connection_info(int fd, const char* ip, unsigned short* port)
      return 0;
 }
 
-int get_valid_bw_idx()
-{
-    int idx = 0;
-    int times = 2;// 最多轮训两次
-    while (times > 0) {
-        if (idx > MAX_FD_COUNT || idx < 0) {
-            s_atomic_idx.store(0);
-            idx = 0;
-            times--;
-        } else {
-            idx = s_atomic_idx.fetch_add(1);
-        }
-        if(tgg_exist_bw_idx(idx)) {
-            continue;
-        } else {
-            return idx;
-        }
-    }
-    return -1;
-}
+// int get_valid_bw_idx()
+// {
+//     int idx = 0;
+//     int times = 2;// 最多轮训两次
+//     while (times > 0) {
+//         if (idx > MAX_FD_COUNT || idx < 0) {
+//             s_atomic_idx.store(0);
+//             idx = 0;
+//             times--;
+//         } else {
+//             idx = s_atomic_idx.fetch_add(1);
+//         }
+//         if(tgg_exist_bw_idx(idx)) {
+//             continue;
+//         } else {
+//             return idx;
+//         }
+//     }
+//     return -1;
+// }
 
 static void init_bwinfo(tgg_bw_info* bwinfo)
 {
@@ -73,163 +73,162 @@ static void init_bwinfo(tgg_bw_info* bwinfo)
 }
 
 //tgg_bw_info* lookup_bwinfo(int fd)
-bool tgg_exist_bw_idx(int bwidx)
-{
-    std::lock_guard<std::mutex> gurad(g_set_bwidx_mtx);
-    std::set<int>::iterator it = g_set_bwidx.find(bwidx);
-    if (it != g_set_bwidx.end()) {
-        return true;
-    } 
-    return false;
-}
+// bool tgg_exist_bw_idx(int bwidx)
+// {
+//     std::lock_guard<std::mutex> gurad(g_set_bwidx_mtx);
+//     std::set<int>::iterator it = g_set_bwidx.find(bwidx);
+//     if (it != g_set_bwidx.end()) {
+//         return true;
+//     } 
+//     return false;
+// }
 
-bool tgg_add_bw_idx(int bwidx)
-{
-    std::lock_guard<std::mutex> gurad(g_set_bwidx_mtx);
-    std::set<int>::iterator it = g_set_bwidx.find(bwidx);
-    if (it != g_set_bwidx.end()) {
-        return false;
-    } 
-    if (g_set_bwidx.insert(bwidx).second)
-        return true;
-    return false;
-}
+// bool tgg_add_bw_idx(int bwidx)
+// {
+//     std::lock_guard<std::mutex> gurad(g_set_bwidx_mtx);
+//     std::set<int>::iterator it = g_set_bwidx.find(bwidx);
+//     if (it != g_set_bwidx.end()) {
+//         return false;
+//     } 
+//     if (g_set_bwidx.insert(bwidx).second)
+//         return true;
+//     return false;
+// }
 
-bool tgg_delete_bw_idx(int bwidx)
-{
-    std::lock_guard<std::mutex> gurad(g_set_bwidx_mtx);
-    std::set<int>::iterator it = g_set_bwidx.find(bwidx);
-    if (it != g_set_bwidx.end()) {
-        g_set_bwidx.erase(it);
-        return true;
-    } 
-    return false;
-}
+// bool tgg_delete_bw_idx(int bwidx)
+// {
+//     std::lock_guard<std::mutex> gurad(g_set_bwidx_mtx);
+//     std::set<int>::iterator it = g_set_bwidx.find(bwidx);
+//     if (it != g_set_bwidx.end()) {
+//         g_set_bwidx.erase(it);
+//         return true;
+//     } 
+//     return false;
+// }
 
 
 
-int tgg_get_bw_idx(int fd)
-{
-    std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
-    std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
-    if (it != g_map_bwinfo.end()) {
-        return it->second->idx;
-    } 
-    return TGG_FD_NOTEXIST;
-}
+// int tgg_get_bw_idx(int fd)
+// {
+//     std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
+//     std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
+//     if (it != g_map_bwinfo.end()) {
+//         return it->second->idx;
+//     } 
+//     return TGG_FD_NOTEXIST;
+// }
 
-int tgg_set_bw_idx(int fd, int idx)
-{
-    std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
-    std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
-    if (it != g_map_bwinfo.end()) {
-        it->second->idx = idx;
-        return 0;
-    } 
-    return -1;
-}
+// int tgg_set_bw_idx(int fd, int idx)
+// {
+//     std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
+//     std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
+//     if (it != g_map_bwinfo.end()) {
+//         it->second->idx = idx;
+//         return 0;
+//     } 
+//     return -1;
+// }
 
-int tgg_set_bw_seckey(int fd, const std::string& seckey)
-{
-    if(seckey.size() <= 0) {
-        // 如果是空的，就不需要设置了，目前抓包看服务端填充的都是空的
-        return 0;
-    }
-    std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
-    std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
-    if (it != g_map_bwinfo.end()) {
-        int len = seckey.size();
-        if(len > SECRET_KEY_LEN) {
-            len = SECRET_KEY_LEN;
-        }
-        memcpy(it->second->secretKey, seckey.c_str(), len);
-        return 0;
-    } 
-    return -1;
-}
+// int tgg_set_bw_seckey(int fd, const std::string& seckey)
+// {
+//     if(seckey.size() <= 0) {
+//         // 如果是空的，就不需要设置了，目前抓包看服务端填充的都是空的
+//         return 0;
+//     }
+//     std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
+//     std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
+//     if (it != g_map_bwinfo.end()) {
+//         int len = seckey.size();
+//         if(len > SECRET_KEY_LEN) {
+//             len = SECRET_KEY_LEN;
+//         }
+//         memcpy(it->second->secretKey, seckey.c_str(), len);
+//         return 0;
+//     } 
+//     return -1;
+// }
 
-int tgg_get_bw_seckey(int fd, std::string& seckey)
-{
-    std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
-    std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
-    if (it != g_map_bwinfo.end()) {
-        int len = strlen(it->second->secretKey);
-        if(len > SECRET_KEY_LEN) {
-            len = SECRET_KEY_LEN;
-        }
-        seckey = std::string(it->second->secretKey, len);
-        return 0;
-    } 
-    return -1;
-}
+// int tgg_get_bw_seckey(int fd, std::string& seckey)
+// {
+//     std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
+//     std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
+//     if (it != g_map_bwinfo.end()) {
+//         int len = strlen(it->second->secretKey);
+//         if(len > SECRET_KEY_LEN) {
+//             len = SECRET_KEY_LEN;
+//         }
+//         seckey = std::string(it->second->secretKey, len);
+//         return 0;
+//     } 
+//     return -1;
+// }
 
-int new_bw_session(int fd)
-{
-    std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
-    std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
-    if (it != g_map_bwinfo.end()) {
-        if (it->second->idx != TGG_FD_CLOSED) {
-            // 连接还没有关闭
-            return -1;
-        } else {
-            it->second->idx = get_valid_bw_idx();
-            if(it->second->idx < 0 || !tgg_add_bw_idx(it->second->idx)) {// 生成idx失败
-                return -1;
-            }
-        }
-        return 0;
-    }
-    // 全新的fd
-    tgg_bw_info* bwinfo = new(tgg_bw_info);
-    if(!bwinfo) {
-        return -1;
-    }
-    init_bwinfo(bwinfo);
-    int bwidx = get_valid_bw_idx();
-    if(bwidx < 0 || !tgg_add_bw_idx(bwidx)) {// 生成idx失败
-        delete bwinfo;
-        return -1;
-    }
-    bwinfo->idx = bwidx;
-    g_map_bwinfo[fd] = bwinfo;
-    return 0;
-}
+// int new_bw_session(int fd)
+// {
+//     std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
+//     if (it != g_map_bwinfo.end()) {
+//         if (it->second->idx != TGG_FD_CLOSED) {
+//             // 连接还没有关闭
+//             return -1;
+//         } else {
+//             it->second->idx = get_valid_bw_idx();
+//             if(it->second->idx < 0 || !tgg_add_bw_idx(it->second->idx)) {// 生成idx失败
+//                 return -1;
+//             }
+//         }
+//         return 0;
+//     }
+//     // 全新的fd
+//     tgg_bw_info* bwinfo = new(tgg_bw_info);
+//     if(!bwinfo) {
+//         return -1;
+//     }
+//     init_bwinfo(bwinfo);
+//     int bwidx = get_valid_bw_idx();
+//     if(bwidx < 0 || !tgg_add_bw_idx(bwidx)) {// 生成idx失败
+//         delete bwinfo;
+//         return -1;
+//     }
+//     bwinfo->idx = bwidx;
+//     g_map_bwinfo[fd] = bwinfo;
+//     return 0;
+// }
 
-void free_bw_session(int fd)
-{// 不释放空间，只清理，fd是有限的且会重复利用，反复新建和删除影响效率
-    int idx = -1;
-    {
-        std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
-        std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
-        if (it != g_map_bwinfo.end()) {
-            idx = it->second->idx;
-            init_bwinfo(it->second);
-        }
-    }
-    close(fd);
-    // 先关闭，后删除
-    if(idx > 0) {
-        tgg_delete_bw_idx(idx);
-    }
-}
+// void free_bw_session(int fd)
+// {// 不释放空间，只清理，fd是有限的且会重复利用，反复新建和删除影响效率
+//     int idx = -1;
+//     {
+//         std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
+//         std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
+//         if (it != g_map_bwinfo.end()) {
+//             idx = it->second->idx;
+//             init_bwinfo(it->second);
+//         }
+//     }
+//     close(fd);
+//     // 先关闭，后删除
+//     if(idx > 0) {
+//         tgg_delete_bw_idx(idx);
+//     }
+// }
 
-void tgg_set_bw_authorized(int fd, int authorized)
-{
-    std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
-    std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
-    if (it != g_map_bwinfo.end()) {
-        it->second->authorized = authorized;
-    }
-}
-int tgg_get_bw_authorized(int fd)
-{
-    std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
-    std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
-    if (it != g_map_bwinfo.end()) {
-        return it->second->authorized;
-    }
-    return 0;
-}
+// void tgg_set_bw_authorized(int fd, int authorized)
+// {
+//     std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
+//     std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
+//     if (it != g_map_bwinfo.end()) {
+//         it->second->authorized = authorized;
+//     }
+// }
+// int tgg_get_bw_authorized(int fd)
+// {
+//     std::lock_guard<std::mutex> gurad(g_map_bwinfo_mtx);
+//     std::map<int, tgg_bw_info*>::iterator it = g_map_bwinfo.find(fd);
+//     if (it != g_map_bwinfo.end()) {
+//         return it->second->authorized;
+//     }
+//     return 0;
+// }
 
 
 // 将输入字符串使用 DEFLATE 压缩

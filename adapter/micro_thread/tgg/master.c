@@ -10,13 +10,14 @@
 #include "dpdk_init.h"
 #include <arpa/inet.h>
 #include <tgg_comm/tgg_bw_cache.h>
+#include "tgg_comm/tgg_conf.h"
 
 static const char* s_dump_file = "/var/corefiles/tgg_gw_master_core";
 static int s_fd_timeout = 60*1000;
 extern const char* g_rte_malloc_type;
 extern struct rte_mempool* g_mempool_read;
 extern struct rte_mempool* g_mempool_write;
-extern struct rte_ring* g_ring_read;
+// extern struct rte_ring* g_ring_read;
 extern ushort g_gateway_port;
 extern tgg_stats g_tgg_stats;
 extern int g_fd_limit;
@@ -50,7 +51,7 @@ uint32_t get_local_addr(int sockfd)
      return ip_decimal;
 }
 
-int get_remote_info(int sockfd, uint32_t& ip, ushort& port)
+static int get_remote_info(int sockfd, uint32_t& ip, ushort& port)
 {
      // 获取IP地址信息
      struct sockaddr_in local_addr;
@@ -65,8 +66,8 @@ int get_remote_info(int sockfd, uint32_t& ip, ushort& port)
      // printf("ip str:%s\n", ip_str);
      struct in_addr ip_addr;
      inet_pton(AF_INET, ip_str, &ip_addr);
-     ip = big_endian() ? ntohl(ip_addr.s_addr) : ip_addr.s_addr;
-     port = big_endian() ? ntohl(local_addr.sin_port) : local_addr.sin_port;
+     ip = ip_addr.s_addr;
+     port = local_addr.sin_port;
      printf("IP address in decimal: %u\n", ip);
      return 0;
 }
@@ -129,17 +130,17 @@ static int tgg_recv_enqueue(int clt_fd, const char* buf, int len, enum FD_OPT op
 	}
 
 	// 2、入队列
-	while (rte_ring_full(g_ring_read)) {
+	while (rte_ring_full(g_ring_cliprcs[g_core_id])) {
 		// TODO  队列满的情况，  暂时采用休眠的方式等待消费端消费完释放空间，这里应该就能成功了
 		idx++;
 		usleep(10);
 	}
 	if (idx) {
 		RTE_LOG(WARNING, USER1, "[%s][%d] enqueue data to ring[%s] failed times:%d", 
-			__func__, __LINE__, g_ring_read->name, idx);
+			__func__, __LINE__, g_ring_cliprcs[g_core_id]->name, idx);
 	}
 
-	if (tgg_enqueue_read(rdata) < 0) {
+	if (tgg_enqueue_cliprc(g_core_id, rdata) < 0) {
 		// TODO 统计失败计数，是否要重入队列？
 		memset(rdata->data, 0, rdata->data_len);
 		rte_free(rdata->data);
@@ -373,6 +374,10 @@ static int tgg_gw_master()
 int main(int argc, char *argv[])
 {
 	init_core(s_dump_file);
+	if (tgg_init_config(argc, argv) < 0) {
+		printf("init config error.");
+		return -1;
+	}
 	mt_init_frame(argc, argv);
 	g_core_id = rte_lcore_id();
 	if(rte_eal_process_type() == RTE_PROC_PRIMARY) {

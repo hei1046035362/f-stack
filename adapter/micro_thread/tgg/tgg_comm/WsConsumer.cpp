@@ -69,6 +69,7 @@ void WsConsumer::OnClose()
     }
     std::string data = "\x88\x02\x03\xe8";// 关闭websocket
     SendONnoAuth(data, FD_WRITE);
+    Send2Server(this->core_id, this->fd, FD_CLOSE, "");
     // SendData("", FD_CLOSE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
 }
 // 握手
@@ -78,6 +79,7 @@ void WsConsumer::OnHandShake(const std::string& response)
     tgg_set_cli_authorized(this->core_id, this->fd, AUTH_TYPE_HANDLESHAKED);
     std::string scid = get_valid_cid(this->_idx);
     tgg_set_cli_cid(this->core_id, this->fd, scid.c_str());
+    // TODO 这里是直接发送给服务端还是自己处理？
     std::string sendData;
     if (message_pack(2, 1, 0, 1, scid, sendData) < 0)
     {
@@ -87,6 +89,7 @@ void WsConsumer::OnHandShake(const std::string& response)
         return;
     }
     SendONnoAuth(sendData, FD_WRITE);
+    Send2Server(this->core_id, this->fd, FD_NEW, "");
 }
 
 void WsConsumer::OnPing(const std::string& response)
@@ -101,7 +104,12 @@ void WsConsumer::OnPong(const std::string& response)
 
 void WsConsumer::OnMessage(const std::string& msg)
 {
-    // TODO 不解析消息，直接转发给bw
+    Send2Server(this->core_id, this->fd, FD_WRITE, msg);
+
+
+
+
+// TODO 不解析消息，直接转发给bw
 //     if(msg.empty()) {
 //         RTE_LOG(ERR, USER1, "[%s][%d] msg can't be empty.", __func__, __LINE__);
 //         goto OnMessageEnd;
@@ -201,115 +209,6 @@ void WsConsumer::OnSend(const std::string& msg, int fd_opt)
         enqueue_data_single_fd(this->core_id, "", this->fd, _idx, FD_CLOSE);
     }
 }
-
-void WsConsumer::Send2Client(const char* cid, const std::string& data, int fd_opt)
-{
-    int fdid = tgg_get_fdbycid(cid);
-    if(fd < 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] client[%s] not exist.", __func__, __LINE__, cid);
-        return;
-    }
-    int fd = fdid >> 8;
-    int core_id = fdid & 0xf;
-    int idx = tgg_get_cli_idx(core_id, fd);
-    if(idx < 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] client[%s] already closed.", __func__, __LINE__, cid);
-        return;
-    }
-    if(tgg_get_cli_authorized(core_id, fd) != AUTH_TYPE_TOKENCHECKED) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Send data to client[%s] should check Token at first.",
-            __func__, __LINE__, cid);
-        return;
-    }
-    std::string sendData;
-    // 打包封装到
-    if (message_pack(2, 1, 0, 1, data, sendData) < 0)
-    {
-        RTE_LOG(ERR, USER1, "[%s][%d] message_pack data[%s] failed.\r\n", 
-            __func__, __LINE__, data.c_str());
-        return;
-    }
-
-    std::cout << "send data["<< cid <<"]:" << Encrypt::bin2hex(sendData) << std::endl;
-    if (enqueue_data_single_fd(core_id, sendData, fd, idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
-        RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%s,opt:%d",
-         __func__, __LINE__, cid, fd_opt);
-    }
-}
-
-void WsConsumer::BatchSend2Client(std::list<std::string> cids, const std::string& data, int fd_opt)
-{
-    std::list<int> lstFds;
-    std::list<std::string>::iterator itCid = cids.begin();
-    while(itCid != cids.end()) {
-        int fdid = tgg_get_fdbycid((*itCid).c_str());
-        if(fdid < 0) {
-            RTE_LOG(INFO, USER1, "[%s][%d] client[%s] not exist.", __func__, __LINE__, (*itCid).c_str());
-            continue;
-        }
-        lstFds.push_back(fdid);
-        itCid++;
-    }
-    WsConsumer::BatchSend2Client(lstFds, data, fd_opt);
-}
-
-void WsConsumer::BatchSend2Client(std::list<int> fds, const std::string& data, int fd_opt)
-{
-    if(fds.size() <= 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] fd list can't be empty.\r\n", 
-            __func__, __LINE__);
-        return;
-    }
-    // 不同的core_id，分到不同的组，发送的时候需要根据core_id发送到不同的队列
-    std::map<int, std::list<int> > mapEachcorefds;
-    std::list<int>::iterator itFd = fds.begin();
-    while(itFd != fds.end()) {
-        mapEachcorefds[(*itFd) & 0xf].push_back((*itFd) >> 8);
-        itFd++;
-    }
-    for (auto coreidFds : mapEachcorefds) {
-        std::map<int, int> mapFdidx;
-        std::list<int>::iterator itFd = coreidFds->second.begin();
-        while(itFd != coreidFds->second.end()) {
-            int idx = tgg_get_cli_idx(coreidFds->first, *itFd);
-            if(idx < 0) {
-                std::string sCid = tgg_get_cli_cid(coreidFds->first, *itFd);
-                RTE_LOG(INFO, USER1, "[%s][%d] client[%s] already closed.\n", __func__, __LINE__, sCid.c_str());
-                itFd++;
-                continue;
-            }
-            if(tgg_get_cli_authorized(coreidFds->first, *itFd) != AUTH_TYPE_TOKENCHECKED) {
-                std::string sCid = tgg_get_cli_cid(coreidFds->first, *itFd);
-                RTE_LOG(INFO, USER1, "[%s][%d] Send data to client[%s] should check Token at first.\n",
-                    __func__, __LINE__, sCid.c_str());
-                itFd++;
-                continue;
-            }
-            mapFdidx[*itFd] = idx;
-            itFd++;
-        }
-        if(mapFdidx.size() <= 0) {
-            RTE_LOG(ERR, USER1, "[%s][%d] no live fd found for.\r\n", 
-                __func__, __LINE__);
-            return;
-        }
-        std::string sendData;
-        // 打包封装
-        if (message_pack(2, 1, 0, 1, data, sendData) < 0)
-        {
-            RTE_LOG(ERR, USER1, "[%s][%d] message_pack data[%s] failed.\r\n", 
-                __func__, __LINE__, data.c_str());
-            return;
-        }
-
-        std::cout << "send group data:" << Encrypt::bin2hex(sendData) << std::endl;
-        if (enqueue_data_batch_fd(coreidFds->first, sendData, mapFdidx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
-            RTE_LOG(ERR, USER1, "[%s][%d] Batch Enqueue data Failed\n",
-               __func__, __LINE__);
-        }
-    }
-}
-
 
 void WsConsumer::_CleanAndClose()
 {
