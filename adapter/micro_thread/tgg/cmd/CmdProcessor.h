@@ -7,7 +7,7 @@
 class CmdBaseProcessor {
 public:
 
-	CmdBaseProcessor(int fd, void* data, const nlohmann::json& jdata):fd(fd), data(data), jdata(jdata) {}
+	CmdBaseProcessor(int prc_id, int fd, void* data, const nlohmann::json& jdata):prc_id(prc_id), fd(fd), data(data), jdata(jdata) {}
     virtual int ExecCmd() = 0;
 	virtual ~CmdBaseProcessor() {};
 protected:
@@ -15,6 +15,7 @@ protected:
 	void Send2BW(const std::string& data);
 
 protected:
+	int prc_id;
     int fd;
     void* data;
     const nlohmann::json& jdata;
@@ -23,15 +24,23 @@ protected:
 class CmdWorkerConnect : public CmdBaseProcessor
 {
 public:
-	CmdWorkerConnect(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdWorkerConnect(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdWorkerConnect() {}
+    int ExecCmd();
+};
+
+class CmdGatewayClientConnect : public CmdBaseProcessor
+{
+public:
+	CmdGatewayClientConnect(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
+	~CmdGatewayClientConnect() {}
     int ExecCmd();
 };
 
 class CmdGatewayClientConnect : public CmdBaseProcessor {
 public:
 
-	CmdGatewayClientConnect(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdGatewayClientConnect(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdGatewayClientConnect() {}
     int ExecCmd() { return 0; }
 };
@@ -39,7 +48,7 @@ public:
 class CmdSendToOne : public CmdBaseProcessor {
 public:
 
-	CmdSendToOne(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdSendToOne(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdSendToOne() {}
     int ExecCmd();
 };
@@ -47,7 +56,7 @@ public:
 class CmdKick : public CmdBaseProcessor {
 public:
 
-	CmdKick(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdKick(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdKick() {}
     int ExecCmd();
 };
@@ -55,7 +64,7 @@ public:
 class CmdDestroy : public CmdBaseProcessor {
 public:
 
-	CmdDestroy(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdDestroy(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdDestroy() {}
     int ExecCmd();
 };
@@ -63,7 +72,7 @@ public:
 class CmdSendToALL : public CmdBaseProcessor {
 public:
 
-	CmdSendToALL(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdSendToALL(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdSendToALL() {}
     int ExecCmd();
 };
@@ -71,7 +80,7 @@ public:
 class CmdSelect : public CmdBaseProcessor {
 public:
 
-	CmdSelect(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdSelect(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdSelect() {}
     int ExecCmd();
 private:
@@ -92,7 +101,7 @@ private:
 class CmdGetGroupIdList : public CmdBaseProcessor {
 public:
 
-	CmdGetGroupIdList(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdGetGroupIdList(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdGetGroupIdList() {}
     int ExecCmd();
 };
@@ -101,7 +110,7 @@ public:
 class CmdSetSession : public CmdBaseProcessor {
 public:
 
-	CmdSetSession(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdSetSession(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdSetSession() {}
     int ExecCmd();
 };
@@ -109,7 +118,7 @@ public:
 class CmdUpdateSession : public CmdBaseProcessor {
 public:
 
-	CmdUpdateSession(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdUpdateSession(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdUpdateSession() {}
     int ExecCmd();
 };
@@ -117,7 +126,7 @@ public:
 class CmdGetSessionByCid : public CmdBaseProcessor {
 public:
 
-	CmdGetSessionByCid(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdGetSessionByCid(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdGetSessionByCid() {}
     int ExecCmd() {return 0;}
 };
@@ -125,7 +134,7 @@ public:
 class CmdGetAllClientSession : public CmdBaseProcessor {
 public:
 
-	CmdGetAllClientSession(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdGetAllClientSession(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdGetAllClientSession() {}
     int ExecCmd() {return 0;}
 };
@@ -133,7 +142,7 @@ public:
 class CmdIsOnline : public CmdBaseProcessor {
 public:
 
-	CmdIsOnline(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdIsOnline(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdIsOnline() {}
     int ExecCmd();
 };
@@ -141,7 +150,7 @@ public:
 class CmdBindUid : public CmdBaseProcessor {
 public:
 
-	CmdBindUid(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdBindUid(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdBindUid() {}
     virtual int ExecCmd();
 };
@@ -149,7 +158,7 @@ public:
 class CmdUnBindUid : public CmdBaseProcessor {
 public:
 
-	CmdUnBindUid(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdUnBindUid(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdUnBindUid() {}
     int ExecCmd();
 };
@@ -157,7 +166,7 @@ public:
 class CmdSendToUid : public CmdBaseProcessor {
 public:
 
-	CmdSendToUid(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdSendToUid(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdSendToUid() {}
     int ExecCmd();
 };
@@ -165,7 +174,7 @@ public:
 class CmdJoinGroup : public CmdBaseProcessor {
 public:
 
-	CmdJoinGroup(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdJoinGroup(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdJoinGroup() {}
     int ExecCmd();
 };
@@ -173,7 +182,7 @@ public:
 class CmdLeaveGroup : public CmdBaseProcessor {
 public:
 
-	CmdLeaveGroup(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdLeaveGroup(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdLeaveGroup() {}
     int ExecCmd();
 };
@@ -181,7 +190,7 @@ public:
 class CmdUnGroup : public CmdBaseProcessor {
 public:
 
-	CmdUnGroup(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdUnGroup(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdUnGroup() {}
     int ExecCmd();
 };
@@ -189,7 +198,7 @@ public:
 class CmdSendToGroup : public CmdBaseProcessor {
 public:
 
-	CmdSendToGroup(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdSendToGroup(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdSendToGroup() {}
     int ExecCmd();
 };
@@ -197,7 +206,7 @@ public:
 class CmdGetClientSessionsByGroup : public CmdBaseProcessor {
 public:
 
-	CmdGetClientSessionsByGroup(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdGetClientSessionsByGroup(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdGetClientSessionsByGroup() {}
     int ExecCmd();
 };
@@ -205,7 +214,7 @@ public:
 class CmdGetClientCountByGroup : public CmdBaseProcessor {
 public:
 
-	CmdGetClientCountByGroup(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdGetClientCountByGroup(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdGetClientCountByGroup() {}
     int ExecCmd();
 };
@@ -213,7 +222,7 @@ public:
 class CmdGetClientIdByUid : public CmdBaseProcessor {
 public:
 
-	CmdGetClientIdByUid(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdGetClientIdByUid(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdGetClientIdByUid() {}
     int ExecCmd();
 };
@@ -221,7 +230,7 @@ public:
 class CmdBatchGetClientIdByUid : public CmdBaseProcessor {
 public:
 
-	CmdBatchGetClientIdByUid(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata){}
+	CmdBatchGetClientIdByUid(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata){}
 	~CmdBatchGetClientIdByUid() {}
     int ExecCmd();
 };
@@ -229,13 +238,13 @@ public:
 class CmdBatchGetClientCountByGroup : public CmdBaseProcessor {
 public:
 
-	CmdBatchGetClientCountByGroup(int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(fd, data, jdata) {}
+	CmdBatchGetClientCountByGroup(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdBatchGetClientCountByGroup() {}
     int ExecCmd() { return 0; }
 };
 
 
 
-void exec_cmd_processor(int fd, void* data);
+void exec_cmd_processor(int prc_id, int fd, void* data);
 
 #endif // __CMD_PROCESSOR_H__

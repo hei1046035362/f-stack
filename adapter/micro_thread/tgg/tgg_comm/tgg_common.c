@@ -12,11 +12,15 @@
 
 extern int g_fd_limit;
 extern struct rte_memzone* g_fd_zones[MAX_LCORE_COUNT];
+extern int g_bwfdx_limit;
+extern struct rte_memzone* g_bwfdx_zones[MAX_LCORE_COUNT];
+
 extern struct rte_ring* g_ring_read;
 extern struct rte_ring* g_ring_cliprcs[MAX_LCORE_COUNT];// 客户端上行
 extern struct rte_ring* g_ring_writes[MAX_LCORE_COUNT];
 extern struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT];
 extern struct rte_ring* g_ring_trans;
+extern struct rte_ring* g_ring_bwsnds[MAX_LCORE_COUNT];
 
 extern struct rte_mempool* g_mempool_read;
 extern struct rte_mempool* g_mempool_write;
@@ -144,6 +148,12 @@ ushort tgg_get_cli_port(int core_id, int fd)
 	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].port;	
 }
 
+int tgg_get_cli_bwfdx(int core_id, int fd)
+{
+	SpinLock lock(get_cli_lock());
+	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].bwfdx;	
+}
+
 std::string tgg_get_cli_uid(int core_id, int fd)
 {
 	SpinLock lock(get_cli_lock());
@@ -195,6 +205,13 @@ int tgg_set_cli_port(int core_id, int fd, ushort port)
 	return 0;
 }
 
+int tgg_set_cli_bwfdx(int core_id, int fd, int bwfdx);
+{
+	SpinLock lock(get_cli_lock());
+	((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].bwfdx = bwfdx;
+	return 0;
+}
+
 int tgg_set_cli_uid(int core_id, int fd, const char* uid)
 {
 	SpinLock lock(get_cli_lock());
@@ -218,6 +235,192 @@ int tgg_set_cli_reserved(int core_id, int fd, const char* reserved)
 	strncpy(((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].reserved, reserved, strlen(reserved));
 	return 0;
 }
+
+void tgg_init_bwfdx_prc(int prc_id)
+{
+	tgg_iter_del_bwfdx();
+	for(int i = 0; i < g_bwfdx_limit; ++i) {
+		if(tgg_get_bwfdx_status(prc_id, i)) {
+			tgg_close_bw_session(prc_id, i);
+		}
+	}
+}
+
+int tgg_get_bwfdx_status(int prc_id, int fd)
+{
+	SpinLock lock(get_bwfdx_lock());
+	return ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].status;
+}
+
+int tgg_get_bwfdx_load(int prc_id, int fd)
+{
+	SpinLock lock(get_bwfdx_lock());
+	return ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].load;
+}
+
+int tgg_get_bwfdx_cmd(int prc_id, int fd);
+{
+	SpinLock lock(get_bwfdx_lock());
+	return ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].cmd;
+}
+
+int tgg_get_bwfdx_idx(int prc_id, int fd)
+{
+	SpinLock lock(get_bwfdx_lock());
+	return ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].idx;
+}
+int tgg_get_bwfdx_authorized(int prc_id, int fd)
+{
+	SpinLock lock(get_bwfdx_lock());
+	return ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].authorized;
+}
+int tgg_get_bwfdx_ip(int prc_id, int fd)
+{
+	SpinLock lock(get_bwfdx_lock());
+	return ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].ip;
+}
+int tgg_get_bwfdx_port(int prc_id, int fd)
+{
+	SpinLock lock(get_bwfdx_lock());
+	return ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].port;
+}
+std::string tgg_get_bwfdx_seckey(int prc_id, int fd)
+{
+	SpinLock lock(get_bwfdx_lock());
+	return ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].secretkey;
+}
+std::string tgg_get_bwfdx_workerkey(int prc_id, int fd)
+{
+	SpinLock lock(get_bwfdx_lock());
+	return ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].workerkey;
+}
+
+int tgg_set_bwfdx_status(int prc_id, int fd, int status)
+{
+	SpinLock lock(get_bwfdx_lock());
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].status = status;
+	return 0;
+}
+
+int tgg_set_bwfdx_load(int prc_id, int fd, int load)
+{
+	SpinLock lock(get_bwfdx_lock());
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].load = load;
+	return 0;
+}
+
+int tgg_add_bwfdx_load(int prc_id, int fd)
+{
+	SpinLock lock(get_bwfdx_lock());
+	++(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].load);
+	return 0;
+}
+
+int tgg_set_bwfdx_cmd(int prc_id, int fd, int cmd)
+{
+	SpinLock lock(get_bwfdx_lock());
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].cmd = cmd;
+	return 0;
+}
+
+int tgg_set_bwfdx_idx(int prc_id, int fd, int idx)
+{
+	SpinLock lock(get_bwfdx_lock());
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].idx = idx;
+	return 0;
+}
+int tgg_set_bwfdx_authorized(int prc_id, int fd, int authorized)
+{
+	SpinLock lock(get_bwfdx_lock());
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].authorized = authorized;
+	return 0;
+}
+int tgg_set_bwfdx_ip(int prc_id, int fd, uint32_t ip)
+{
+	SpinLock lock(get_bwfdx_lock());
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].ip = ip;
+	return 0;
+}
+int tgg_set_bwfdx_port(int prc_id, int fd, ushort port)
+{
+	SpinLock lock(get_bwfdx_lock());
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].port = port;
+	return 0;
+}
+int tgg_set_bwfdx_seckey(int prc_id, int fd, const char* secretkey)
+{
+	SpinLock lock(get_cli_lock());
+	memset(((tgg_bw_info*)g_fd_zones[core_id]->addr)[fd].secretkey, 0, sizeof(tgg_bw_info::secretkey));
+	strncpy(((tgg_bw_info*)g_fd_zones[core_id]->addr)[fd].secretkey, secretkey, strlen(secretkey));
+	return 0;
+}
+
+int tgg_set_bwfdx_workerkey(int prc_id, int fd, const char* workerkey)
+{
+	SpinLock lock(get_cli_lock());
+	memset(((tgg_bw_info*)g_fd_zones[core_id]->addr)[fd].workerkey, 0, sizeof(tgg_bw_info::workerkey));
+	strncpy(((tgg_bw_info*)g_fd_zones[core_id]->addr)[fd].workerkey, workerkey, strlen(workerkey));
+	return 0;
+}
+
+int tgg_get_bw_prcstatus(int prc_id)
+{
+	return tgg_get_bwfdx_status(prc_id, 0);
+}
+
+int tgg_set_bw_prcstatus(int prc_id, int status)
+{
+	return tgg_set_bwfdx_status(prc_id, 0, status);
+}
+
+void tgg_new_bw_session(int prc_id, int fd, int cmd,
+						const char* workerkey, uint32_t remote_ip, ushort remote_port)
+{
+	tgg_clean_bwfdx(prc_id, fd);
+	tgg_set_bwfdx_workerkey(prc_id, fd, workerkey);
+	tgg_set_bwfdx_cmd(prc_id, fd, cmd);
+    tgg_set_bwfdx_ip(prc_id, fd, remote_ip);
+    tgg_set_bwfdx_port(prc_id, fd, remote_port);
+	tgg_set_bwfdx_authorized(prc_id, fd, 1);
+	tgg_set_bwfdx_status(prc_id, fd, 1);
+	int cmd = tgg_get_bwfdx_cmd(prc_id, fd);
+	if(cmd == GatewayProtocal::CMD_WORKER_CONNECT) {
+		std::string workerkey = tgg_get_bwfdx_workerkey(prc_id, fd);
+		tgg_add_bwwkkey(workerkey.c_str());
+	}
+}
+
+void tgg_close_bw_session(int prc_id, int fd)
+{
+	int cmd = tgg_get_bwfdx_cmd(prc_id, fd);
+	if(cmd == GatewayProtocal::CMD_WORKER_CONNECT) {
+		tgg_del_bwfdx((fd << 8) | (prc_id & 0xf));
+		std::string workerkey = tgg_get_bwfdx_workerkey(prc_id, fd);
+		tgg_del_bwwkkey(workerkey.c_str());
+	}
+	tgg_clean_bwfdx(prc_id, fd);
+}
+
+int tgg_clean_bwfdx(int prc_id, int fd)
+{
+	SpinLock lock(get_bwfdx_lock());
+	// tgg_bw_info* bw = &((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd];
+	memset(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd], 0, sizeof(tgg_bw_info));
+	// bw->idx = get_valid_idx();
+	// if(bw->idx < 0) {
+	// 	return -1;
+	// }
+	// if (tgg_add_idx(bw->idx) < 0) {
+	// 	return -1;
+	// }
+	// bw->authorized = 0;
+	// bw->ip = 0;
+	// bw->port = 0;
+	// bw->status = 0;
+	// bw->cmd = 0;
+	return 0;
+}
+
 
 int cache_ws_buffer(int core_id, int fd, void* data, int len, int pos, int iscomplete)
 {
@@ -381,6 +584,19 @@ int tgg_dequeue_write(int core_id, tgg_write_data** data)
 	return rte_ring_dequeue(g_ring_writes[core_id], (void**)data);
 }
 
+int tgg_enqueue_bwsnd(int queue_id, tgg_bw_data* data)
+{
+	return rte_ring_enqueue(g_ring_bwsnds[queue_id], data);
+}
+
+int tgg_dequeue_bwsnd(int queue_id, tgg_bw_data** data)
+{
+	if (rte_ring_empty(g_ring_bwsnds[queue_id])) {
+		return -ENOENT;
+	}
+	return rte_ring_dequeue(g_ring_bwsnds[queue_id], (void**)data);
+}
+
 int tgg_enqueue_trans(tgg_bw_data* data)
 {
 	return rte_ring_enqueue(g_ring_trans, data);
@@ -394,17 +610,17 @@ int tgg_dequeue_trans(tgg_bw_data** data)
 	return rte_ring_dequeue(g_ring_trans, (void**)data);
 }
 
-int tgg_enqueue_bwrcv(int core_id, tgg_bw_data* data)
+int tgg_enqueue_bwrcv(int prc_id, tgg_bw_data* data)
 {
-	return rte_ring_enqueue(g_ring_bwrcvs[core_id], data);
+	return rte_ring_enqueue(g_ring_bwrcvs[prc_id], data);
 }
 
-int tgg_dequeue_bwrcv(int core_id, tgg_bw_data** data)
+int tgg_dequeue_bwrcv(int prc_id, tgg_bw_data** data)
 {
-	if (rte_ring_empty(g_ring_bwrcvs[core_id])) {
+	if (rte_ring_empty(g_ring_bwrcvs[prc_id])) {
 		return -ENOENT;
 	}
-	return rte_ring_dequeue(g_ring_bwrcvs[core_id], (void**)data);
+	return rte_ring_dequeue(g_ring_bwrcvs[prc_id], (void**)data);
 }
 
 
@@ -515,6 +731,15 @@ int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, in
 	while (tgg_enqueue_write(core_id, wdata) < 0 && idx-- > 0 ) {
 		usleep(10);
 	}
+	static int loop_times_sndcli = 0;
+	// 前期调试要看是否经常出现重试
+	if (idx < 9) {
+		++loop_times_sndcli;
+		if(loop_times_sndcli % 100 == 0) {
+			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.", loop_times_sndcli
+				__func__, __LINE__);
+		}
+	}
 	if (idx <= 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d] Enqueue write data failed.", 
 			__func__, __LINE__);
@@ -530,6 +755,85 @@ int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx
 	mapfdidx[fd] = idx;
 	return enqueue_data_batch_fd(core_id, data, mapfdidx, fdopt);
 }
+
+tgg_read_data* format_send_server_data(int core_id, int fd, const std::string& sdata, int fdopt)
+{
+	tgg_bw_data* bwdata = NULL;
+	int ret = rte_mempool_get(g_mempool_bwrcv, (void**)&bwdata);
+        // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
+	if (ret < 0) {
+		RTE_LOG(ERR, USER1, "[%s][%d] get mem from bwrcv pool failed,code:%d.", 
+			__func__, __LINE__, ret);
+		return NULL;
+	}
+	bwdata->data = dpdk_rte_malloc(sdata.length());
+	memcpy(bwdata->data, sdata.c_str(), sdata.length());
+	bwdata->data_len = sdata.length();
+	bwdata->fd_opt = fdopt;
+	bwdata->fd = fd;
+	bwdata->core_id = core_id;
+	return bwdata;
+}
+
+int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
+{
+	tgg_bw_data* bwdata = format_send_server_data(core_id, fd, data, fdopt);
+	if (!bwdata) {
+		RTE_LOG(ERR, USER1, "[%s][%d] Format bw server data failed.", 
+			__func__, __LINE__);
+		return -1;
+	}
+	int idx = 10;// 入队列可能会失败最多尝试10次
+	while (tgg_enqueue_trans(bwdata) < 0 && idx-- > 0 ) {
+		usleep(10);
+	}
+	static int loop_times_sndserver = 0;
+	// 前期调试要看是否经常出现重试
+	if (idx < 9) {
+		++loop_times_sndserver;
+		if(loop_times_sndserver % 100 == 0) {
+			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.", loop_times_sndserver
+				__func__, __LINE__);
+		}
+	}
+	if (idx <= 0) {
+		RTE_LOG(ERR, USER1, "[%s][%d] Enqueue bw server data failed.", 
+			__func__, __LINE__);
+		return -1;
+	}
+	return 0;
+}
+
+int enqueue_data_send_server(int core_id, int fd, const std::string& data, int fdopt)
+{
+	tgg_bw_data* bwdata = format_send_server_data(core_id, fd, data, fdopt);
+	if (!bwdata) {
+		RTE_LOG(ERR, USER1, "[%s][%d] Format bw server data failed.", 
+			__func__, __LINE__);
+		return -1;
+	}
+	int idx = 10;// 入队列可能会失败最多尝试10次
+	int queue_id = fd % TggConfigure::instance::get_bwsvr_count();
+	while (tgg_enqueue_bwsnd(queue_id, bwdata) < 0 && idx-- > 0 ) {
+		usleep(10);
+	}
+	static int loop_times_sndserver = 0;
+	// 前期调试要看是否经常出现重试
+	if (idx < 9) {
+		++loop_times_sndserver;
+		if(loop_times_sndserver % 100 == 0) {
+			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.", loop_times_sndserver
+				__func__, __LINE__);
+		}
+	}
+	if (idx <= 0) {
+		RTE_LOG(ERR, USER1, "[%s][%d] Enqueue bw server data failed.", 
+			__func__, __LINE__);
+		return -1;
+	}
+	return 0;
+}
+
 
 #include <sys/prctl.h>
 void init_core(const char* dumpfile)

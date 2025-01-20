@@ -10,7 +10,7 @@ endif
 PKGCONF ?= pkg-config
 
 DEBUG= -g
-BINARY = gwrcv gwprc gwredis
+BINARY = gwrcv gwcliprc gwbwprc gwredis
 FF_LIBS+= $(shell $(PKGCONF) --static --libs libdpdk)
 FF_LIBS+= -L${FF_PATH}/lib -Wl,--whole-archive,-lfstack,--no-whole-archive -L$(FF_PATH)/adapter/micro_thread -lmt
 FF_LIBS+= -Wl,--no-whole-archive -lrt -lm -ldl -lcrypto -lpthread -lnuma -lhiredis -lstdc++
@@ -69,12 +69,21 @@ clean:
 
 
 MASTER_OBJ = dpdk_init.o master.o tgg_comm/tgg_common.o tgg_comm/tgg_bw_cache.o \
-			tgg_comm/tgg_lock.o
+			tgg_comm/tgg_lock.o tgg_comm/tgg_cliprc.o comm/RWIni.o comm/tgg_conf.o 
 
-PROCESS_OBJ = process.o dpdk_init.o bwserver.o cmd/CmdProcessor.o tgg_comm/tgg_bw_cache.o\
+
+CLIPRC_OBJ = cliprc.o dpdk_init.o tgg_comm/tgg_bw_cache.o \
 				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
 				tgg_comm/tgg_lock.o comm/Websocket.o comm/Encrypt.o comm/RedisClient.o \
-				tgg_comm/WsConsumer.o comm/Serialize.o
+				tgg_comm/WsConsumer.o tgg_comm/tgg_conf.o \
+				comm/RWIni.o comm/tgg_conf.o
+
+
+BWSERVER_OBJ = bwprc.o dpdk_init.o cmd/CmdProcessor.o tgg_comm/tgg_bw_cache.o\
+				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
+				tgg_comm/tgg_lock.o comm/Encrypt.o comm/RedisClient.o \
+				comm/Serialize.o tgg_comm/tgg_conf.o tgg_comm/tgg_bwserver.o \
+				comm/RWIni.o comm/tgg_conf.o tgg_comm/tgg_transport.o
 
 REDIS_OBJ = unittest/rediscli_test.o tgg_comm/tgg_bw_cache.o tgg_comm/tgg_common.o \
 			tgg_comm/tgg_data_opt.o dpdk_init.o tgg_comm/tgg_lock.o comm/Encrypt.o \
@@ -84,9 +93,13 @@ gwrcv: $(MASTER_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
 	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl $(FF_LIBS) $(CRESET)
 
-gwprc: $(PROCESS_OBJ)
+gwcliprc: $(CLIPRC_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
 	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl -lz -lssl $(FF_LIBS) $(CRESET)
+
+gwbwprc: $(BWSERVER_OBJ)
+	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
+	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl -lz -lco -lssl $(FF_LIBS) $(CRESET)
 
 gwredis: $(REDIS_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
