@@ -68,4 +68,19 @@ int tgg_add_idx(int idx);
 int tgg_del_idx(int idx);
 int tgg_check_idx_exist(int idx);
 
+int tgg_add_bwfdx(int bwfdx);
+int tgg_del_bwfdx(int bwfdx);
+int tgg_check_bwfdx_exist(int bwfdx);
+int tgg_get_bwfdx_count();
+int tgg_get_bwfdx_bypos(int pos);
+void tgg_iter_del_bwfdx(int prc_id);
+
+// 获取负载最小的bwfdx
+int tgg_get_load_balance();
+
+
+int tgg_check_bwwkkey_exist(const char* bwwkkey);
+int tgg_del_bwwkkey(const char* bwwkkey);
+int tgg_add_bwwkkey(const char* bwwkkey);
+
 #endif  // __TGG_BW_CACHE_H__

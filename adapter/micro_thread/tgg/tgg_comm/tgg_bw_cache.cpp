@@ -11,6 +11,8 @@ extern const struct rte_hash *g_uid_hash;
 extern const struct rte_hash *g_cid_hash;
 extern const struct rte_hash *g_uidgid_hash;
 extern const struct rte_hash *g_idx_hash;
+extern const struct rte_hash *g_bwfdx_hash;
+extern const struct rte_hash *g_bwwkkey_hash;
 
 
 typedef void (*tgg_add_data)(void*);
@@ -596,15 +598,18 @@ void tgg_iterprint_gidsbyuid(const char* uid)
 
 int tgg_add_idx(int idx)
 {
-    int ret = rte_hash_lookup_with_hash(g_idx_hash, &idx, rte_hash_crc(&idx, sizeof(int), 0));
-    if (ret < 0) {// 首次插入
+    ReadLock lock(get_idxhsh_lock());
+    // 只添加key  且不需要value时，不需要先查找
+    // int ret = rte_hash_lookup_with_hash(g_idx_hash, &idx, rte_hash_crc(&idx, sizeof(int), 0));
+    // if (ret < 0) {// 首次插入
         return rte_hash_add_key_with_hash(g_idx_hash, &idx, rte_hash_crc(&idx, sizeof(int), 0));
-    }
-    RTE_LOG(ERR, USER1, "[%s][%d] idx: %d already exist.\n", __func__, __LINE__, idx);
-    return -1;
+    // }
+    // RTE_LOG(ERR, USER1, "[%s][%d] idx: %d already exist.\n", __func__, __LINE__, idx);
+    // return -1;
 }
 int tgg_del_idx(int idx)
 {
+    ReadLock lock(get_idxhsh_lock());
     int ret = rte_hash_del_key_with_hash(g_idx_hash, &idx, rte_hash_crc(&idx, sizeof(idx), 0));
     if (ret > 0) {
         // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
@@ -620,5 +625,169 @@ int tgg_del_idx(int idx)
 }
 int tgg_check_idx_exist(int idx)
 {
-    return rte_hash_del_key_with_hash(g_idx_hash, &idx, rte_hash_crc(&idx, sizeof(idx), 0));
+    return rte_hash_lookup_with_hash(g_idx_hash, &idx, rte_hash_crc(&idx, sizeof(int), 0));
+}
+
+int tgg_add_bwfdx(int bwfdx)
+{
+    ReadLock lock(get_bwfdxhsh_lock());
+    // TODO  不查询直接插入，根据返回码判断插入成功、失败、已存在等
+    // int ret = rte_hash_lookup_with_hash(g_bwfdx_hash, &bwfdx, rte_hash_crc(&bwfdx, sizeof(int), 0));
+    // if (ret < 0) {// 首次插入
+        return rte_hash_add_key_with_hash(g_bwfdx_hash, &bwfdx, rte_hash_crc(&bwfdx, sizeof(int), 0));
+    // }
+    // RTE_LOG(ERR, USER1, "[%s][%d] bwfdx: %d already exist.\n", __func__, __LINE__, bwfdx);
+    // return -1;
+}
+
+int tgg_del_bwfdx(int bwfdx)
+{
+    ReadLock lock(get_bwfdxhsh_lock());
+    int ret = rte_hash_del_key_with_hash(g_bwfdx_hash, &bwfdx, rte_hash_crc(&bwfdx, sizeof(bwfdx), 0));
+    if (ret > 0) {
+        // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
+        if (rte_hash_free_key_with_position(g_bwfdx_hash, ret) < 0) {
+            RTE_LOG(ERR, USER1, "[%s][%d]Del bwfdx[%d] pos failed:%d.\n", __func__, __LINE__, bwfdx, ret);
+            return -EINVAL;
+        }
+    } else {
+        RTE_LOG(ERR, USER1, "[%s][%d]Del bwfdx[%d] data failed:%d.\n", __func__, __LINE__, bwfdx, ret);
+        return -EINVAL;
+    }
+    return 0;
+}
+
+int tgg_check_bwfdx_exist(int bwfdx)
+{
+    ReadLock lock(get_bwfdxhsh_lock());
+    return rte_hash_lookup_with_hash(g_bwfdx_hash, &bwfdx, rte_hash_crc(&bwfdx, sizeof(int), 0));
+}
+
+int tgg_get_bwfdx_count()
+{
+    return rte_hash_count(g_bwfdx_hash);
+}
+
+int tgg_get_bwfdx_bypos(int pos)
+{
+    ReadLock lock(get_bwfdxhsh_lock());
+    int* key = NULL;
+    if (rte_hash_get_key_with_position(g_bwfdx_hash, pos, &key) < 0)
+        return -1;
+    return *key;
+}
+
+int tgg_get_load_balance()
+{
+    // 假设负载是一个简单的整数，表示负载量
+    int min_load = 0;
+    int bwfdx = -1, cur_bwfdx = -1;
+    void *key;
+    void *value;
+    uint32_t index;
+    int ret;
+
+    ReadLock lock(get_bwfdxhsh_lock());
+    // 遍历哈希表，找到负载最小的 fd
+    ret = rte_hash_iterate(g_bwfdx_hash, &index, &key, &value);
+    if (ret < 0) {
+        if (ret == -ENOENT) {
+            // 哈希表为空，返回错误或采取相应措施
+            printf("Hash table is empty.\n");
+            return -1;
+        } else {
+            // 其他错误
+            perror("rte_hash_iterate");
+            return -1;
+        }
+    }
+    bwfdx = *(int *)key;
+    min_load = tgg_get_bwfdx_load(bwfdx & 0xf, bwfdx >> 8);
+
+    while ((ret = rte_hash_iterate(g_bwfdx_hash, &index, &key, &value)) >= 0) {
+        int cur_bwfdx = *(int *)key;
+        int cur_load = tgg_get_bwfdx_load(cur_bwfdx & 0xf, cur_bwfdx >> 8);
+        if (cur_load < min_load) {
+            bwfdx = cur_bwfdx;
+            min_load = current_load;
+        }
+    }
+
+    // 找到最小负载的 fd 后，可以对其进行相应操作，例如将新的请求发送到该 fd
+    if (bwfdx!= -1) {
+        // 这里不更新负载，外面可能会失败
+        printf("Assigning new request to fd %d with load %d\n", bwfdx, min_load);
+        return bwfdx;
+    } else {
+        printf("No valid fd found.\n");
+        return -1;
+    }
+}
+
+void tgg_iter_del_bwfdx(int prc_id)
+{
+    void *key;
+    void *value;
+    uint32_t index;
+    int ret;
+    ReadLock lock(get_bwfdxhsh_lock());
+
+    // 开始迭代哈希表
+    ret = rte_hash_iterate(g_bwfdx_hash, &index, &key, &value);
+    while (ret >= 0) {
+        // 删除当前键
+        if((*key)&0xf == prc_id) {
+            ret = rte_hash_del_key(g_bwfdx_hash, key);
+            if (ret < 0) {
+                if (ret == -ENOENT) {
+                    // 键不存在，可能已经被删除或未添加成功
+                    printf("Key not found during deletion.\n");
+                } else {
+                    perror("rte_hash_del_key");
+                }
+            } else {
+                printf("Deleted key: %d\n", *(int *)key);
+            }
+        }
+        // 继续迭代
+        ret = rte_hash_iterate(g_bwfdx_hash, &index, &key, &value);
+    }
+    if (ret < 0 && ret!= -ENOENT) {
+        perror("rte_hash_iterate");
+    }
+}
+
+int tgg_add_bwwkkey(const char* bwwkkey)
+{
+    ReadLock lock(get_bwwkkeyhsh_lock());
+    // TODO  不查询直接插入，根据返回码判断插入成功、失败、已存在等
+    // int ret = rte_hash_lookup_with_hash(g_bwfdx_hash, &bwfdx, rte_hash_crc(&bwfdx, sizeof(int), 0));
+    // if (ret < 0) {// 首次插入
+        return rte_hash_add_key_with_hash(g_bwwkkey_hash, bwwkkey, rte_hash_crc(bwwkkey, sizeof(int), 0));
+    // }
+    // RTE_LOG(ERR, USER1, "[%s][%d] bwfdx: %d already exist.\n", __func__, __LINE__, bwfdx);
+    // return -1;
+}
+
+int tgg_del_bwwkkey(const char* bwwkkey)
+{
+    ReadLock lock(get_bwwkkeyhsh_lock());
+    int ret = rte_hash_del_key_with_hash(g_bwwkkey_hash, bwwkkey, rte_hash_crc(bwwkkey, sizeof(bwwkkey), 0));
+    if (ret > 0) {
+        // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
+        if (rte_hash_free_key_with_position(g_bwwkkey_hash, ret) < 0) {
+            RTE_LOG(ERR, USER1, "[%s][%d]Del bwwkkey[%s] pos failed:%d.\n", __func__, __LINE__, bwwkkey, ret);
+            return -EINVAL;
+        }
+    } else {
+        RTE_LOG(ERR, USER1, "[%s][%d]Del bwwkkey[%s] data failed:%d.\n", __func__, __LINE__, bwwkkey, ret);
+        return -EINVAL;
+    }
+    return 0;
+}
+
+int tgg_check_bwwkkey_exist(const char* bwwkkey)
+{
+    ReadLock lock(get_bwwkkeyhsh_lock());
+    return rte_hash_lookup_with_hash(g_bwwkkey_hash, bwwkkey, rte_hash_crc(bwwkkey, sizeof(int), 0));
 }
