@@ -4,8 +4,9 @@
 #include <rte_mempool.h>
 #include "tgg_comm/tgg_common.h"
 #include "tgg_comm/WsConsumer.h"
-
+#include <chrono>
 extern struct rte_mempool* g_mempool_read;
+extern int g_run;
 
 
 void tgg_process_read(int lcore_idx)
@@ -14,7 +15,8 @@ void tgg_process_read(int lcore_idx)
         tgg_read_data* rdata = NULL;
         if (tgg_dequeue_cliprc(lcore_idx, &rdata) < 0) {
             // 队列空
-            usleep(10);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            //usleep(10);
             continue;
         }
         if (!rdata) {

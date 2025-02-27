@@ -10,14 +10,15 @@
 #include "dpdk_init.h"
 #include "tgg_comm/tgg_transport.h"
 #include "comm/Encrypt.hpp"
-#include "tgg_comm/tgg_bwserver.h"
 #include "tgg_comm/tgg_bw_cache.h"
 #include "tgg_comm/tgg_bwcomm.h"
 #include "tgg_comm/tgg_conf.h"
 #include <vector>
 #include "tgg_comm/tgg_cliprc.h"
+#include "tgg_comm/tgg_conf.h"
+
 // 绝对路径
-const char* f_stack_ini = "/data/code/f-stack/config.ini"
+const char* f_stack_ini = "/data/code/f-stack/config.ini";
 
 int g_run = 1;
 static const char* s_dump_file = "/var/corefiles/tgg_gw_bwprc_core";
@@ -30,6 +31,7 @@ extern const char* g_rte_malloc_type;
 extern struct rte_mempool* g_mempool_read;
 extern struct rte_mempool* g_mempool_write;
 extern struct rte_mempool* g_mempool_bwrcv;
+extern int g_listen_fd;
 
 void signal_handler(int signum)
 {
@@ -73,24 +75,24 @@ void signal_handler(int signum)
 	}
 }
 
-static int tgg_process_bwrcv()
-{
-	tgg_bw_data* bdata = NULL;
-	if (tgg_dequeue_bwrcv(&bdata) < 0) {
-	    // 队列空
-		return 1;
-	}
-	if (!bdata) {
-		return 0;
-	}
-	if (!g_run) {
-		rte_free(bdata->data);
-		memset(bdata, 0, sizeof(tgg_bw_data));
-		rte_mempool_put(g_mempool_bwrcv, (void*)bdata);
-		return -1;
-	}
-	return 0;
-}
+// static int tgg_process_bwrcv()
+// {
+// 	tgg_bw_data* bdata = NULL;
+// 	if (tgg_dequeue_bwrcv(g_prc_id, &bdata) < 0) {
+// 	    // 队列空
+// 		return 1;
+// 	}
+// 	if (!bdata) {
+// 		return 0;
+// 	}
+// 	if (!g_run) {
+// 		rte_free(bdata->data);
+// 		memset(bdata, 0, sizeof(tgg_bw_data));
+// 		rte_mempool_put(g_mempool_bwrcv, (void*)bdata);
+// 		return -1;
+// 	}
+// 	return 0;
+// }
 
 void fork_oneprocess(void* data)
 {
@@ -107,7 +109,7 @@ void fork_oneprocess(void* data)
         // 启动之前，先清理数据，防止上次异常退出导致资源没有正常清理
         tgg_init_bwfdx_prc(g_prc_id);
 
-        for(int i = 0; i < ; i++)
+        for(int i = 0; i < TggConfigure::getInstance()->get_bwsvr_co_count() ; i++)
         {
       		// read操作的协程
             task_t * task = (task_t*)calloc( 1,sizeof(task_t) );
@@ -117,11 +119,12 @@ void fork_oneprocess(void* data)
         }
 
         // write操作的协程
-        co_create( &(task->co),NULL,write_routine,data );
-        co_resume( task->co );
+        stCoRoutine_t *write_co = NULL;
+        co_create( &write_co, NULL, write_routine, data );
+        co_resume( write_co );
 
         stCoRoutine_t *accept_co = NULL;
-        co_create( &accept_co,NULL,accept_routine,0 );
+        co_create( &accept_co, NULL, accept_routine, 0 );
         co_resume( accept_co );
 
         // 协程启动完后，把进程的状态设置为正在运行
@@ -133,7 +136,7 @@ void fork_oneprocess(void* data)
 
 		// init_bwserver();
 		// tgg_gw_process(NULL);
-		uninit_bwserver();
+		// uninit_bwserver();
         prc_exit(0, "child exit.\n");
     } else {
         // 父进程
@@ -207,15 +210,19 @@ void tgg_sig_init()
         perror("Error setting signal handler");
         prc_exit(-1, "Error setting signal handler");
     }
-    // 子进程退出
-    struct sigaction sa;
-    sa.sa_handler = child_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-	if (sigaction(SIGCHLD, &sa, NULL) == SIG_ERR) {
+    if (signal(SIGTERM, signal_handler) == SIG_ERR) {
         perror("Error setting signal handler");
         prc_exit(-1, "Error setting signal handler");
     }
+    // // 子进程退出
+    // struct sigaction sa;
+    // sa.sa_handler = signal_handler;
+    // sigemptyset(&sa.sa_mask);
+    // sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+	// if (sigaction(SIGCHLD, &sa, NULL) == SIG_ERR) {
+    //     perror("Error setting signal handler");
+    //     prc_exit(-1, "Error setting signal handler");
+    // }
 
 }
 
@@ -240,7 +247,7 @@ static void prc_dpdk_eal_init(int argc, char **argv)
 	char mp_flag[] = "--proc-type=secondary";
 	char log_flag[] = "--log-level=6";
 	char *argp[argc + 4];
-	uint16_t nb_ports;
+	// uint16_t nb_ports;
 
 	argp[0] = argv[0];
 	argp[1] = c_flag;
@@ -248,12 +255,12 @@ static void prc_dpdk_eal_init(int argc, char **argv)
 	argp[3] = mp_flag;
 	argp[4] = log_flag;
 
-	for (i = 1; i < argc; i++)
+	for (int i = 1; i < argc; i++)
 		argp[i + 4] = argv[i];
 
 	argc += 4;
 
-	ret = rte_eal_init(argc, argp);
+	int ret = rte_eal_init(argc, argp);
 	if (ret < 0)
 		rte_panic("Cannot init EAL\n");
 }
@@ -262,7 +269,6 @@ static void prc_dpdk_eal_init(int argc, char **argv)
 int main(int argc, char *argv[])
 {
 	init_core(s_dump_file);
-	std::string 
 	if (tgg_init_config(argc, argv) < 0) {
 		printf("init config error.");
 		return -1;
@@ -273,14 +279,15 @@ int main(int argc, char *argv[])
 	init_flag_for_process();
 
 
-
-	g_listen_fd = create_tcp_socket( port,ip,true );
+    unsigned int port = TggConfigure::getInstance()->get_bwsvr_bw_port();
+    const std::string& ip = TggConfigure::getInstance()->get_bwsvr_bw_addr();
+	g_listen_fd = create_tcp_socket( port, ip.c_str(), true );
     listen( g_listen_fd,1024 );
     if(g_listen_fd==-1){
         printf("Port %d is in use\n", port);
         return -1;
     }
-    printf("listen %d %s:%d\n",g_listen_fd,ip,port);
+    printf("listen %d %s:%d\n",g_listen_fd, ip.c_str(), port);
 
     set_non_block( g_listen_fd );
 

@@ -3,16 +3,18 @@
 #include "tgg_comm/tgg_common.h"
 #include "tgg_comm/tgg_struct.h"
 #include "tgg_bwcomm.h"
-#include "cmd/CmdProcessor.h"
+// #include "cmd/CmdProcessor.h"
 #include "WsConsumer.h"
 #include "comm/Encrypt.hpp"
 #include "tgg_comm/tgg_bw_cache.h"
+#include "tgg_transport.h"
+#include "tgg_struct.h"
 
 
 int WsConsumer::ConsumerData(void* data)
 {
     tgg_read_data* rdata = (tgg_read_data*)data;
-    if (!ConnectionValid(rdata->fd, data)) {
+    if (!ConnectionValid(rdata->coreid, rdata->fd, data)) {
         _CleanAndClose();
         return 0;
     }
@@ -62,14 +64,16 @@ bool WsConsumer::ConnectionValid(int core_id, int fd, void* data)
 void WsConsumer::OnClose()
 {// 子类继承后要执行clean_buffer清理缓存
     if (tgg_get_cli_authorized(this->core_id, this->fd) == AUTH_TYPE_TOKENCHECKED) {
-        // 尚未绑定的连接不需要解绑  TOTO 检查绑定过程中失败的是否有清理
-        nlohmann::json obj;
-        CmdUnBindUid ubuid(this->fd, this->data, obj);
-        ubuid.ExecCmd();// 解绑，从hash表中删除连接
+        // TODO 构造消息让gwbwrcv去解绑还是就在这里解绑？  
+        // 当前选择关闭时直接解绑，防止消息丢失导致连接未解绑
+        tgg_free_session(this->core_id, this->fd);
+        // nlohmann::json obj;
+        // CmdUnBindUid ubuid(this->core_id, this->fd, this->data, obj);
+        // ubuid.ExecCmd();// 解绑，从hash表中删除连接
     }
     std::string data = "\x88\x02\x03\xe8";// 关闭websocket
     SendONnoAuth(data, FD_WRITE);
-    Send2Server(this->core_id, this->fd, FD_CLOSE, "");
+    Send2Server(this->core_id, this->fd, "", FD_CLOSE);
     // SendData("", FD_CLOSE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
 }
 // 握手
@@ -89,7 +93,7 @@ void WsConsumer::OnHandShake(const std::string& response)
         return;
     }
     SendONnoAuth(sendData, FD_WRITE);
-    Send2Server(this->core_id, this->fd, FD_NEW, "");
+    Send2Server(this->core_id, this->fd, "", FD_NEW);
 }
 
 void WsConsumer::OnPing(const std::string& response)
@@ -104,7 +108,7 @@ void WsConsumer::OnPong(const std::string& response)
 
 void WsConsumer::OnMessage(const std::string& msg)
 {
-    Send2Server(this->core_id, this->fd, FD_WRITE, msg);
+    Send2Server(this->core_id, this->fd, msg, FD_WRITE);
 
 
 

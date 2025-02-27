@@ -17,6 +17,7 @@ static int s_fd_timeout = 60*1000;
 extern const char* g_rte_malloc_type;
 extern struct rte_mempool* g_mempool_read;
 extern struct rte_mempool* g_mempool_write;
+extern struct rte_ring* g_ring_cliprcs[MAX_LCORE_COUNT];// 客户端上行
 // extern struct rte_ring* g_ring_read;
 extern ushort g_gateway_port;
 extern tgg_stats g_tgg_stats;
@@ -392,4 +393,5 @@ int main(int argc, char *argv[])
 	} else {
 		tgg_secondary_uninit();
 	}
+	return 0;
 }

@@ -66,11 +66,11 @@ int get_connection_info(int fd, const char* ip, unsigned short* port)
 //     return -1;
 // }
 
-static void init_bwinfo(tgg_bw_info* bwinfo)
-{
-    memset(bwinfo, 0, sizeof(tgg_bw_info));
-    bwinfo->idx = TGG_FD_CLOSED;
-}
+// static void init_bwinfo(tgg_bw_info* bwinfo)
+// {
+//     memset(bwinfo, 0, sizeof(tgg_bw_info));
+//     bwinfo->idx = TGG_FD_CLOSED;
+// }
 
 //tgg_bw_info* lookup_bwinfo(int fd)
 // bool tgg_exist_bw_idx(int bwidx)

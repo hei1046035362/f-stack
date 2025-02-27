@@ -1,5 +1,7 @@
 #include "tgg_common.h"
 #include "tgg_bw_cache.h"
+#include "cmd/GatewayProtocal.h"
+#include "tgg_conf.h"
 #include <rte_ring.h>
 #include <rte_memzone.h>
 #include <rte_mempool.h>
@@ -205,7 +207,7 @@ int tgg_set_cli_port(int core_id, int fd, ushort port)
 	return 0;
 }
 
-int tgg_set_cli_bwfdx(int core_id, int fd, int bwfdx);
+int tgg_set_cli_bwfdx(int core_id, int fd, int bwfdx)
 {
 	SpinLock lock(get_cli_lock());
 	((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].bwfdx = bwfdx;
@@ -238,7 +240,7 @@ int tgg_set_cli_reserved(int core_id, int fd, const char* reserved)
 
 void tgg_init_bwfdx_prc(int prc_id)
 {
-	tgg_iter_del_bwfdx();
+	tgg_iter_del_bwfdx(prc_id);
 	for(int i = 0; i < g_bwfdx_limit; ++i) {
 		if(tgg_get_bwfdx_status(prc_id, i)) {
 			tgg_close_bw_session(prc_id, i);
@@ -258,7 +260,7 @@ int tgg_get_bwfdx_load(int prc_id, int fd)
 	return ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].load;
 }
 
-int tgg_get_bwfdx_cmd(int prc_id, int fd);
+int tgg_get_bwfdx_cmd(int prc_id, int fd)
 {
 	SpinLock lock(get_bwfdx_lock());
 	return ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].cmd;
@@ -350,16 +352,16 @@ int tgg_set_bwfdx_port(int prc_id, int fd, ushort port)
 int tgg_set_bwfdx_seckey(int prc_id, int fd, const char* secretkey)
 {
 	SpinLock lock(get_cli_lock());
-	memset(((tgg_bw_info*)g_fd_zones[core_id]->addr)[fd].secretkey, 0, sizeof(tgg_bw_info::secretkey));
-	strncpy(((tgg_bw_info*)g_fd_zones[core_id]->addr)[fd].secretkey, secretkey, strlen(secretkey));
+	memset(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].secretkey, 0, sizeof(tgg_bw_info::secretkey));
+	strncpy(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].secretkey, secretkey, strlen(secretkey));
 	return 0;
 }
 
 int tgg_set_bwfdx_workerkey(int prc_id, int fd, const char* workerkey)
 {
 	SpinLock lock(get_cli_lock());
-	memset(((tgg_bw_info*)g_fd_zones[core_id]->addr)[fd].workerkey, 0, sizeof(tgg_bw_info::workerkey));
-	strncpy(((tgg_bw_info*)g_fd_zones[core_id]->addr)[fd].workerkey, workerkey, strlen(workerkey));
+	memset(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].workerkey, 0, sizeof(tgg_bw_info::workerkey));
+	strncpy(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].workerkey, workerkey, strlen(workerkey));
 	return 0;
 }
 
@@ -383,7 +385,7 @@ void tgg_new_bw_session(int prc_id, int fd, int cmd,
     tgg_set_bwfdx_port(prc_id, fd, remote_port);
 	tgg_set_bwfdx_authorized(prc_id, fd, 1);
 	tgg_set_bwfdx_status(prc_id, fd, 1);
-	int cmd = tgg_get_bwfdx_cmd(prc_id, fd);
+	// int cmd = tgg_get_bwfdx_cmd(prc_id, fd);
 	if(cmd == GatewayProtocal::CMD_WORKER_CONNECT) {
 		std::string workerkey = tgg_get_bwfdx_workerkey(prc_id, fd);
 		tgg_add_bwwkkey(workerkey.c_str());
@@ -405,7 +407,7 @@ int tgg_clean_bwfdx(int prc_id, int fd)
 {
 	SpinLock lock(get_bwfdx_lock());
 	// tgg_bw_info* bw = &((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd];
-	memset(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd], 0, sizeof(tgg_bw_info));
+	memset(&(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd]), 0, sizeof(tgg_bw_info));
 	// bw->idx = get_valid_idx();
 	// if(bw->idx < 0) {
 	// 	return -1;
@@ -736,8 +738,8 @@ int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, in
 	if (idx < 9) {
 		++loop_times_sndcli;
 		if(loop_times_sndcli % 100 == 0) {
-			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.", loop_times_sndcli
-				__func__, __LINE__);
+			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.",
+				__func__, __LINE__, loop_times_sndcli);
 		}
 	}
 	if (idx <= 0) {
@@ -771,7 +773,7 @@ tgg_read_data* format_send_server_data(int core_id, int fd, const std::string& s
 	bwdata->data_len = sdata.length();
 	bwdata->fd_opt = fdopt;
 	bwdata->fd = fd;
-	bwdata->core_id = core_id;
+	bwdata->coreid = core_id;
 	return bwdata;
 }
 
@@ -792,8 +794,8 @@ int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
 	if (idx < 9) {
 		++loop_times_sndserver;
 		if(loop_times_sndserver % 100 == 0) {
-			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.", loop_times_sndserver
-				__func__, __LINE__);
+			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.", 
+				__func__, __LINE__, loop_times_sndserver);
 		}
 	}
 	if (idx <= 0) {
@@ -813,7 +815,7 @@ int enqueue_data_send_server(int core_id, int fd, const std::string& data, int f
 		return -1;
 	}
 	int idx = 10;// 入队列可能会失败最多尝试10次
-	int queue_id = fd % TggConfigure::instance::get_bwsvr_count();
+	int queue_id = fd % TggConfigure::getInstance()->get_bwsvr_count();
 	while (tgg_enqueue_bwsnd(queue_id, bwdata) < 0 && idx-- > 0 ) {
 		usleep(10);
 	}
@@ -822,8 +824,8 @@ int enqueue_data_send_server(int core_id, int fd, const std::string& data, int f
 	if (idx < 9) {
 		++loop_times_sndserver;
 		if(loop_times_sndserver % 100 == 0) {
-			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.", loop_times_sndserver
-				__func__, __LINE__);
+			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.",
+				__func__, __LINE__, loop_times_sndserver);
 		}
 	}
 	if (idx <= 0) {
