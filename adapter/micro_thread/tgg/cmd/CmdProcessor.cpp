@@ -16,6 +16,9 @@
 #include "comm/Encrypt.hpp"
 #include "tgg_comm/BwMsgPack.hpp"
 #include "tgg_comm/tgg_bw_cache.h"
+#include "comm/common.hpp"
+#include "tgg_comm/tgg_transport.h"
+
 static int s_compress_flag = 0;
 static int s_is_open_binary = 0;
 
@@ -111,7 +114,7 @@ int CmdWorkerConnect::ExecCmd()
             close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             return -1;
         }
-        std::string bwWokerkey = uint32_to_hex() + ":" + worker_info["worker_key"];
+        std::string bwWokerkey = uint32_to_hex(remote_ip) + ":" + worker_info["worker_key"].get<std::string>();
         if (tgg_check_bwwkkey_exist(bwWokerkey.c_str()) < 0) {// 在一台服务器上businessWorker->name不能相同
             close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             // tgg_close_bw_session(this->prc_id, this->fd);
@@ -180,7 +183,8 @@ int CmdGatewayClientConnect::ExecCmd()
         // free_bw_session(this->prc_id, this->fd);
         return -1;
     }
-    tgg_new_bw_session(this->prc_id, this->fd, GatewayProtocal::CMD_GATEWAY_CLIENT_CONNECT);
+    // CMD_GATEWAY_CLIENT_CONNECT 类型的连接没有workerkey
+    tgg_new_bw_session(this->prc_id, this->fd, GatewayProtocal::CMD_GATEWAY_CLIENT_CONNECT, "");
     return 0;
 }
 
@@ -219,25 +223,28 @@ int CmdSendToGroup::ExecCmd()
     if (ext_data.contains("group") && ext_data["group"].is_array()) {
         // 遍历需要发送数据的所有group
         for (const auto& element : ext_data["group"]) {
-            // 通过gid找到在线的fd列表
+            // 通过gid找到在线的fdx列表
             std::list<std::string> lstFds;
             if (tgg_get_fdsbygid(element.get<std::string>().c_str(), lstFds) < 0) {// 没找到gid
                 RTE_LOG(INFO, USER1, "[%s][%d] gid[%s] not exist.\n", __func__, __LINE__, element.get<std::string>().c_str());
                 continue;
             }
-            // 遍历group中的<fd:idx>列表,根据fd找到cid
+            // 遍历group中的<fdx:idx>列表,根据fdx找到cid
             std::list<std::string>::iterator itFd = lstFds.begin();
             while (itFd != lstFds.end()) {
-                int fd = get_fd_by_fdidx(*itFd);
-                if(fd < 0) {
+                int fdx = get_fd_by_fdidx(*itFd);
+                if(fdx < 0) {
                     RTE_LOG(INFO, USER1, "[%s][%d] parse fdidx[%s] failed.\n", __func__, __LINE__, (*itFd).c_str());
                     itFd++;
                     continue;
                 }
-                std::string cid = tgg_get_cli_cid(fd);
+                int coreid = fdx & 0xf;
+                int fd = fdx >> 8;
+
+                std::string cid = tgg_get_cli_cid(coreid, fd);
                 if(cid.empty()) {
-                    RTE_LOG(INFO, USER1, "[%s][%d] cid for fd[%d] gid[%s] not exist.\n", 
-                        __func__, __LINE__, fd, element.get<std::string>().c_str());
+                    RTE_LOG(INFO, USER1, "[%s][%d] cid for fdx[%d] gid[%s] not exist.\n", 
+                        __func__, __LINE__, fdx, element.get<std::string>().c_str());
                     itFd++;
                     continue;
                 }
@@ -245,7 +252,7 @@ int CmdSendToGroup::ExecCmd()
                 std::set<std::string>::iterator iter = setExeptCid.find(cid);
                 if(iter == setExeptCid.end()) {
                     // 不在排除队列中就加入发送队列
-                    lstAllFds.push_back(fd);
+                    lstAllFds.push_back(fdx);
                 }
                 itFd++;
             }
@@ -274,7 +281,7 @@ int CmdDestroy::ExecCmd()
 {
     std::string scid = get_valid_cid(jdata["connection_id"]);
     std::string data = "\x88\x02\x03\xe8";// 关闭websocket
-    WsConsumer::Send2Client(scid.c_str(), data, FD_WRITE | FD_CLOSE);
+    Send2Client(scid.c_str(), data, FD_WRITE | FD_CLOSE);
     return 0;
 }
 
@@ -579,8 +586,10 @@ int CmdUnBindUid::ExecCmd()
     int fdx = tgg_get_fdbycid(scid.c_str());
     if(fdx < 0) {
         RTE_LOG(INFO, USER1, "[%s][%d] get fdx by cid[%s] failed.\n", __func__, __LINE__, scid.c_str());
-        return -1;
+        // TODO 有可能前面已经删除了，还需要观察
+        return 0;
     }
+    RTE_LOG(INFO, USER1, "[%s][%d] free cid[%s].\n", __func__, __LINE__, scid.c_str());
     return tgg_free_session(fdx & 0xf, fdx >> 8);
 }
 
@@ -913,7 +922,7 @@ void exec_cmd_processor(int prc_id, int fd, void* data)
     int authorized = tgg_get_bwfdx_authorized(prc_id, fd);
     if (!authorized && cmd != CMD_WORKER_CONNECT && 
         cmd != CMD_GATEWAY_CLIENT_CONNECT) {
-        free_bw_session(prc_id, fd);
+        tgg_close_bw_session(prc_id, fd);
         close(fd);
         RTE_LOG(ERR, USER1, "[%s][%d] command[%d] error or not authorized[%d].\n", 
             __func__, __LINE__, cmd, authorized);

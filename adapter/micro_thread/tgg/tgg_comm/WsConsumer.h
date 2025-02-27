@@ -16,7 +16,7 @@ public:
     int ConsumerData(void* data);
 
 protected:
-    bool ConnectionValid(int fd, void* data);
+    bool ConnectionValid(int core_id, int fd, void* data);
 
     virtual void OnClose();
     // 握手

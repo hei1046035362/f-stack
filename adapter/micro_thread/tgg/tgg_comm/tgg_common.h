@@ -98,7 +98,7 @@ void* dpdk_rte_malloc(int size);
 
 // bw侧接口
 void tgg_new_bw_session(int prc_id, int fd, int cmd, 
-    uint32_t remote_ip = 0, ushort remote_port = 0);
+    const char* workerkey, uint32_t remote_ip = 0, ushort remote_port = 0);
 void tgg_close_bw_session(int prc_id, int fd);
 
 // 业务侧接口
@@ -130,6 +130,7 @@ int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx
 
 // 发送给服务端
 tgg_read_data* format_send_server_data(int core_id, int fd, const std::string& sdata, int fdopt);
+int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt);
 int enqueue_data_send_server(int core_id, int fd, const std::string& data, int fdopt);
 
 #endif  // _TGG_COMMON_H_

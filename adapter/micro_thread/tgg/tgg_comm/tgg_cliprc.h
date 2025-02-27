@@ -14,7 +14,7 @@ public:
     // 启动所有线程的函数，需要传入线程函数以及对应的参数（示例中线程函数接受一个整数参数）
     template<typename Func, typename... Args>
     void startThreads(Func&& func, Args&&... args) {
-        for (int i = 0; i < lcoreIdx.size(); ++i) {
+        for (unsigned int i = 0; i < lcoreIdx.size(); ++i) {
             threads.push_back(std::thread(func, args..., lcoreIdx[i]));
         }
     }

@@ -672,7 +672,7 @@ int tgg_get_bwfdx_bypos(int pos)
 {
     ReadLock lock(get_bwfdxhsh_lock());
     int* key = NULL;
-    if (rte_hash_get_key_with_position(g_bwfdx_hash, pos, &key) < 0)
+    if (rte_hash_get_key_with_position(g_bwfdx_hash, pos, (void**)(&key)) < 0)
         return -1;
     return *key;
 }
@@ -680,7 +680,7 @@ int tgg_get_bwfdx_bypos(int pos)
 int tgg_get_load_balance()
 {
     // 假设负载是一个简单的整数，表示负载量
-    int min_load = 0;
+    int min_load = 0, cur_load = 0;
     int bwfdx = -1, cur_bwfdx = -1;
     void *key;
     void *value;
@@ -689,7 +689,7 @@ int tgg_get_load_balance()
 
     ReadLock lock(get_bwfdxhsh_lock());
     // 遍历哈希表，找到负载最小的 fd
-    ret = rte_hash_iterate(g_bwfdx_hash, &index, &key, &value);
+    ret = rte_hash_iterate(g_bwfdx_hash, (const void**)&key, (void**)&value, &index);
     if (ret < 0) {
         if (ret == -ENOENT) {
             // 哈希表为空，返回错误或采取相应措施
@@ -704,12 +704,12 @@ int tgg_get_load_balance()
     bwfdx = *(int *)key;
     min_load = tgg_get_bwfdx_load(bwfdx & 0xf, bwfdx >> 8);
 
-    while ((ret = rte_hash_iterate(g_bwfdx_hash, &index, &key, &value)) >= 0) {
-        int cur_bwfdx = *(int *)key;
-        int cur_load = tgg_get_bwfdx_load(cur_bwfdx & 0xf, cur_bwfdx >> 8);
+    while ((ret = rte_hash_iterate(g_bwfdx_hash, (const void**)&key, (void**)&value, &index)) >= 0) {
+        cur_bwfdx = *(int *)key;
+        cur_load = tgg_get_bwfdx_load(cur_bwfdx & 0xf, cur_bwfdx >> 8);
         if (cur_load < min_load) {
             bwfdx = cur_bwfdx;
-            min_load = current_load;
+            min_load = cur_load;
         }
     }
 
@@ -726,17 +726,17 @@ int tgg_get_load_balance()
 
 void tgg_iter_del_bwfdx(int prc_id)
 {
-    void *key;
-    void *value;
+    int *key;
+    int *value;
     uint32_t index;
     int ret;
     ReadLock lock(get_bwfdxhsh_lock());
 
     // 开始迭代哈希表
-    ret = rte_hash_iterate(g_bwfdx_hash, &index, &key, &value);
+    ret = rte_hash_iterate(g_bwfdx_hash, (const void**)&key, (void**)&value, &index);
     while (ret >= 0) {
         // 删除当前键
-        if((*key)&0xf == prc_id) {
+        if( ((*key) & 0xf) == prc_id ) {
             ret = rte_hash_del_key(g_bwfdx_hash, key);
             if (ret < 0) {
                 if (ret == -ENOENT) {
@@ -746,11 +746,11 @@ void tgg_iter_del_bwfdx(int prc_id)
                     perror("rte_hash_del_key");
                 }
             } else {
-                printf("Deleted key: %d\n", *(int *)key);
+                printf("Deleted key: %d\n", *key);
             }
         }
         // 继续迭代
-        ret = rte_hash_iterate(g_bwfdx_hash, &index, &key, &value);
+        ret = rte_hash_iterate(g_bwfdx_hash, (const void**)&key, (void**)&value, &index);
     }
     if (ret < 0 && ret!= -ENOENT) {
         perror("rte_hash_iterate");
