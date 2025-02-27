@@ -18,13 +18,20 @@
 
 
 
-#include "co_routine.h"
 #include "tgg_bwserver.h"
+#include "tgg_struct.h"
+#include "cmd/CmdProcessor.h"
+#include "tgg_common.h"
+#include "tgg_conf.h"
+#include "tgg_bw_cache.h"
+#include "BwMsgPack.hpp"
+#include <rte_log.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <sys/time.h>
 #include <stack>
+#include <map>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -42,15 +49,11 @@
 #endif
 
 using namespace std;
-struct task_t
-{
-    stCoRoutine_t *co;
-    int fd;
-};
 
 static stack<task_t*> g_readwrite;
 int g_listen_fd = -1;
-extern int g_prc_id = -1;
+extern int g_prc_id;
+extern int g_run;
 int set_non_block(int iSock)
 {
     int iFlags;
@@ -123,8 +126,8 @@ void *read_routine( void *arg )
                     .bwfdx = (fd << 8 ) | g_prc_id,
                     .fd_opt = FD_WRITE,
                     .idx = tgg_get_bwfdx_idx(g_prc_id, fd),
-                    .data = buf,
-                    .data_len = (unsigned int)ret
+                    .data_len = (unsigned int)ret,
+                    .data = buf
                 };
                 tgg_process_bwrcv_data(&bwdata);
             }
@@ -147,9 +150,9 @@ void *write_routine( void *arg )
     co_enable_hook_sys();
     // g_prc_id = *((int*)arg);
     std::map<int, int> map_msgtype;// 客户端上行透传 消息类型映射
-    map_msgtype[FD_NEW] = CMD_ON_CLIENT_CONNECT;
-    map_msgtype[FD_WRITE] = CMD_ON_CLIENT_MESSAGE;
-    map_msgtype[FD_CLOSE] = CMD_ON_CLIENT_CLOSE;
+    map_msgtype[FD_NEW] = ClientProtocal::CMD_ON_CLIENT_CONNECT;
+    map_msgtype[FD_WRITE] = ClientProtocal::CMD_ON_CLIENT_MESSAGE;
+    map_msgtype[FD_CLOSE] = ClientProtocal::CMD_ON_CLIENT_CLOSE;
     while(g_run) {
         tgg_bw_data* bdata = NULL;
         if (tgg_dequeue_bwsnd(g_prc_id, &bdata) < 0 || !bdata) {
@@ -166,17 +169,18 @@ void *write_routine( void *arg )
         }
         std::string result;
         tgg_bw_protocal header = {
-            .pack_len = sizeof(tgg_bw_protocal) + bdata->data_len,
-            .cmd = map_msgtype[bdata->fd_opt],
-            .local_ip = tgg_get_bwfdx_ip(prc_id, fd),
-            .local_port = tgg_get_bwfdx_ip(prc_id, fd),
-            .client_ip = tgg_get_cli_ip(bdata->coreid, bdata->fd),
-            .client_port = tgg_get_cli_port(bdata->coreid, bdata->fd),
+            .pack_len = (unsigned int)sizeof(tgg_bw_protocal) + bdata->data_len,
+            .cmd = (unsigned char)map_msgtype[bdata->fd_opt],
+            .local_ip = (unsigned int)tgg_get_bwfdx_ip(prc_id, fd),
+            .local_port = (unsigned short)tgg_get_bwfdx_ip(prc_id, fd),
+            .client_ip = (unsigned int)tgg_get_cli_ip(bdata->coreid, bdata->fd),
+            .client_port = (unsigned short)tgg_get_cli_port(bdata->coreid, bdata->fd),
+            .connection_id = (unsigned int)tgg_get_cli_idx(bdata->coreid, bdata->fd),
             .flag = 1,// TODO 需要确定数据来源，怎么填
-            .gateway_port = TggConfigure::instance::get_gateway_port(),
+            .gateway_port = TggConfigure::getInstance()->get_gateway_port(),
             .ext_len = 0// TODO 暂时不知道上行数据是否能用上
-        }
-        BwPackageHandler::encode(result, &header, std::string(bdata->data, bdata->data_len))
+        };
+        BwPackageHandler::encode(result, &header, std::string((char*)bdata->data, bdata->data_len));
         int ret = write(fd, result.c_str(), result.length());
         int loops = 3;// 如果失败最多重试3次，否则丢弃
         while(ret == -1 && EAGAIN == errno && loops--) {
@@ -189,6 +193,7 @@ void *write_routine( void *arg )
         }
         clean_bw_data(bdata);
     }
+    return 0;
 }
 
 
@@ -349,7 +354,7 @@ static  pthread_t s_bwtrans_thread;
 
 extern struct rte_mempool* g_mempool_bwrcv;
 
-static void deal_trans(void*)
+static void* deal_trans(void*)
 {
     while(g_run) {
         tgg_bw_data* bdata = NULL;
@@ -357,7 +362,7 @@ static void deal_trans(void*)
             usleep(10);
             continue;
         }
-        int bwfdx = tgg_get_cli_bwfd(bdata->coreid, bdata->fd);
+        int bwfdx = tgg_get_cli_bwfdx(bdata->coreid, bdata->fd);
         if(bwfdx && tgg_get_bw_prcstatus(bwfdx & 0xf) && tgg_get_bwfdx_status((bwfdx & 0xf), bwfdx >> 8)) {
             // 已经绑定服务端，正常透传
             bdata->bwfdx = bwfdx;
@@ -387,7 +392,7 @@ static void deal_trans(void*)
                 clean_bw_data(bdata);
             } else {
                 // 客户端连接绑定到服务端连接
-                tgg_set_cli_bwfd(bdata->coreid, bdata->fd, bwfdx);
+                tgg_set_cli_bwfdx(bdata->coreid, bdata->fd, bwfdx);
                 // 负载++
                 tgg_add_bwfdx_load(bwfdx & 0xf, bwfdx >> 8);
                 bdata->bwfdx = bwfdx;
@@ -395,6 +400,7 @@ static void deal_trans(void*)
             }
         }
     }
+    return 0;
 }
 
 int init_bwtrans()

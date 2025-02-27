@@ -29,7 +29,7 @@ endif
 CC = g++
 
 # You shouldn't need to make any more changes below this line.
-INCCOMM=-I./valgrind -I$(FF_PATH)/lib -I$(FF_PATH)/adapter/micro_thread -I$(FF_PATH)/adapter/micro_thread/tgg
+INCCOMM=-I./valgrind -I$(FF_PATH)/lib -I$(FF_PATH)/adapter/micro_thread -I$(FF_PATH)/adapter/micro_thread/tgg -I/data/code/libco/
 SOURCE_FILES := $(wildcard cmd/*.c cmd/*.cpp comm/*.c comm/*.cpp tgg_comm/*.c tgg_comm/*.cpp ./*.c unittest/*.cpp)
 #.c.o:
 #	$(CC) -c $*.c
@@ -69,25 +69,25 @@ clean:
 
 
 MASTER_OBJ = dpdk_init.o master.o tgg_comm/tgg_common.o tgg_comm/tgg_bw_cache.o \
-			tgg_comm/tgg_lock.o tgg_comm/tgg_cliprc.o comm/RWIni.o comm/tgg_conf.o 
+			tgg_comm/tgg_lock.o comm/RWIni.o tgg_comm/tgg_conf.o comm/common.o
 
 
 CLIPRC_OBJ = cliprc.o dpdk_init.o tgg_comm/tgg_bw_cache.o \
 				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
 				tgg_comm/tgg_lock.o comm/Websocket.o comm/Encrypt.o comm/RedisClient.o \
-				tgg_comm/WsConsumer.o tgg_comm/tgg_conf.o \
-				comm/RWIni.o comm/tgg_conf.o
+				tgg_comm/WsConsumer.o tgg_comm/tgg_conf.o comm/common.o \
+				comm/RWIni.o tgg_comm/tgg_cliprc.o tgg_comm/tgg_transport.o
 
 
 BWSERVER_OBJ = bwprc.o dpdk_init.o cmd/CmdProcessor.o tgg_comm/tgg_bw_cache.o\
 				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
 				tgg_comm/tgg_lock.o comm/Encrypt.o comm/RedisClient.o \
 				comm/Serialize.o tgg_comm/tgg_conf.o tgg_comm/tgg_bwserver.o \
-				comm/RWIni.o comm/tgg_conf.o tgg_comm/tgg_transport.o
+				comm/RWIni.o tgg_comm/tgg_transport.o comm/common.o
 
 REDIS_OBJ = unittest/rediscli_test.o tgg_comm/tgg_bw_cache.o tgg_comm/tgg_common.o \
 			tgg_comm/tgg_data_opt.o dpdk_init.o tgg_comm/tgg_lock.o comm/Encrypt.o \
-			comm/RedisClient.o tgg_comm/tgg_bwcomm.o
+			comm/RedisClient.o tgg_comm/tgg_bwcomm.o comm/common.o comm/RWIni.o tgg_comm/tgg_conf.o
 
 gwrcv: $(MASTER_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
@@ -99,11 +99,11 @@ gwcliprc: $(CLIPRC_OBJ)
 
 gwbwprc: $(BWSERVER_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
-	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl -lz -lco -lssl $(FF_LIBS) $(CRESET)
+	@$(CC) -O -gdwarf-2 -o $@ $^  -L/data/code/libco/solib -ldl -lz -lcolib -lssl $(FF_LIBS) $(CRESET)
 
 gwredis: $(REDIS_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
 	@$(CC) -O -gdwarf-2 -o $@ $^ -lz -lssl $(FF_LIBS) $(CRESET)
 
 
-all: gwrcv gwprc gwredis
+all: gwrcv gwcliprc gwbwprc gwredis

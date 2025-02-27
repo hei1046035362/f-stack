@@ -37,13 +37,13 @@ public:
     int ExecCmd();
 };
 
-class CmdGatewayClientConnect : public CmdBaseProcessor {
-public:
+// class CmdGatewayClientConnect : public CmdBaseProcessor {
+// public:
 
-	CmdGatewayClientConnect(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
-	~CmdGatewayClientConnect() {}
-    int ExecCmd() { return 0; }
-};
+// 	CmdGatewayClientConnect(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
+// 	~CmdGatewayClientConnect() {}
+//     int ExecCmd() { return 0; }
+// };
 
 class CmdSendToOne : public CmdBaseProcessor {
 public:
