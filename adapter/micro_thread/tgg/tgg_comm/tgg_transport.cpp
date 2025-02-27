@@ -73,17 +73,17 @@ void BatchSend2Client(std::list<int> fds, const std::string& data, int fd_opt)
     }
     for (auto coreidFds : mapEachcorefds) {
         std::map<int, int> mapFdidx;
-        std::list<int>::iterator itFd = coreidFds->second.begin();
-        while(itFd != coreidFds->second.end()) {
-            int idx = tgg_get_cli_idx(coreidFds->first, *itFd);
+        std::list<int>::iterator itFd = coreidFds.second.begin();
+        while(itFd != coreidFds.second.end()) {
+            int idx = tgg_get_cli_idx(coreidFds.first, *itFd);
             if(idx < 0) {
-                std::string sCid = tgg_get_cli_cid(coreidFds->first, *itFd);
+                std::string sCid = tgg_get_cli_cid(coreidFds.first, *itFd);
                 RTE_LOG(INFO, USER1, "[%s][%d] client[%s] already closed.\n", __func__, __LINE__, sCid.c_str());
                 itFd++;
                 continue;
             }
-            if(tgg_get_cli_authorized(coreidFds->first, *itFd) != AUTH_TYPE_TOKENCHECKED) {
-                std::string sCid = tgg_get_cli_cid(coreidFds->first, *itFd);
+            if(tgg_get_cli_authorized(coreidFds.first, *itFd) != AUTH_TYPE_TOKENCHECKED) {
+                std::string sCid = tgg_get_cli_cid(coreidFds.first, *itFd);
                 RTE_LOG(INFO, USER1, "[%s][%d] Send data to client[%s] should check Token at first.\n",
                     __func__, __LINE__, sCid.c_str());
                 itFd++;
@@ -107,7 +107,7 @@ void BatchSend2Client(std::list<int> fds, const std::string& data, int fd_opt)
         }
 
         std::cout << "send group data:" << Encrypt::bin2hex(sendData) << std::endl;
-        if (enqueue_data_batch_fd(coreidFds->first, sendData, mapFdidx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
+        if (enqueue_data_batch_fd(coreidFds.first, sendData, mapFdidx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
             RTE_LOG(ERR, USER1, "[%s][%d] Batch Enqueue data Failed\n",
                __func__, __LINE__);
         }

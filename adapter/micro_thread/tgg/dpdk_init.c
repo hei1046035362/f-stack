@@ -445,14 +445,14 @@ void tgg_master_init()
 		g_ring_bwrcvs[i] = make_ring(bwrcv_ring_name, s_ring_size);
 
 	}
-	for (uint32_t i = 0; i < TggConfigure::instance->get_bwsvr_count() ; i++) {
+	for (uint32_t i = 0; i < TggConfigure::getInstance()->get_bwsvr_count() ; i++) {
 		// bwfd zone
 		char zone_name[256] = {};
 		sprintf(zone_name, "%s_%d", bwfdx_zone_name_prev, i);
 		g_bwfdx_zones[i] = make_memzone(zone_name, s_bwzone_size);
 		for (uint32_t j = 0; j < g_bwfdx_limit; j++) {
 			// 所有fd的初始状态设置为0
-			tgg_set_bwfdx(i, j, 0);
+			tgg_set_bwfdx_status(i, j, 0);
 		}
 		// bw 发送
 		char bwsnd_ring_name[256] = {};
@@ -493,7 +493,7 @@ void tgg_master_uninit()
 		rte_ring_free(g_ring_bwrcvs[i]);
 		g_ring_writes[i] = NULL;
 	}
-	for (uint32_t i = 0; i < TggConfigure::instance->get_bwsvr_count(); i++) {
+	for (uint32_t i = 0; i < TggConfigure::getInstance()->get_bwsvr_count(); i++) {
 		rte_memzone_free(g_bwfdx_zones[i]);
 		g_bwfdx_zones[i] = NULL;
 		// bw 发送
@@ -536,7 +536,7 @@ void init_multi_for_secondary()
 		sprintf(ring_name, "%s_%d", write_ring_name_prev, i);
 		g_ring_writes[i] = find_ring(ring_name);
 	}
-	for (uint32_t i = 0; i < TggConfigure::instance->get_bwsvr_count(); i++) {
+	for (uint32_t i = 0; i < TggConfigure::getInstance()->get_bwsvr_count(); i++) {
 		// 初始化bwfdx数组的zones
 		char zone_name[256] = {};
 		sprintf(zone_name, "%s_%d", bwfdx_zone_name_prev, i);
@@ -544,7 +544,7 @@ void init_multi_for_secondary()
 		// bw 发送
 		char bwsnd_ring_name[256] = {};
 		sprintf(bwsnd_ring_name, "%s_%d", bwsnd_ring_name_prev, i);
-		g_ring_bwsnds[i] = find_memzone(bwsnd_ring_name, s_ring_size);
+		g_ring_bwsnds[i] = find_ring(bwsnd_ring_name);
 	}
 }
 

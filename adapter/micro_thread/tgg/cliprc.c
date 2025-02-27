@@ -17,7 +17,7 @@
 #include <vector>
 #include "tgg_comm/tgg_cliprc.h"
 // 绝对路径
-const char* f_stack_ini = "/data/code/f-stack/config.ini"
+const char* f_stack_ini = "/data/code/f-stack/config.ini";
 
 int g_run = 1;
 static const char* s_dump_file = "/var/corefiles/tgg_gw_cliprc_core";
@@ -35,7 +35,7 @@ void signal_handler(int signum)
 
 void tgg_gw_process(void* data)
 {
-	ThreadArray threads(TggConfigure::instance::get_lcore_pos());
+	ThreadArray threads(TggConfigure::getInstance()->get_lcore_pos());
 	threads.startThreads(tgg_process_read);
 }
 
@@ -74,7 +74,7 @@ static void prc_dpdk_eal_init(int argc, char **argv)
 	char mp_flag[] = "--proc-type=secondary";
 	char log_flag[] = "--log-level=6";
 	char *argp[argc + 4];
-	uint16_t nb_ports;
+	// uint16_t nb_ports;
 
 	argp[0] = argv[0];
 	argp[1] = c_flag;
@@ -82,12 +82,12 @@ static void prc_dpdk_eal_init(int argc, char **argv)
 	argp[3] = mp_flag;
 	argp[4] = log_flag;
 
-	for (i = 1; i < argc; i++)
+	for (int i = 1; i < argc; i++)
 		argp[i + 4] = argv[i];
 
 	argc += 4;
 
-	ret = rte_eal_init(argc, argp);
+	int ret = rte_eal_init(argc, argp);
 	if (ret < 0)
 		rte_panic("Cannot init EAL\n");
 }
@@ -96,7 +96,6 @@ static void prc_dpdk_eal_init(int argc, char **argv)
 int main(int argc, char *argv[])
 {
 	init_core(s_dump_file);
-	std::string 
 	if (tgg_init_config(argc, argv) < 0) {
 		printf("init config error.");
 		return -1;

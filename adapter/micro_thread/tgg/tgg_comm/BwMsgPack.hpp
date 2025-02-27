@@ -27,7 +27,7 @@ constexpr bool is_scalar()
 class BwPackageHandler {
 public:
     // 获取整个包的buffer，对应encode函数   外部需要填充bwdata->flag和bwdata->cmd 两个字段，ip和port默认都是不填的，可选
-    static void encode(std::string &result, const tgg_bw_protocal* bwdata, 
+    static void encode(std::string &result, tgg_bw_protocal* bwdata, 
         const std::string& body, const std::string& extend_data = "")
      {
         // bwdata->flag = (body.find_first_not_of("0123456789") == std::string::npos);
@@ -59,7 +59,7 @@ public:
             bwdata->ext_len = htonl(bwdata->ext_len);
         }
         std::memcpy(&result[0], bwdata, sizeof(tgg_bw_protocal));
-        return result;
+        // return result;
     }
 
     // 从二进制数据转换为数组，对应decode函数
