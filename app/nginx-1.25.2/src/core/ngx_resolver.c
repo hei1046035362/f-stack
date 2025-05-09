@@ -1908,7 +1908,7 @@ short_response:
 
 done:
 
-    ngx_log_error(r->log_level, r->log, 0, err);
+    ngx_log_error(r->log_level, r->log, 0, "%s", err);
 
     return;
 
@@ -2570,7 +2570,7 @@ invalid:
 
     /* unlock name mutex */
 
-    ngx_log_error(r->log_level, r->log, 0, err);
+    ngx_log_error(r->log_level, r->log, 0, "%s", err);
 
     return;
 

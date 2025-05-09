@@ -1700,7 +1700,7 @@ ngx_connection_error(ngx_connection_t *c, ngx_err_t err, char *text)
         level = NGX_LOG_ALERT;
     }
 
-    ngx_log_error(level, c->log, err, text);
+    ngx_log_error(level, c->log, err, "%s", text);
 
     return NGX_ERROR;
 }
