@@ -44,11 +44,12 @@ int tgg_del_fd4uid(const char* uid, int fdid, int idx);
 int tgg_get_fdsbyuid(const char* uid, std::list<std::string>& lst_fd);
 
 /// 增删查  cid hash<cid, fdid>
-int tgg_add_cid(const char* cid, int fdid);
-int tgg_del_cid(const char* cid);
-int tgg_get_fdbycid(const char* cid);
-int tgg_get_allonlinecids(std::list<std::string>& lst_cids);
+int tgg_add_cid(int cid, int fdid);
+int tgg_del_cid(int cid);
+int tgg_get_fdbycid(int cid);
+int tgg_get_allonlinecids(std::list<int>& lst_cids);
 int tgg_get_allfds(std::list<int>& lst_fds);
+void tgg_clean_allcids_bypid(int prc_id);
 
 /// 增删查  uid->gid映射 hash<uid, list<gid> >
 int tgg_add_uidgid(const char* uid, const char* gid);

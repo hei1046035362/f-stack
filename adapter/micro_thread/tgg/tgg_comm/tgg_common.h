@@ -17,7 +17,7 @@ ushort tgg_get_cli_port(int core_id, int fd);
 int tgg_get_cli_bwfdx(int core_id, int fd);
 // 不能返回引用，内部加锁的
 std::string tgg_get_cli_uid(int core_id, int fd);
-std::string tgg_get_cli_cid(int core_id, int fd);
+int tgg_get_cli_cid(int core_id, int fd);
 std::string tgg_get_cli_reserved(int core_id, int fd);
 int tgg_set_cli_idx(int core_id, int fd, int idx);
 int tgg_set_cli_status(int core_id, int fd, int status);
@@ -26,7 +26,7 @@ int tgg_set_cli_ip(int core_id, int fd, uint32_t ip);
 int tgg_set_cli_port(int core_id, int fd, ushort port);
 int tgg_set_cli_bwfdx(int core_id, int fd, int bwfdx);
 int tgg_set_cli_uid(int core_id, int fd, const char* uid);
-int tgg_set_cli_cid(int core_id, int fd, const char* cid);
+int tgg_set_cli_cid(int core_id, int fd, int cid);
 int tgg_set_cli_reserved(int core_id, int fd, const char* reserved);
 void tgg_close_cli(int core_id, int fd);
 int tgg_init_cli(int core_id, int fd, uint32_t ip, ushort port);
@@ -103,19 +103,19 @@ void tgg_close_bw_session(int prc_id, int fd);
 
 // 业务侧接口
 // 新接入连接
-int tgg_bind_session(int core_id, int fd, const char* uid, const char* cid);
+int tgg_bind_session(int core_id, int fd, const char* uid, int cid);
 // 连接断开
 int tgg_free_session(int core_id, int fd);
 // 加入组
-int tgg_join_group(const char* gid, const char* cid);
+int tgg_join_group(const char* gid, int cid);
 // 退出组
-int tgg_exit_group(const char* gid, const char* cid);
+int tgg_exit_group(const char* gid, int cid);
 
 // 获取可用的idx
 int get_valid_idx();
 
 // 通过idx生成cid
-std::string get_valid_cid(int idx);
+int get_valid_cid(int prc_id, int idx);
 
 // 清理队列
 void clean_bw_data(tgg_bw_data* bdata);
