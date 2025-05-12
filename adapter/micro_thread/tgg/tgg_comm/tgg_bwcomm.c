@@ -15,7 +15,6 @@
 #include "string.h"
 #include "nlohmann/json.hpp"
 #include "comm/Encrypt.hpp"
-#include "comm/RedisClient.hpp"
 #include "tgg_comm/tgg_bw_cache.h"
 #include "tgg_comm/tgg_common.h"
 
@@ -474,25 +473,3 @@ int message_unpack(const std::string& packedData, std::string& result)
     return 0;
 }
 
-int tgg_init_uidgid(const std::vector<std::string>& clusterNodes, const std::string& password, const std::string& userName)
-{
-    std::map<std::string, std::set<std::string>> mapUsers;
-    int ret = GetUserWithGids(clusterNodes, mapUsers, password);
-    if (ret < 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Connect redis failed.\n", __func__, __LINE__);
-        return ret;
-    }
-
-    std::map<std::string, std::set<std::string>>::iterator itUid = mapUsers.begin();
-    while(itUid != mapUsers.end()) {
-        std::set<std::string>::iterator itGid = itUid->second.begin();
-        while(itGid != itUid->second.end()) {
-            std::cout << "start add userId[" << itUid->first << "]: Gid[" << *itGid << "]" << std::endl;
-            tgg_add_uidgid(itUid->first.c_str(), (*itGid).c_str());
-            std::cout << "end add userId[" << itUid->first << "]: Gid[" << *itGid << "]" << std::endl;
-            itGid++;
-        }
-        itUid++;
-    }
-    return 0;
-}
