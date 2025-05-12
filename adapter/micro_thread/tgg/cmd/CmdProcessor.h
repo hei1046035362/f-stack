@@ -15,8 +15,8 @@ protected:
 	void Send2BW(const std::string& data);
 
 protected:
-	int prc_id;
-    int fd;
+	int prc_id;// bwprc的进程编号，不是gwprc的
+    int fd;// bwprc的fd
     void* data;
     const nlohmann::json& jdata;
 };
