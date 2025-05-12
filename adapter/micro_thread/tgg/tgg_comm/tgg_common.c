@@ -64,6 +64,7 @@ int get_valid_idx()
 		current_id_atomic = rte_atomic32_read(get_idx_lock());
 		if(current_id_atomic > g_fd_limit) {
 			rte_atomic32_init(get_idx_lock());
+			rte_atomic32_inc(get_idx_lock());// idx要从1开始  0(ready)和-1(closed)已经被用作其他功能了
 			looptimes--;
 		}
 		if(looptimes <= 0) {

@@ -190,7 +190,7 @@ int CmdGatewayClientConnect::ExecCmd()
 
 int CmdSendToOne::ExecCmd()
 {
-    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    int cid = jdata["connection_id"];
     int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string body = jdata["body"].get<std::string>();
     if(!raw) {
@@ -269,7 +269,7 @@ int CmdSendToGroup::ExecCmd()
 
 int CmdKick::ExecCmd()
 {
-    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    int cid = jdata["connection_id"];
     std::string body = jdata["body"].get<std::string>();
     Send2Client(cid, body, FD_WRITE);
     std::string data = "\x88\x02\x03\xe8";// 关闭websocket
@@ -279,7 +279,7 @@ int CmdKick::ExecCmd()
 
 int CmdDestroy::ExecCmd()
 {
-    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    int cid = jdata["connection_id"];
     std::string data = "\x88\x02\x03\xe8";// 关闭websocket
     Send2Client(cid, data, FD_WRITE | FD_CLOSE);
     return 0;
@@ -445,7 +445,7 @@ int CmdSelect::ExecCmd()
                 } else {
                     // cid {"9527":9527}
                     for (const auto& connection_id : it.value()) {
-                        int cid = get_valid_cid(this->prc_id, connection_id);
+                        int cid = connection_id;
                         int fd = tgg_get_fdbycid(cid);
                         if (fd > 0) {
                             std::list<int> lst_fds;
@@ -493,7 +493,7 @@ int CmdGetGroupIdList::ExecCmd()
 int CmdSetSession::ExecCmd()
 {
     std::string ext_data = jdata["ext_data"];
-    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    int cid = jdata["connection_id"];
     if(ext_data.empty() || cid < 0) {
         RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and cid[%d] shouldn't be empty.\n",
                  __func__, __LINE__, ext_data.c_str(), cid);
@@ -510,7 +510,7 @@ int CmdSetSession::ExecCmd()
 int CmdUpdateSession::ExecCmd()
 {
     // TODO 稍微有点复杂，且当前拿不到数据
-    // int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    // int cid = jdata["connection_id"];
     // if(ext_data.empty() || cid < 0) {
     //     RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and cid[%d] shouldn't be empty.\n",
     //              __func__, __LINE__, ext_data.c_str(), cid);
@@ -541,7 +541,7 @@ int CmdUpdateSession::ExecCmd()
 int CmdIsOnline::ExecCmd()
 {
     std::string result = "i:";
-    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    int cid = jdata["connection_id"];
     int clifdx = tgg_get_fdbycid(cid);
     if(clifdx < 0) {
         result += "0";
@@ -558,7 +558,7 @@ int CmdBindUid::ExecCmd()
     // return tgg_bind_session(this->fd, s_uid.c_str(), tgg_get_cli_cid(this->fd).c_str());
     // TODO Binduid到底是客户端过来消息绑定，还是服务端过来消息绑定
     std::string suid = std::to_string(jdata["user_id"].get<std::uint64_t>());
-    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    int cid = jdata["connection_id"];
     if(suid.empty() || cid < 0) {
         RTE_LOG(INFO, USER1, "[%s][%d] bind uid failed, uid[%s] and cid[%d] shouldn't be empty.\n",
                  __func__, __LINE__, suid.c_str(), cid);
@@ -577,7 +577,7 @@ int CmdBindUid::ExecCmd()
 int CmdUnBindUid::ExecCmd()
 {
     std::string suid = std::to_string(jdata["user_id"].get<std::uint64_t>());
-    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    int cid = jdata["connection_id"];
     if(suid.empty() || cid < 0) {
         RTE_LOG(INFO, USER1, "[%s][%d] bind uid failed, uid[%s] and cid[%d] shouldn't be empty.\n",
                  __func__, __LINE__, suid.c_str(), cid);
@@ -631,7 +631,7 @@ int CmdSendToUid::ExecCmd()
 int CmdJoinGroup::ExecCmd()
 {
     std::string group = jdata["ext_data"];
-    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    int cid = jdata["connection_id"];
     if(group.empty() || cid < 0) {
         RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and cid[%d] shouldn't be empty.\n",
                  __func__, __LINE__, group.c_str(), cid);
@@ -650,7 +650,7 @@ int CmdJoinGroup::ExecCmd()
 int CmdLeaveGroup::ExecCmd()
 {
     std::string group = jdata["ext_data"];
-    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    int cid = jdata["connection_id"];
     if(group.empty() || cid < 0) {
         RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and cid[%d] shouldn't be empty.\n",
                  __func__, __LINE__, group.c_str(), cid);
