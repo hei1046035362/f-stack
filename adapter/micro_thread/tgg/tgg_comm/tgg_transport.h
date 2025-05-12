@@ -5,13 +5,13 @@
 
 /// 服务端透传到客户端
 // 后台直发客户端的数据，token校验成功后才能正常调用本接口
-void Send2Client(const char* cid, const std::string& data, int fd_opt);
+void Send2Client(int cid, const std::string& data, int fd_opt);
 
 // 批量发送接口
-void BatchSend2Client(std::list<std::string> cids, const std::string& data, int fd_opt);
+void BatchSend2ClientBycids(std::list<int> cids, const std::string& data, int fd_opt);
 
 // 批量发送接口
-void BatchSend2Client(std::list<int> fds, const std::string& data, int fd_opt);
+void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_opt);
 
 // 客户端的内容透传到服务端
 

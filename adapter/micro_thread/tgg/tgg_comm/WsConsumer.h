@@ -38,7 +38,7 @@ private:
     int _idx;
     int _status;
     std::string _uid;
-    std::string _cid;
+    int _cid;
     void* data;
 };
 

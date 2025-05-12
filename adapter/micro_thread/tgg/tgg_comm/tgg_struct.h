@@ -82,7 +82,7 @@ typedef struct st_cli_info {
     int ip;
     unsigned short port;
     int bwfdx;        // 绑定的bw
-    char cid[TGG_CID_LEN];    // client id                             process 填充
+    int cid;    // client id                             process 填充
     char uid[TGG_UID_LEN];    // user id                             process 填充
     char reserved[128];    // reserved
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_cli_info;

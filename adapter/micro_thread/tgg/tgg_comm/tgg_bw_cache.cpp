@@ -29,6 +29,8 @@ void iter_del_idlist(void* iddata)
     iter_del_list<tgg_list_id>((tgg_list_id*)iddata);
 }
 
+#if 0
+// key为 const char*
 // 针对key-value的hash
 static int tgg_hash_add_key_value(const rte_hash* hash, const char* key, int fdid)
 {
@@ -66,6 +68,7 @@ static int tgg_hash_add_key_value(const rte_hash* hash, const char* key, int fdi
 
     return 0;
 }
+#endif
 
 // 针对key-list的hash
 static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int fdid, int idx)
@@ -263,6 +266,105 @@ static int tgg_hash_get_allkeys(const rte_hash* hash, std::list<std::string>& ls
 }
 
 
+// key 为int
+
+// 针对key-value的hash
+static int tgg_hash_add_int_key_value(const rte_hash* hash, int key, int fdid)
+{
+    if (key <= 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d]add key[%d] failed, invalid data.\n", __func__, __LINE__, key);
+        return -EINVAL; 
+    }
+    int* value = NULL;
+    int ret = rte_hash_lookup_with_hash(hash, &key, rte_hash_crc_4byte(key, 0));
+    if (ret < 0) {
+        value = (int*)dpdk_rte_malloc(sizeof(int));
+        if(!value) {
+            RTE_LOG(ERR, USER1, "[%s][%d]add key[%d] failed:%d.\n", __func__, __LINE__, key, ret);
+            return -1;
+        }
+        *value = fdid;
+        int ret = rte_hash_add_key_with_hash_data(hash, &key, rte_hash_crc_4byte(key, 0), value);
+        if (ret < 0) {
+            RTE_LOG(ERR, USER1, "[%s][%d]add key[%d] failed:%d.\n", __func__, __LINE__, key, ret);
+            rte_free(value);
+            return ret;
+        }
+    } else {
+        ret = rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc_4byte(key, 0), (void**)&value);
+        if (ret < 0) {
+            RTE_LOG(ERR, USER1, "[%s][%d]Get key[%d] data failed:%d\n", __func__, __LINE__, key, ret);
+            return -1;
+        }
+        *value = fdid;
+    }
+
+    return 0;
+}
+
+// 获取hash value/list
+static void* tgg_hash_get_intkey_value(const rte_hash* hash, int key)
+{
+    int ret = rte_hash_lookup_with_hash(hash, &key, rte_hash_crc_4byte(key, 0));
+    if (ret < 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d]Get key[%d] data failed,hash key not exist:%d\n", __func__, __LINE__, key, ret);
+        return NULL;
+    }
+    void* pdata = NULL;
+    ret = rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc_4byte(key, 0), &pdata);
+    if (ret < 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d]Get key[%d] data failed:%d\n", __func__, __LINE__, key, ret);
+        return NULL;
+    }
+    return pdata;
+}
+
+// 删除整个key
+static int tgg_hash_del_intkey(const rte_hash* hash, int key, tgg_free_id_data fp)
+{
+    tgg_gid_data* pdata = (tgg_gid_data*)tgg_hash_get_intkey_value(hash, key);
+    if (!pdata)
+        return -EINVAL;
+
+    // 释放value的空间
+    fp((void*)pdata);
+
+    int ret = rte_hash_del_key_with_hash(hash, &key, rte_hash_crc_4byte(key, 0));
+    if (ret > 0) {
+        // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
+        if (rte_hash_free_key_with_position(hash, ret) < 0) {
+            RTE_LOG(ERR, USER1, "[%s][%d]Del key[%d] pos failed:%d\n", __func__, __LINE__, key, ret);
+            return -EINVAL;
+        }
+    } else {
+        RTE_LOG(ERR, USER1, "[%s][%d]Del key[%d] data failed:%d\n", __func__, __LINE__, key, ret);
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static int tgg_hash_get_all_intkeys(const rte_hash* hash, std::list<int>& lst_items)
+{
+    int* key = NULL;
+    int* value = NULL;
+    uint32_t next = 0;
+    int ret = 0;
+    while (1) {
+        ret = rte_hash_iterate(hash, (const void**)&key, (void**)&value, &next);
+        if (-ENOENT == ret) {
+            printf("iter to the end.\n");
+            break;
+        } else if (ret < 0) {
+            printf("catch an error\n");
+            return -1;
+        }
+        lst_items.push_back(*key);
+    }
+    return 0;
+}
+
+
+
 
 #define APROPRIAT_HASH_KEY(key, len)\
     char _key[len] = {0};\
@@ -361,12 +463,11 @@ int tgg_get_fdsbyuid(const char* uid, std::list<std::string>& lst_fd)
 }
 
 /// 增删查  cid
-int tgg_add_cid(const char* cid, int fdid)
+int tgg_add_cid(int cid, int fdid)
 {
-    APROPRIAT_HASH_KEY(cid, TGG_CID_LEN);
-    RTE_LOG(INFO, USER1, "[%s][%d] add cid[%s] fdid[%d].\n", __func__, __LINE__, cid, fdid);
+    RTE_LOG(INFO, USER1, "[%s][%d] add cid[%d] fdid[%d].\n", __func__, __LINE__, cid, fdid);
     WriteLock lock(get_cidfd_lock());
-    return tgg_hash_add_key_value(g_cid_hash, _key, fdid);
+    return tgg_hash_add_int_key_value(g_cid_hash, cid, fdid);
 }
 
 static void free_ciddata(void* data)
@@ -376,34 +477,57 @@ static void free_ciddata(void* data)
     rte_free(pdata);
 }
 
-int tgg_del_cid(const char* cid)
+int tgg_del_cid(int cid)
 {
-    APROPRIAT_HASH_KEY(cid, TGG_CID_LEN);
-    RTE_LOG(INFO, USER1, "[%s][%d] del fdid for cid[%s].\n", __func__, __LINE__, cid);
+    RTE_LOG(INFO, USER1, "[%s][%d] del fdid for cid[%d].\n", __func__, __LINE__, cid);
     WriteLock lock(get_cidfd_lock());
-    return tgg_hash_del_key(g_cid_hash, _key, free_ciddata);
+    return tgg_hash_del_intkey(g_cid_hash, cid, free_ciddata);
 }
 
-int tgg_get_fdbycid(const char* cid)
+int tgg_get_fdbycid(int cid)
 {
-    APROPRIAT_HASH_KEY(cid, TGG_CID_LEN);
     ReadLock lock(get_cidfd_lock());
-    int* value = (int*)tgg_hash_get_value(g_cid_hash, _key);
+    int* value = (int*)tgg_hash_get_intkey_value(g_cid_hash, cid);
     if(!value) {
         return -1;
     }
     return *value;
 }
 
-int tgg_get_allonlinecids(std::list<std::string>& lst_cids)
+int tgg_get_allonlinecids(std::list<int>& lst_cids)
 {
     WriteLock lock(get_cidfd_lock());
-    return tgg_hash_get_allkeys(g_cid_hash, lst_cids);
+    return tgg_hash_get_all_intkeys(g_cid_hash, lst_cids);
+}
+
+// 删除某个进程的所有pid，单个进程异常退出时调用
+void tgg_clean_allcids_bypid(int prc_id)
+{
+    char* key = NULL;
+    int* value = NULL;
+    uint32_t next = 0;
+    int ret = 0;
+    WriteLock lock(get_cidfd_lock());
+    while (1) {
+        ret = rte_hash_iterate(g_cid_hash, (const void**)&key, (void**)&value, &next);
+        if (-ENOENT == ret) {
+            printf("iter to the end.\n");
+            break;
+        } else if (ret < 0) {
+            printf("catch an error\n");
+            return;
+        }
+        if(*key >> 24 == prc_id) {
+            free_ciddata(value);
+            rte_hash_del_key(g_cid_hash, key);
+        }
+    }
+    return ;
 }
 
 int tgg_get_allfds(std::list<int>& lst_fds)
 {
-    char* key = NULL;
+    int* key = NULL;
     int* value = NULL;
     uint32_t next = 0;
     int ret = 0;

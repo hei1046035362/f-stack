@@ -7,6 +7,7 @@
 #include <sys/wait.h>
 #include "tgg_comm/tgg_common.h"
 #include "tgg_comm/tgg_struct.h"
+#include "tgg_comm/tgg_bwserver.h"
 #include "dpdk_init.h"
 #include "tgg_comm/tgg_transport.h"
 #include "comm/Encrypt.hpp"
