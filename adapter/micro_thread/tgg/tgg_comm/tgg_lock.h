@@ -18,7 +18,6 @@ typedef struct  st_lock_cache {
                                     // TODO 多个进程共用一把锁，对性能会有一定影响，需要考虑优化
     rte_spinlock_t bwfdx_lock;    // bwfdx 操作锁
     rte_atomic32_t idx_lock;    // idx累加的操作锁
-    rte_atomic32_t redis_init_lock;    // idx累加的操作锁
 } tgg_lock;
 
 rte_rwlock_t* get_bwfdxhsh_lock();
@@ -31,6 +30,5 @@ rte_rwlock_t* get_uidgid_lock();
 rte_spinlock_t* get_cli_lock();
 rte_spinlock_t* get_bwfdx_lock();
 rte_atomic32_t* get_idx_lock();
-rte_atomic32_t* get_redis_init_lock();
 
 #endif // _TGG_LOCK_STRUCT_H_

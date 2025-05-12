@@ -277,7 +277,6 @@ int main(int argc, char *argv[])
 	prc_dpdk_eal_init(argc, argv);
 	// mt_init_frame(argc, argv);
 	tgg_process_init();
-	init_flag_for_process();
 
 
     unsigned int port = TggConfigure::getInstance()->get_bwsvr_bw_port();
