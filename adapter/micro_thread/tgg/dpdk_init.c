@@ -115,47 +115,14 @@ struct rte_hash *g_idx_hash = NULL;  // 存放已使用的client idx，idx会在
 struct rte_hash *g_bwfdx_hash = NULL;  // 用于服务端连接的负载均衡，存放正在使用的bwfd, 确定客户端的数据要发送到哪个服务端
 struct rte_hash *g_bwwkkey_hash = NULL;  // 存放正在使用的bw的worker key
 
-// 创建全局唯一cid时使用的缓冲区，防止频繁申请和释放内存
-char g_cid_str[21] = {0};  // 8位地址+4位端口+8位idx+1位结束符'\0'
-
-static uint32_t convert_ip2int(const char* ip)
-{
-    struct in_addr ipaddr;
-    if (inet_pton(AF_INET, ip, &ipaddr) != 1) {
-        fprintf(stderr, "Invalid IP address format.\n");
-        exit(-1);
-    }
-    if(big_endian()) {
-    	return ntohl(ipaddr.s_addr);
-    }
-    return ipaddr.s_addr;
-}
-// 初始化cid的前缀  16进制的8位ip+4位port
-static void init_cid_prefix(uint32_t ip, ushort port)
-{
-	char* ptr = (char*)g_cid_str;
-	for (int j = 0; j < 6; j++) {
-		if ( j < 4) {
-			// ip
-			sprintf(ptr, "%02X", (ip >> (24 - j * 8)) & 0xFF);
-		} else {
-			// 端口
-			sprintf(ptr, "%02X", (port >> (8 - (j -4) * 8)) & 0xFF);
-		}
-		ptr += 2;
-	}
-}
-
 static void init_cid()
 {
-	// ip和端口 是固定的，只需要初始化的时候赋值就可以了
-	g_gate_ip = convert_ip2int(g_gateway_ip_str);
-	init_cid_prefix(g_gate_ip, g_gateway_port);
 	// 只要有一个进程初始化就可以了，这里选择primary进程做初始化
 	if (rte_eal_process_type() == RTE_PROC_PRIMARY) {
 		rte_atomic32_init(get_idx_lock());
 	}
 }
+
 static void init_redis_flag()
 {
 	rte_atomic32_init(get_redis_init_lock());

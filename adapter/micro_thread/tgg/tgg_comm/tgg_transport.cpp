@@ -6,22 +6,22 @@
 #include "tgg_bwcomm.h"
 #include "tgg_comm/tgg_common.h"
 
-void Send2Client(const char* cid, const std::string& data, int fd_opt)
+void Send2Client(int cid, const std::string& data, int fd_opt)
 {
     int fdidx = tgg_get_fdbycid(cid);
     if(fdidx < 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] client[%s] not exist.", __func__, __LINE__, cid);
+        RTE_LOG(ERR, USER1, "[%s][%d] client[%d] not exist.", __func__, __LINE__, cid);
         return;
     }
     int fd = fdidx >> 8;
     int core_id = fdidx & 0xf;
     int idx = tgg_get_cli_idx(core_id, fd);
     if(idx < 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] client[%s] already closed.", __func__, __LINE__, cid);
+        RTE_LOG(ERR, USER1, "[%s][%d] client[%d] already closed.", __func__, __LINE__, cid);
         return;
     }
     if(tgg_get_cli_authorized(core_id, fd) != AUTH_TYPE_TOKENCHECKED) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Send data to client[%s] should check Token at first.",
+        RTE_LOG(ERR, USER1, "[%s][%d] Send data to client[%d] should check Token at first.",
             __func__, __LINE__, cid);
         return;
     }
@@ -36,28 +36,28 @@ void Send2Client(const char* cid, const std::string& data, int fd_opt)
 
     std::cout << "send data["<< cid <<"]:" << Encrypt::bin2hex(sendData) << std::endl;
     if (enqueue_data_single_fd(core_id, sendData, fd, idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
-        RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%s,opt:%d",
+        RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%d,opt:%d",
          __func__, __LINE__, cid, fd_opt);
     }
 }
 
-void BatchSend2Client(std::list<std::string> cids, const std::string& data, int fd_opt)
+void BatchSend2ClientBycids(std::list<int> cids, const std::string& data, int fd_opt)
 {
     std::list<int> lstFds;
-    std::list<std::string>::iterator itCid = cids.begin();
+    std::list<int>::iterator itCid = cids.begin();
     while(itCid != cids.end()) {
-        int fdidx = tgg_get_fdbycid((*itCid).c_str());
+        int fdidx = tgg_get_fdbycid(*itCid);
         if(fdidx < 0) {
-            RTE_LOG(INFO, USER1, "[%s][%d] client[%s] not exist.", __func__, __LINE__, (*itCid).c_str());
+            RTE_LOG(INFO, USER1, "[%s][%d] client[%d] not exist.", __func__, __LINE__, *itCid);
             continue;
         }
         lstFds.push_back(fdidx);
         itCid++;
     }
-    BatchSend2Client(lstFds, data, fd_opt);
+    BatchSend2ClientByfds(lstFds, data, fd_opt);
 }
 
-void BatchSend2Client(std::list<int> fds, const std::string& data, int fd_opt)
+void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_opt)
 {
     if(fds.size() <= 0) {
         RTE_LOG(ERR, USER1, "[%s][%d] fd list can't be empty.\r\n", 
@@ -77,15 +77,15 @@ void BatchSend2Client(std::list<int> fds, const std::string& data, int fd_opt)
         while(itFd != coreidFds.second.end()) {
             int idx = tgg_get_cli_idx(coreidFds.first, *itFd);
             if(idx < 0) {
-                std::string sCid = tgg_get_cli_cid(coreidFds.first, *itFd);
-                RTE_LOG(INFO, USER1, "[%s][%d] client[%s] already closed.\n", __func__, __LINE__, sCid.c_str());
+                int cid = tgg_get_cli_cid(coreidFds.first, *itFd);
+                RTE_LOG(INFO, USER1, "[%s][%d] client[%d] already closed.\n", __func__, __LINE__, cid);
                 itFd++;
                 continue;
             }
             if(tgg_get_cli_authorized(coreidFds.first, *itFd) != AUTH_TYPE_TOKENCHECKED) {
-                std::string sCid = tgg_get_cli_cid(coreidFds.first, *itFd);
-                RTE_LOG(INFO, USER1, "[%s][%d] Send data to client[%s] should check Token at first.\n",
-                    __func__, __LINE__, sCid.c_str());
+                int cid = tgg_get_cli_cid(coreidFds.first, *itFd);
+                RTE_LOG(INFO, USER1, "[%s][%d] Send data to client[%d] should check Token at first.\n",
+                    __func__, __LINE__, cid);
                 itFd++;
                 continue;
             }

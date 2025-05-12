@@ -81,14 +81,14 @@ void WsConsumer::OnHandShake(const std::string& response)
 {
     OnSend(response, FD_WRITE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
     tgg_set_cli_authorized(this->core_id, this->fd, AUTH_TYPE_HANDLESHAKED);
-    std::string scid = get_valid_cid(this->_idx);
-    tgg_set_cli_cid(this->core_id, this->fd, scid.c_str());
+    int cid = get_valid_cid(this->core_id, this->_idx);
+    tgg_set_cli_cid(this->core_id, this->fd, cid);
     // TODO 这里是直接发送给服务端还是自己处理？
     std::string sendData;
-    if (message_pack(2, 1, 0, 1, scid, sendData) < 0)
+    if (message_pack(2, 1, 0, 1, std::to_string(cid), sendData) < 0)
     {
-        RTE_LOG(ERR, USER1, "[%s][%d] message_pack cid[%s] failed.\r\n", 
-            __func__, __LINE__, scid.c_str());
+        RTE_LOG(ERR, USER1, "[%s][%d] message_pack cid[%d] failed.\r\n", 
+            __func__, __LINE__, cid);
         _CleanAndClose();
         return;
     }
@@ -208,8 +208,8 @@ void WsConsumer::OnSend(const std::string& msg, int fd_opt)
 
     std::cout << "OnSend:" << Encrypt::bin2hex(msg) << std::endl;
     if (enqueue_data_single_fd(this->core_id, msg, this->fd, _idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
-        RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%s,uid:%s,opt:%d",
-         __func__, __LINE__, _cid.c_str(), _uid.c_str(), fd_opt);
+        RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%d,uid:%s,opt:%d",
+         __func__, __LINE__, _cid, _uid.c_str(), fd_opt);
         enqueue_data_single_fd(this->core_id, "", this->fd, _idx, FD_CLOSE);
     }
 }
