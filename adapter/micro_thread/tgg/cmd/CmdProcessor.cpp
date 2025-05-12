@@ -190,7 +190,7 @@ int CmdGatewayClientConnect::ExecCmd()
 
 int CmdSendToOne::ExecCmd()
 {
-    std::string scid = get_valid_cid(jdata["connection_id"]);
+    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
     int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string body = jdata["body"].get<std::string>();
     if(!raw) {
@@ -198,7 +198,7 @@ int CmdSendToOne::ExecCmd()
         // body = 
     }
     // TODO 目前只支持ws发送
-    Send2Client(scid.c_str(), body, FD_WRITE);
+    Send2Client(cid, body, FD_WRITE);
     return 0;
 }
 
@@ -241,15 +241,15 @@ int CmdSendToGroup::ExecCmd()
                 int coreid = fdx & 0xf;
                 int fd = fdx >> 8;
 
-                std::string cid = tgg_get_cli_cid(coreid, fd);
-                if(cid.empty()) {
+                int cid = tgg_get_cli_cid(coreid, fd);
+                if(cid <= 0) {
                     RTE_LOG(INFO, USER1, "[%s][%d] cid for fdx[%d] gid[%s] not exist.\n", 
                         __func__, __LINE__, fdx, element.get<std::string>().c_str());
                     itFd++;
                     continue;
                 }
                 // 确认cid是否要排除
-                std::set<std::string>::iterator iter = setExeptCid.find(cid);
+                std::set<std::string>::iterator iter = setExeptCid.find(std::to_string(cid));
                 if(iter == setExeptCid.end()) {
                     // 不在排除队列中就加入发送队列
                     lstAllFds.push_back(fdx);
@@ -259,7 +259,7 @@ int CmdSendToGroup::ExecCmd()
             //std::cout << element << std::endl;
         }
         if(lstAllFds.size() > 0) {
-            BatchSend2Client(lstAllFds, body, FD_WRITE);
+            BatchSend2ClientByfds(lstAllFds, body, FD_WRITE);
         }
     } else {
         return -1;
@@ -269,19 +269,19 @@ int CmdSendToGroup::ExecCmd()
 
 int CmdKick::ExecCmd()
 {
-    std::string scid = get_valid_cid(jdata["connection_id"]);
+    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
     std::string body = jdata["body"].get<std::string>();
-    Send2Client(scid.c_str(), body, FD_WRITE);
+    Send2Client(cid, body, FD_WRITE);
     std::string data = "\x88\x02\x03\xe8";// 关闭websocket
-    Send2Client(scid.c_str(), data, FD_WRITE);
+    Send2Client(cid, data, FD_WRITE);
     return 0;
 }
 
 int CmdDestroy::ExecCmd()
 {
-    std::string scid = get_valid_cid(jdata["connection_id"]);
+    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
     std::string data = "\x88\x02\x03\xe8";// 关闭websocket
-    Send2Client(scid.c_str(), data, FD_WRITE | FD_CLOSE);
+    Send2Client(cid, data, FD_WRITE | FD_CLOSE);
     return 0;
 }
 
@@ -296,7 +296,7 @@ int CmdSendToALL::ExecCmd()
     std::string ext_data = jdata["ext_data"];
     if(!ext_data.empty()) {
         nlohmann::json jext = nlohmann::json::parse(ext_data);
-        std::list<std::string> lstCids;
+        std::list<int> lstCids;
         if(jext.contains("connections") && jext["connections"].is_array()) {
             // 发送给所有指定的cid
             for (const auto& element : jext["connections"]) {
@@ -304,7 +304,7 @@ int CmdSendToALL::ExecCmd()
                 lstCids.push_back(element);
             }
             if(lstCids.size() > 0) {
-                BatchSend2Client(lstCids, body, FD_WRITE);
+                BatchSend2ClientBycids(lstCids, body, FD_WRITE);
             }
         } else {
             // 所有在线的客户端fd
@@ -313,7 +313,7 @@ int CmdSendToALL::ExecCmd()
                 return -1;
             }
             if(lstFds.size() > 0) {
-                BatchSend2Client(lstFds, body, FD_WRITE);
+                BatchSend2ClientByfds(lstFds, body, FD_WRITE);
             }
         }
         return 0;
@@ -333,14 +333,14 @@ void CmdSelect::FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::j
         }
         int coreid = *itFd & 0xf;
         int fd = *itFd >> 8;
-        std::string cid = tgg_get_cli_cid(coreid, fd);
-        if(cid.empty()) {
+        int cid = tgg_get_cli_cid(coreid, fd);
+        if(cid <= 0) {
             RTE_LOG(INFO, USER1, "[%s][%d] cid for fd[%d] not exist.\n", 
                 __func__, __LINE__, fd);
             itFd++;
             continue;
         }
-        if(!result.contains(cid)) {
+        if(!result.contains(std::to_string(cid))) {
             result[cid] = nlohmann::json::array();
         }
         std::string uid = tgg_get_cli_uid(coreid, fd);
@@ -357,8 +357,8 @@ void CmdSelect::FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::j
                     result[cid]["groups"] = nlohmann::json::array();
                 } else {
                                             // 已经填充过了就不要再次执行了
-                    RTE_LOG(INFO, USER1, "[%s][%d] cid[%s] groups already exist.\n", 
-                        __func__, __LINE__, cid.c_str());
+                    RTE_LOG(INFO, USER1, "[%s][%d] cid[%d] groups already exist.\n", 
+                        __func__, __LINE__, cid);
                 }
                 std::list<std::string>::iterator itGid = lst_gids.begin();
                 while(itGid != lst_gids.end()) {
@@ -372,8 +372,8 @@ void CmdSelect::FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::j
                 result[cid]["uid"] = uid;
             } else {
                 // 已经填充过了就不要再次执行了
-                RTE_LOG(INFO, USER1, "[%s][%d] cid[%s] groups already exist.\n", 
-                    __func__, __LINE__, cid.c_str());
+                RTE_LOG(INFO, USER1, "[%s][%d] cid[%d] groups already exist.\n", 
+                    __func__, __LINE__, cid);
             }
         }
         itFd++;
@@ -445,8 +445,8 @@ int CmdSelect::ExecCmd()
                 } else {
                     // cid {"9527":9527}
                     for (const auto& connection_id : it.value()) {
-                        std::string scid = get_valid_cid(connection_id);
-                        int fd = tgg_get_fdbycid(scid.c_str());
+                        int cid = get_valid_cid(this->prc_id, connection_id);
+                        int fd = tgg_get_fdbycid(cid);
                         if (fd > 0) {
                             std::list<int> lst_fds;
                             lst_fds.push_back(fd);
@@ -493,15 +493,15 @@ int CmdGetGroupIdList::ExecCmd()
 int CmdSetSession::ExecCmd()
 {
     std::string ext_data = jdata["ext_data"];
-    std::string scid = get_valid_cid(jdata["connection_id"]);
-    if(ext_data.empty() || scid.empty()) {
-        RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and scid[%s] shouldn't be empty.\n",
-                 __func__, __LINE__, ext_data.c_str(), scid.c_str());
+    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    if(ext_data.empty() || cid < 0) {
+        RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and cid[%d] shouldn't be empty.\n",
+                 __func__, __LINE__, ext_data.c_str(), cid);
         return -1;
     }
-    int clifdx = tgg_get_fdbycid(scid.c_str());
+    int clifdx = tgg_get_fdbycid(cid);
     if(clifdx < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] get clifdx by cid[%s] failed.\n", __func__, __LINE__, scid.c_str());
+        RTE_LOG(INFO, USER1, "[%s][%d] get clifdx by cid[%d] failed.\n", __func__, __LINE__, cid);
         return -1;
     }
     return tgg_set_cli_reserved(clifdx & 0xf, clifdx >> 8, ext_data.c_str());
@@ -510,15 +510,15 @@ int CmdSetSession::ExecCmd()
 int CmdUpdateSession::ExecCmd()
 {
     // TODO 稍微有点复杂，且当前拿不到数据
-    // std::string scid = get_valid_cid(jdata["connection_id"]);
-    // if(ext_data.empty() || scid.empty()) {
-    //     RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and scid[%s] shouldn't be empty.\n",
-    //              __func__, __LINE__, ext_data.c_str(), scid.c_str());
+    // int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    // if(ext_data.empty() || cid < 0) {
+    //     RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and cid[%d] shouldn't be empty.\n",
+    //              __func__, __LINE__, ext_data.c_str(), cid);
     //     return -1;
     // }
-    // int clifdx = tgg_get_fdbycid(scid.c_str());
+    // int clifdx = tgg_get_fdbycid(cid);
     // if(clifdx < 0) {
-    //     RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%s] failed.\n", __func__, __LINE__, scid.c_str());
+    //     RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%d] failed.\n", __func__, __LINE__, cid;
     //     return -1;
     // }
     // int coreid = clifdx & 0xf;
@@ -527,8 +527,8 @@ int CmdUpdateSession::ExecCmd()
     // std::string session = tgg_get_cli_reserved(coreid, clifd);
     // if(session.empty()) {
     //     if (tgg_set_cli_reserved(coreid, clifd, ext_data.c_str()) < 0) {
-    //         RTE_LOG(INFO, USER1, "[%s][%d] update session failed cid[%s] session[%s] failed.\n", 
-    //                 __func__, __LINE__, scid.c_str(), session.c_str());
+    //         RTE_LOG(INFO, USER1, "[%s][%d] update session failed cid[%d] session[%s] failed.\n", 
+    //                 __func__, __LINE__, cid, session.c_str());
     //         return -1;
     //     }
     //     return 0;
@@ -541,8 +541,8 @@ int CmdUpdateSession::ExecCmd()
 int CmdIsOnline::ExecCmd()
 {
     std::string result = "i:";
-    std::string scid = get_valid_cid(jdata["connection_id"]);
-    int clifdx = tgg_get_fdbycid(scid.c_str());
+    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    int clifdx = tgg_get_fdbycid(cid);
     if(clifdx < 0) {
         result += "0";
     } else {
@@ -558,38 +558,38 @@ int CmdBindUid::ExecCmd()
     // return tgg_bind_session(this->fd, s_uid.c_str(), tgg_get_cli_cid(this->fd).c_str());
     // TODO Binduid到底是客户端过来消息绑定，还是服务端过来消息绑定
     std::string suid = std::to_string(jdata["user_id"].get<std::uint64_t>());
-    std::string scid = get_valid_cid(jdata["connection_id"]);
-    if(suid.empty() || scid.empty()) {
-        RTE_LOG(INFO, USER1, "[%s][%d] bind uid failed, uid[%s] and cid[%s] shouldn't be empty.\n",
-                 __func__, __LINE__, suid.c_str(), scid.c_str());
+    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    if(suid.empty() || cid < 0) {
+        RTE_LOG(INFO, USER1, "[%s][%d] bind uid failed, uid[%s] and cid[%d] shouldn't be empty.\n",
+                 __func__, __LINE__, suid.c_str(), cid);
         return -1;
     }
-    int fdx = tgg_get_fdbycid(scid.c_str());
+    int fdx = tgg_get_fdbycid(cid);
     if(fdx < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%s] failed.\n", __func__, __LINE__, scid.c_str());
+        RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%d] failed.\n", __func__, __LINE__, cid);
         return -1;
     }
 
-    return tgg_bind_session(fdx & 0xf, fdx >> 8, suid.c_str(), scid.c_str());
+    return tgg_bind_session(fdx & 0xf, fdx >> 8, suid.c_str(), cid);
 
 }
 
 int CmdUnBindUid::ExecCmd()
 {
     std::string suid = std::to_string(jdata["user_id"].get<std::uint64_t>());
-    std::string scid = get_valid_cid(jdata["connection_id"]);
-    if(suid.empty() || scid.empty()) {
-        RTE_LOG(INFO, USER1, "[%s][%d] bind uid failed, uid[%s] and cid[%s] shouldn't be empty.\n",
-                 __func__, __LINE__, suid.c_str(), scid.c_str());
+    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    if(suid.empty() || cid < 0) {
+        RTE_LOG(INFO, USER1, "[%s][%d] bind uid failed, uid[%s] and cid[%d] shouldn't be empty.\n",
+                 __func__, __LINE__, suid.c_str(), cid);
         return -1;
     }
-    int fdx = tgg_get_fdbycid(scid.c_str());
+    int fdx = tgg_get_fdbycid(cid);
     if(fdx < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] get fdx by cid[%s] failed.\n", __func__, __LINE__, scid.c_str());
+        RTE_LOG(INFO, USER1, "[%s][%d] get fdx by cid[%d] failed.\n", __func__, __LINE__, cid);
         // TODO 有可能前面已经删除了，还需要观察
         return 0;
     }
-    RTE_LOG(INFO, USER1, "[%s][%d] free cid[%s].\n", __func__, __LINE__, scid.c_str());
+    RTE_LOG(INFO, USER1, "[%s][%d] free cid[%d].\n", __func__, __LINE__, cid);
     return tgg_free_session(fdx & 0xf, fdx >> 8);
 }
 
@@ -622,7 +622,7 @@ int CmdSendToUid::ExecCmd()
         }
     }
     if(lst_fds.size() > 0) {
-        BatchSend2Client(lst_fds, body, FD_WRITE);
+        BatchSend2ClientByfds(lst_fds, body, FD_WRITE);
     }
     return 0;
 }
@@ -631,18 +631,18 @@ int CmdSendToUid::ExecCmd()
 int CmdJoinGroup::ExecCmd()
 {
     std::string group = jdata["ext_data"];
-    std::string scid = get_valid_cid(jdata["connection_id"]);
-    if(group.empty() || scid.empty()) {
-        RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and scid[%s] shouldn't be empty.\n",
-                 __func__, __LINE__, group.c_str(), scid.c_str());
+    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    if(group.empty() || cid < 0) {
+        RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and cid[%d] shouldn't be empty.\n",
+                 __func__, __LINE__, group.c_str(), cid);
         return -1;
     }
-    int fd = tgg_get_fdbycid(scid.c_str());
+    int fd = tgg_get_fdbycid(cid);
     if(fd < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%s] failed.\n", __func__, __LINE__, scid.c_str());
+        RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%d] failed.\n", __func__, __LINE__, cid);
         return -1;
     }
-    tgg_join_group(scid.c_str(), group.c_str());
+    tgg_join_group(group.c_str(), cid);
     return 0;
 }
 
@@ -650,18 +650,18 @@ int CmdJoinGroup::ExecCmd()
 int CmdLeaveGroup::ExecCmd()
 {
     std::string group = jdata["ext_data"];
-    std::string scid = get_valid_cid(jdata["connection_id"]);
-    if(group.empty() || scid.empty()) {
-        RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and scid[%s] shouldn't be empty.\n",
-                 __func__, __LINE__, group.c_str(), scid.c_str());
+    int cid = get_valid_cid(this->prc_id, jdata["connection_id"]);
+    if(group.empty() || cid < 0) {
+        RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and cid[%d] shouldn't be empty.\n",
+                 __func__, __LINE__, group.c_str(), cid);
         return -1;
     }
-    int fd = tgg_get_fdbycid(scid.c_str());
+    int fd = tgg_get_fdbycid(cid);
     if(fd < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%s] failed.\n", __func__, __LINE__, scid.c_str());
+        RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%d] failed.\n", __func__, __LINE__, cid);
         return -1;
     }
-    tgg_exit_group(scid.c_str(), group.c_str());
+    tgg_exit_group(group.c_str(), cid);
     return 0;
 }
 
@@ -700,14 +700,14 @@ int CmdGetClientSessionsByGroup::ExecCmd()
             }
             int coreid = clidfdx & 0xf;
             int fd = clidfdx >> 8;
-            std::string scid = tgg_get_cli_cid(coreid, fd);
-            if(scid.length() <= TGG_IPPORT_LEN) {
-                RTE_LOG(INFO, USER1, "[%s][%d] cid[%s] length should be longger than %d.\n",
-                    __func__, __LINE__, scid.c_str(), TGG_IPPORT_LEN);
+            int cid = tgg_get_cli_cid(coreid, fd);
+            if(cid < 0) {
+                RTE_LOG(INFO, USER1, "[%s][%d] wrong cid[%d].\n",
+                    __func__, __LINE__, cid);
                 itFd++;
                 continue;
             }
-            std::string connection_id = scid.substr(TGG_IPPORT_LEN);// cid的前12位是ip和port，后面的才是connection_id
+            std::string connection_id = std::to_string(cid);// cid的前12位是ip和port，后面的才是connection_id
             std::string session = tgg_get_cli_reserved(coreid, fd);
             result[connection_id] = session;
             itFd++;
@@ -743,10 +743,10 @@ int CmdGetClientCountByGroup::ExecCmd()
                 itFd++;
                 continue;
             }
-            std::string scid = tgg_get_cli_cid(clifdx & 0xf, clifdx >> 8);
-            if(scid.length() <= TGG_IPPORT_LEN) {
-                RTE_LOG(INFO, USER1, "[%s][%d] cid[%s] length should be longger than %d.\n",
-                    __func__, __LINE__, scid.c_str(), TGG_IPPORT_LEN);
+            int cid = tgg_get_cli_cid(clifdx & 0xf, clifdx >> 8);
+            if(cid < 0) {
+                RTE_LOG(INFO, USER1, "[%s][%d] cid[%d] not found.\n",
+                    __func__, __LINE__, cid);
                 itFd++;
                 continue;
             }
@@ -782,14 +782,14 @@ int CmdGetClientIdByUid::ExecCmd()
                 itFd++;
                 continue;
             }
-            std::string scid = tgg_get_cli_cid(clifdx & 0xf, clifdx >> 8);
-            if(scid.length() <= TGG_IPPORT_LEN) {
-                RTE_LOG(INFO, USER1, "[%s][%d] cid[%s] length should be longger than %d.\n",
-                    __func__, __LINE__, scid.c_str(), TGG_IPPORT_LEN);
+            int cid = tgg_get_cli_cid(clifdx & 0xf, clifdx >> 8);
+            if(cid < 0) {
+                RTE_LOG(INFO, USER1, "[%s][%d] invalid cid[%d].\n",
+                    __func__, __LINE__, cid);
                 itFd++;
                 continue;
             }
-            std::string connection_id = scid.substr(TGG_IPPORT_LEN);// cid的前12位是ip和port，后面的才是connection_id
+            std::string connection_id = std::to_string(cid);// cid的前12位是ip和port，后面的才是connection_id
             result.push_back(connection_id);
             itFd++;
         }
@@ -817,14 +817,14 @@ int CmdBatchGetClientIdByUid::ExecCmd()
                     itFd++;
                     continue;
                 }
-                std::string scid = tgg_get_cli_cid(clifdx & 0xf, clifdx >> 8);
-                if(scid.length() <= TGG_IPPORT_LEN) {
-                    RTE_LOG(INFO, USER1, "[%s][%d] cid[%s] length should be longger than %d.\n",
-                        __func__, __LINE__, scid.c_str(), TGG_IPPORT_LEN);
+                int cid = tgg_get_cli_cid(clifdx & 0xf, clifdx >> 8);
+                if(cid < 0) {
+                    RTE_LOG(INFO, USER1, "[%s][%d] invalid cid[%d].\n",
+                        __func__, __LINE__, cid);
                     itFd++;
                     continue;
                 }
-                std::string connection_id = scid.substr(TGG_IPPORT_LEN);// cid的前12位是ip和port，后面的才是connection_id
+                std::string connection_id = std::to_string(cid);// cid的前12位是ip和port，后面的才是connection_id
                 result[it].push_back(connection_id);
                 itFd++;
             }

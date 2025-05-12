@@ -27,7 +27,6 @@ extern struct rte_ring* g_ring_bwsnds[MAX_LCORE_COUNT];
 extern struct rte_mempool* g_mempool_read;
 extern struct rte_mempool* g_mempool_write;
 extern struct rte_mempool* g_mempool_bwrcv;
-extern char g_cid_str[21];  // 8位地址+4位端口+8位idx+1位结束符'\0'
 
 tgg_stats g_tgg_stats = {0};
 
@@ -79,13 +78,9 @@ int get_valid_idx()
 	return current_id_atomic;
 }
 
-std::string get_valid_cid(int idx)
+int get_valid_cid(int prc_id, int idx)
 {
-	std::string scid(g_cid_str, TGG_IPPORT_LEN);
-    std::string rsp;
-    rsp.resize(sizeof(int));
-    memcpy(const_cast<char* >(rsp.data()), &idx, sizeof(int));
-    return scid + rsp;
+	return ((prc_id << 24) & idx);
 }
 
 
@@ -93,7 +88,7 @@ void tgg_close_cli(int core_id, int fd)
 {
 	SpinLock lock(get_cli_lock());
 	tgg_cli_info* cli = &((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd];
-	memset(cli->cid, 0, sizeof(cli->cid));
+	cli->cid = 0;
 	memset(cli->uid, 0, sizeof(cli->uid));
 	memset(cli->reserved, 0, sizeof(cli->reserved));
 	cli->idx = TGG_FD_CLOSED;
@@ -105,7 +100,7 @@ int tgg_init_cli(int core_id, int fd, uint32_t ip, ushort port)
 {
 	SpinLock lock(get_cli_lock());
 	tgg_cli_info* cli = &((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd];
-	memset(cli->cid, 0, sizeof(cli->cid));
+	cli->cid = 0;
 	memset(cli->uid, 0, sizeof(cli->uid));
 	memset(cli->reserved, 0, sizeof(cli->reserved));
 	cli->idx = get_valid_idx();
@@ -162,7 +157,7 @@ std::string tgg_get_cli_uid(int core_id, int fd)
 	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].uid;	
 }
 
-std::string tgg_get_cli_cid(int core_id, int fd)
+int tgg_get_cli_cid(int core_id, int fd)
 {
 	SpinLock lock(get_cli_lock());
 	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].cid;	
@@ -222,11 +217,10 @@ int tgg_set_cli_uid(int core_id, int fd, const char* uid)
 	return 0;
 }
 
-int tgg_set_cli_cid(int core_id, int fd, const char* cid)
+int tgg_set_cli_cid(int core_id, int fd, int cid)
 {
 	SpinLock lock(get_cli_lock());
-	memset(((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].cid, 0, sizeof(tgg_cli_info::cid));
-	strncpy(((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].cid, cid, strlen(cid));
+	((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].cid = cid;
 	return 0;
 }
 

@@ -8,18 +8,18 @@
 extern int g_fd_limit;
 
 // 执行bind   cid bind uid的时候需要执行这个函数
-int tgg_bind_session(int core_id, int fd, const char* uid, const char* cid)
+int tgg_bind_session(int core_id, int fd, const char* uid, int cid)
 {
 	int status = tgg_get_cli_status(core_id, fd);
 	int idx = tgg_get_cli_idx(core_id, fd);
 	int fdid = (fd << 8) & core_id;
 	if (idx < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d]session is closing, uid[%s] cid[%s].\n", __func__, __LINE__, uid, cid);
+		RTE_LOG(ERR, USER1, "[%s][%d]session is closing, uid[%s] cid[%d].\n", __func__, __LINE__, uid, cid);
 		// tgg_free_session(fd);
 		return -1;
 	}
-	if(strlen(uid) <= 0 || strlen(cid) <= 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] uid[%s] and cid[%s] should not be empty.\n", __func__, __LINE__, uid, cid);
+	if(strlen(uid) <= 0 || cid <= 0) {
+		RTE_LOG(ERR, USER1, "[%s][%d] uid[%s] and cid[%d] should not be empty.\n", __func__, __LINE__, uid, cid);
 		return -1;
 	}
 	// 添加到 hash<gid, list<fd>>
@@ -46,7 +46,7 @@ int tgg_bind_session(int core_id, int fd, const char* uid, const char* cid)
 	}
 	// 添加到 hash<cid, fd>
 	if (tgg_add_cid(cid, fdid) < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] add cid[%s] fdid[%d] failed.\n", __func__, __LINE__, cid, fd);
+		RTE_LOG(ERR, USER1, "[%s][%d] add cid[%d] fdid[%d] failed.\n", __func__, __LINE__, cid, fd);
 		goto bind_end;
 	}
 	tgg_set_cli_uid(core_id, fd, uid);
@@ -80,7 +80,7 @@ int tgg_free_session(int core_id, int fd)
 		return 0;
 	}
 	std::string uid = tgg_get_cli_uid(core_id, fd);
-	std::string cid = tgg_get_cli_cid(core_id, fd);
+	int cid = tgg_get_cli_cid(core_id, fd);
 	int fdid = (fd << 8) & core_id;
 	if(!uid.empty()) {
 		// 从 hash<gid, list<fd>>中删除
@@ -97,8 +97,8 @@ int tgg_free_session(int core_id, int fd)
 		tgg_del_fd4uid(uid.c_str(), fdid, idx);
 	}
 	// 从hash<cid, fd>中删除
-	if(!cid.empty()) {
-		tgg_del_cid(cid.c_str());
+	if(cid > 0) {
+		tgg_del_cid(cid);
 	}
 
 	// 清空cli信息  这个信息在由master close以后再清理，这里只清理hash表，由process调用
@@ -107,18 +107,18 @@ int tgg_free_session(int core_id, int fd)
 
 }
 
-int tgg_join_group(const char* gid, const char* cid)
+int tgg_join_group(const char* gid, int cid)
 {
 	int fdid = tgg_get_fdbycid(cid);
 	int core_id = fdid & 0xf;
 	int fd = fdid >> 8;
 	int idx = tgg_get_cli_idx(core_id, fd);
 	if (fd < 0 || idx < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, cid[%s] not found.", __func__, __LINE__, cid);
+		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, cid[%d] not found.", __func__, __LINE__, cid);
 		return -1;
 	}
 	if (tgg_add_gid(gid, fd, idx) < 0){
-		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, add gid not found, gid[%s] cid[%s].", 
+		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, add gid not found, gid[%s] cid[%d].", 
 			__func__, __LINE__, gid, cid);
 		return -1;
 	}
@@ -127,7 +127,7 @@ int tgg_join_group(const char* gid, const char* cid)
 		return -1;
 	}
 	if (tgg_add_uidgid(uid.c_str(), gid) < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, uid[%s] gid[%s] cid[%s].", 
+		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, uid[%s] gid[%s] cid[%d].", 
 			__func__, __LINE__, uid.c_str(), gid, cid);
 		tgg_del_fd4gid(gid, fdid, idx);
 		return -1;
@@ -135,24 +135,24 @@ int tgg_join_group(const char* gid, const char* cid)
 	return 0;
 }
 
-int tgg_exit_group(const char* gid, const char* cid)
+int tgg_exit_group(const char* gid, int cid)
 {
 	int fdid = tgg_get_fdbycid(cid);
 	int core_id = fdid & 0xf;
 	int fd = fdid >> 8;
 	int idx = tgg_get_cli_idx(core_id, fd);
 	if (fd < 0 || idx < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] connection invalid, cid[%s] not found.", __func__, __LINE__, cid);
+		RTE_LOG(ERR, USER1, "[%s][%d] connection invalid, cid[%d] not found.", __func__, __LINE__, cid);
 		return -1;
 	}
 	if (tgg_del_fd4gid(gid, fdid, idx) < 0){
-		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, add gid not found, gid[%s] cid[%s].", 
+		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, add gid not found, gid[%s] cid[%d].", 
 			__func__, __LINE__, gid, cid);
 		return -1;
 	}
 	std::string uid = tgg_get_cli_uid(core_id, fd);
 	if (tgg_del_gid_uidgid(uid.c_str(), gid) < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, uid[%s] gid[%s] cid[%s].", 
+		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, uid[%s] gid[%s] cid[%d].", 
 			__func__, __LINE__, uid.c_str(), gid, cid);
 		return -1;
 	}

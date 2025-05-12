@@ -20,7 +20,7 @@ public:
 private:
 	int fd;
 	///< 客户端要用cid做校验，fd被回收的速度太快了，容易把新建立的连接断掉
-	std::string _cid;
+	int _cid;
 };
 
 class CTimerTggBwFd : public CTimerNotify
