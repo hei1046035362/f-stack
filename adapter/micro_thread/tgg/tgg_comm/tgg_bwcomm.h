@@ -15,8 +15,6 @@ int message_pack(uint16_t command, uint32_t seq, uint8_t protocol,
 
 int message_unpack(const std::string& packedData, std::string& result);
 
-int tgg_init_uidgid(const std::vector<std::string>& clusterNodes, const std::string& password, const std::string& userName = "");
-
 // 或缺一个可用的idx
 // int get_valid_bw_idx();
 
