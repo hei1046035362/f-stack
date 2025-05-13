@@ -192,8 +192,8 @@ int tgg_init_config(int& argc, char* argv[])
     int c;
     int index = 0;
     int index_argv_g = -1;
-    std::string fstack_filename = "";
-    std::string tgg_filename = "";
+    std::string fstack_filename = "/etc/tgg_gw/config.ini";
+    std::string tgg_filename = "/etc/tgg_gw/tgg_conf.ini";
     while((c = getopt_long(argc, argv, tgg_short_options, tgg_long_options, &index)) != -1) {
         switch (c) {
             case 'c':
@@ -221,11 +221,6 @@ int tgg_init_config(int& argc, char* argv[])
         remove_option_from_argv(argc, argv, index_argv_g + 1);
     }
 
-    if(fstack_filename.empty() || tgg_filename.empty()) {
-        RTE_LOG(ERR, USER1, "[%s][%d] fstack conf[%s] and tgg conf[%s] can't be empty.",
-         __FILE__, __LINE__, fstack_filename.c_str(), tgg_filename.c_str());
-        return -1;
-    }
     if (TggConfigure::getInstance()->init(fstack_filename.c_str(), tgg_filename.c_str()) < 0) {
         return -1;
     }
