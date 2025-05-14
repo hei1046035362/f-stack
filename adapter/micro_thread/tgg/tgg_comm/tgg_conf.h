@@ -20,8 +20,10 @@ public:
     }
     int init(const char* fstack_conf, const char* tgg_conf);
 private:
-    int lcore_count;   // 收包进程的个数，从f-stack的conf.ini的lcore_mask获取，用于process确定要启动多少个进程
-    std::vector<int>    lcore_pos;/// 每个lcore在掩码中的位置
+    int lcore_mask;         // 收包进程绑定的核
+    int ccore_mask;         // cli处理进程绑定的核
+    std::vector<int>    lcore_pos;/// 收包进程绑定的核的位置
+    std::vector<int>    ccore_pos;/// cli处理进程每个core在掩码中的位置，创建线程池及绑核使用
     std::string addr;        // 网关对外ip  客户端
     unsigned short port;    // 网关对外使用的端口  客户端
     std::vector<std::string> redis_addrs; // redis集群地址
@@ -32,8 +34,10 @@ private:
     unsigned short bw_port;    // 网关对内使用的端口  服务端
     int bw_heart_beat;
 public:
-    int get_lcore_count() {return lcore_count;}
+    int get_lcore_mask() { return lcore_mask;}
+    int get_ccore_mask() { return ccore_mask;}
     const std::vector<int>& get_lcore_pos() {return lcore_pos;}
+    const std::vector<int>& get_ccore_pos() {return ccore_pos;}
     const std::string& get_gateway_addr() {return addr;}
     unsigned short get_gateway_port() {return port;}
     const std::vector<std::string>& get_redis_addrs() {return redis_addrs;}
