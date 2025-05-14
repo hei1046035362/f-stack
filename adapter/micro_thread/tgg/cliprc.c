@@ -27,15 +27,14 @@ void signal_handler(int signum)
 	if(signum == SIGINT || signum == SIGTERM) {
 		if(g_run) {
 			g_run = 0;
-			rte_eal_cleanup();
-        	prc_exit(0, "catched signal:%d\n", signum);
+			RTE_LOG(WARNING, USER1, "catched signal:%d\n", signum);
 		}
 	}
 }
 
 void tgg_gw_process(void* data)
 {
-	ThreadArray threads(TggConfigure::getInstance()->get_lcore_pos());
+	ThreadArray threads(TggConfigure::getInstance()->get_lcore_pos(), TggConfigure::getInstance()->get_ccore_pos());
 	threads.startThreads(tgg_process_read);
 }
 
@@ -55,8 +54,8 @@ void tgg_sig_init()
 void tgg_process_init()
 {
 	tgg_sig_init();// 信号处理初始化
-	tgg_secondary_init();// dpdk相关初始化
-	tgg_iterprint_gidsbyuid();// 打印redis中获取的数据
+	tgg_cliprc_init();// dpdk相关初始化
+	// tgg_iterprint_gidsbyuid();// 打印redis中获取的数据
 	initOpenSSL();// 初始化ssl加解密环境
 	init_endians();// 大小端判断初始化
 }

@@ -62,7 +62,7 @@ int get_valid_idx()
 		// TODO  后续要考虑自增id超过uint32_max了怎么处理，
 		rte_atomic32_inc(get_idx_lock());
 		current_id_atomic = rte_atomic32_read(get_idx_lock());
-		if(current_id_atomic > g_fd_limit) {
+		if(current_id_atomic >= g_fd_limit) {
 			rte_atomic32_init(get_idx_lock());
 			rte_atomic32_inc(get_idx_lock());// idx要从1开始  0(ready)和-1(closed)已经被用作其他功能了
 			looptimes--;
@@ -76,6 +76,7 @@ int get_valid_idx()
 			break;
 		}
 	}
+	RTE_LOG(ERR, USER1, "[%s][%d] invalid idx %d.", __func__, __LINE__, current_id_atomic);
 	return current_id_atomic;
 }
 
@@ -846,7 +847,7 @@ void* dpdk_rte_malloc(int size)
 {
 	void* pdata = rte_malloc("tgg_malloc", size, 0);
 	if (!pdata)	{
-		RTE_LOG(ERR, USER1, "malloc data failed.");
+		RTE_LOG(ERR, USER1, "malloc data failed.\n");
 	}
 	// TODO 这里需要把pdata管理起来，因dpdk的secondary进程出core而未释放时会导致大页内存泄漏
 	// 		可以用链表管理起来，然后注册rte_service给master进程去管理，也可以放到定时任务管理

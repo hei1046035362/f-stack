@@ -34,6 +34,8 @@ extern struct rte_mempool* g_mempool_write;
 extern struct rte_mempool* g_mempool_bwrcv;
 extern int g_listen_fd;
 
+static void prc_dpdk_eal_init(int argc, char **argv);
+
 void signal_handler(int signum)
 {
 	if(signum == SIGINT || signum == SIGTERM) {
@@ -70,32 +72,19 @@ void signal_handler(int signum)
 		{
 			if (s_pids[i].pid == pid) {
 				// 有信号就重置心跳计数
-				s_pids[i].heard_beat = 0;
+				s_pids[i].heart_beat = 0;
 			}
 		}
 	}
 }
 
-// static int tgg_process_bwrcv()
-// {
-// 	tgg_bw_data* bdata = NULL;
-// 	if (tgg_dequeue_bwrcv(g_prc_id, &bdata) < 0) {
-// 	    // 队列空
-// 		return 1;
-// 	}
-// 	if (!bdata) {
-// 		return 0;
-// 	}
-// 	if (!g_run) {
-// 		rte_free(bdata->data);
-// 		memset(bdata, 0, sizeof(tgg_bw_data));
-// 		rte_mempool_put(g_mempool_bwrcv, (void*)bdata);
-// 		return -1;
-// 	}
-// 	return 0;
-// }
+int local_eventloop_fun(void* arg) {
+    if (!g_run)
+        return -1;// 终止coroutine的eventloop
+    return 0;
+}
 
-void fork_oneprocess(void* data)
+void fork_oneprocess(void* data, int argc, char **argv)
 {
    	g_prc_id = *((int*)data);
 	pid_t pid = fork();
@@ -103,9 +92,9 @@ void fork_oneprocess(void* data)
     if (pid < 0) {
         perror("Fork failed.");
         prc_exit(EXIT_FAILURE, "Fork failed.\n");
-        // exit(EXIT_FAILURE);
     } else if (pid == 0) {
         // 子进程
+        prc_dpdk_eal_init(argc, argv);
 
         // 启动之前，先清理数据，防止上次异常退出导致资源没有正常清理
         tgg_init_bwfdx_prc(g_prc_id);
@@ -132,43 +121,43 @@ void fork_oneprocess(void* data)
         tgg_set_bw_prcstatus(g_prc_id, 1);
 
         // 开始协程循环
-        co_eventloop( co_get_epoll_ct(),0,0 );
+        co_eventloop( co_get_epoll_ct(), local_eventloop_fun,0 );
 
 
-		// init_bwserver();
-		// tgg_gw_process(NULL);
-		// uninit_bwserver();
         prc_exit(0, "child exit.\n");
     } else {
         // 父进程
         // s_pids[g_prc_id].idx = g_prc_id;
         s_pids[g_prc_id].pid = pid;
+        s_pids[g_prc_id].heart_beat = 0;
         // *ppid = pid;
     }
 }
 
-void fork_processes()
+void fork_processes(int argc, char **argv)
 {
 	s_pids = (pid_data*)malloc(s_pid_count * sizeof(pid_data));
     
     // 创建子进程
     for (int i = 0; i < s_pid_count; i++) {
-    	fork_oneprocess(&i);
+    	fork_oneprocess(&i, argc, argv);
     }
+    prc_dpdk_eal_init(argc, argv);
 }
 
 // 检查心跳
 void check_heart_beat(pid_data* pdata)
 {
 	// 心跳间隔大于5min钟，就判定进程假死了，直接重启进程
-	if (pdata->heard_beat > 60 * s_heart_beat_interval)
+	if (pdata->heart_beat > 60 * s_heart_beat_interval)
 	{
 		// 重启进程
 		kill(pdata->pid, SIGTERM);
         wait(NULL);
 	}
+    pdata->heart_beat = 0;
 }
-void monitor_process()
+void monitor_process(int argc, char **argv)
 {
 	// 定期检查子进程状态
     while (g_run) {
@@ -178,23 +167,35 @@ void monitor_process()
             pid_t result = waitpid(s_pids[i].pid, &status, WNOHANG); // 非阻塞等待
             
             if (result == 0) {
-                // 子进程仍在运行
-                printf("子进程 (PID: %d) 仍在运行.\n", s_pids[i].pid);
-                check_heart_beat(&s_pids[i]);
+                printf("子进程[%d]仍在运行\n", s_pids[i].pid);
             } else if (result == -1) {
                 // 出现错误
                 perror("waitpid 错误");
             } else {
-                // 子进程已结束
-                printf("子进程 (PID: %d) 已结束.\n", s_pids[i].pid);
-                // 重新创建
-                fork_oneprocess(&i);
-                // pids[i] = s_pids[--s_pid_count]; // 移除已结束的子进程
-                // i--; // 调整索引，以便正确检查下一个进程
+                if(g_run) {
+                    // 子进程已结束
+                    printf("子进程 (PID: %d) 异常结束，重启进程.\n", s_pids[i].pid);
+                    // 重新创建
+                    fork_oneprocess(&i, argc, argv);
+                    // pids[i] = s_pids[--s_pid_count]; // 移除已结束的子进程
+                    // i--; // 调整索引，以便正确检查下一个进程
+                }
+                if (result == s_pids[i].pid) {
+                    if (WIFSTOPPED(status)) {  // 子进程暂停（可能因死锁卡在锁操作）
+                        printf("子进程[%d]可能死锁，终止信号：%d\n", s_pids[i].pid, WSTOPSIG(status));
+                    } else if (WIFSIGNALED(status)) {  // 子进程被信号终止
+                        printf("子进程[%d]被信号终止：%d\n", s_pids[i].pid, WTERMSIG(status));
+                    } 
+                }
             }
-
+            //pdata->heart_beat++;
             // 
         }
+    }
+    pid_t pid;
+    int status = 0;
+    while ((pid = wait(&status)) != -1) {
+        printf("子进程 %d 退出，状态码: %d\n", pid, WEXITSTATUS(status));
     }
     free(s_pids);
     printf("所有子进程已结束，父进程退出.\n");
@@ -205,33 +206,22 @@ void tgg_sig_init()
 {
 	if (signal(SIGINT, signal_handler) == SIG_ERR) {
         perror("Error setting signal handler");
-        prc_exit(-1, "Error setting signal handler");
+        exit(-1);
     }
 	if (signal(SIGTERM, signal_handler) == SIG_ERR) {
         perror("Error setting signal handler");
-        prc_exit(-1, "Error setting signal handler");
+        exit(-1);
     }
     if (signal(SIGTERM, signal_handler) == SIG_ERR) {
         perror("Error setting signal handler");
-        prc_exit(-1, "Error setting signal handler");
+        exit(-1);
     }
-    // // 子进程退出
-    // struct sigaction sa;
-    // sa.sa_handler = signal_handler;
-    // sigemptyset(&sa.sa_mask);
-    // sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-	// if (sigaction(SIGCHLD, &sa, NULL) == SIG_ERR) {
-    //     perror("Error setting signal handler");
-    //     prc_exit(-1, "Error setting signal handler");
-    // }
-
 }
 
 void tgg_process_init()
 {
 	tgg_sig_init();
-	tgg_secondary_init();
-	tgg_iterprint_gidsbyuid();
+	// tgg_iterprint_gidsbyuid();
 	initOpenSSL();
 	init_endians();
 }
@@ -264,6 +254,7 @@ static void prc_dpdk_eal_init(int argc, char **argv)
 	int ret = rte_eal_init(argc, argp);
 	if (ret < 0)
 		rte_panic("Cannot init EAL\n");
+    tgg_secondary_init();
 }
 
 
@@ -274,7 +265,6 @@ int main(int argc, char *argv[])
 		printf("init config error.");
 		return -1;
 	}
-	prc_dpdk_eal_init(argc, argv);
 	// mt_init_frame(argc, argv);
 	tgg_process_init();
 
@@ -282,24 +272,25 @@ int main(int argc, char *argv[])
     unsigned int port = TggConfigure::getInstance()->get_bwsvr_bw_port();
     const std::string& ip = TggConfigure::getInstance()->get_bwsvr_bw_addr();
 	g_listen_fd = create_tcp_socket( port, ip.c_str(), true );
+    s_pid_count = TggConfigure::getInstance()->get_bwsvr_count();
     listen( g_listen_fd,1024 );
-    if(g_listen_fd==-1){
+    if(g_listen_fd == -1){
         printf("Port %d is in use\n", port);
         return -1;
     }
-    printf("listen %d %s:%d\n",g_listen_fd, ip.c_str(), port);
+    printf("listen %d %s:%d,server count:%d\n",g_listen_fd, ip.c_str(), port, s_pid_count);
 
     set_non_block( g_listen_fd );
 
 
 
     // 启动bwserver服务进程组
-	fork_processes();
+	fork_processes(argc, argv);
 	// 启动透传线程
 	init_bwtrans();
 	// init_bwserver();
 	// 主进程循环监控 bwserver服务进程组，循环
-	monitor_process();
+	monitor_process(argc, argv);
 	// 主进程结束，开始销毁资源
 	uninit_bwtrans();
 	// tgg_gw_process(NULL);

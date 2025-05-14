@@ -30,6 +30,30 @@ int g_run_status = 1;
 using namespace NS_MICRO_THREAD;
 
 
+void signal_handler(int signum)
+{
+	if(signum == SIGINT || signum == SIGTERM) {
+		if(g_run_status) {
+			g_run_status = 0;
+			RTE_LOG(WARNING, USER1, "catched signal:%d\n", signum);
+		}
+	}
+}
+
+void tgg_sig_init()
+{
+	if (signal(SIGINT, signal_handler) == SIG_ERR) {
+        perror("Error setting signal handler");
+        prc_exit(-1, "Error setting signal handler");
+    }
+	if (signal(SIGTERM, signal_handler) == SIG_ERR) {
+        perror("Error setting signal handler");
+        prc_exit(-1, "Error setting signal handler");
+    }
+
+}
+
+
 // TODO 是否要改为通过fd获取ip尚未确定，目前还是采用的配置中的ip地址，会有一定的局限性
 // 通过fd获取本机地址，但是只有当有客户端连上来的时候才能获取，有一定延迟，通过服务端自己的fd只能获取到0.0.0.0
 uint32_t get_local_addr(int sockfd)
@@ -121,7 +145,7 @@ static int tgg_recv_enqueue(int clt_fd, const char* buf, int len, enum FD_OPT op
 		rdata->data = dpdk_rte_malloc(rdata->data_len);
 		if (!rdata->data) {
 			// TODO 记录失败次数
-			RTE_LOG(WARNING, USER1, "[%s][%d] malloc data failed.", __func__, __LINE__);
+			RTE_LOG(WARNING, USER1, "[%s][%d] malloc data failed.\n", __func__, __LINE__);
 			// 分配内存失败，获取的入队列结构体要放回内存池
 			rte_mempool_put(g_mempool_read, rdata);
 			return -1;
@@ -316,7 +340,8 @@ static int tgg_gw_master()
 	struct sockaddr_in addr;
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = INADDR_ANY;
-	addr.sin_port = big_endian() ? htons(g_gateway_port) : g_gateway_port;
+
+	addr.sin_port = big_endian() ? TggConfigure::getInstance()->get_gateway_port() : htons(TggConfigure::getInstance()->get_gateway_port());
 
 	int fd = create_tcp_sock();
 	if (fd < 0) {
@@ -335,6 +360,7 @@ static int tgg_gw_master()
 		fprintf(stderr, "listen failed [%m]\n");
 		return -1;
 	}
+	RTE_LOG(INFO, USER1, "start service for port:%d.\n", TggConfigure::getInstance()->get_gateway_port());
     int clt_fd = 0;
 	int *p;
 	while (g_run_status) {
@@ -364,6 +390,7 @@ static int tgg_gw_master()
 			fprintf(stderr, "set clt_fd nonblock failed [%m]\n");
 			break;
 		}
+		RTE_LOG(INFO, USER1, "accept a new connection.\n");
 		// 启动一个接收线程
 		p = new int(clt_fd);
 		mt_start_thread((void *)tgg_recv, (void *)p);
@@ -379,6 +406,7 @@ int main(int argc, char *argv[])
 		printf("init config error.");
 		return -1;
 	}
+
 	mt_init_frame(argc, argv);
 	g_core_id = rte_lcore_id();
 	if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
@@ -386,12 +414,15 @@ int main(int argc, char *argv[])
 	} else {
 		tgg_secondary_init();
 	}
+	tgg_sig_init();// 信号处理初始化
 	tgg_gw_master();
 	if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
+		printf("-------master core[%d] exit-------\n", g_core_id);
 		tgg_master_uninit();
-		mt_uninit_frame();
 	} else {
-		tgg_secondary_uninit();
+		printf("-------secondary core[%d] exit-------\n", g_core_id);
 	}
+	mt_uninit_frame();
+    rte_eal_cleanup();
 	return 0;
 }

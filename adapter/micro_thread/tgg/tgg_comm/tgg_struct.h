@@ -6,7 +6,8 @@
 #define SECRET_KEY_LEN 32
 #define WOKER_KEY_LEN 64
 
-#define MAX_LCORE_COUNT 20    // 最大允许的 lcore个数
+#define MAX_LCORE_COUNT 32    // 最大允许的 lcore个数 TODO 可以优化，需要改相关逻辑以支持更多核
+                              // 目前最大吃吃16个gw收包进程和16个cli处理线程
 
 #define TGG_CID_LEN 24
 #define TGG_UID_LEN 24
@@ -155,7 +156,7 @@ typedef struct st_stats {
 // 进程信息
 typedef struct st_pid_data {
     pid_t pid;        // 进程id                                    父进程写入
-    uint64_t heard_beat;    // 心跳   防止进程无响应，队列无人消费            父进程写入，子进程通过信号通知并重置计数
+    uint64_t heart_beat;    // 心跳   防止进程无响应，队列无人消费            父进程写入，子进程通过信号通知并重置计数
     int idx;        // 索引   进程索引，标记进程能使用的队列        子进程写入和使用
 } pid_data;
 
