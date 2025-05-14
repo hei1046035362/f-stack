@@ -9,13 +9,22 @@
 class ThreadArray {
 public:
     // 构造函数，传入要创建的线程数量
-    ThreadArray(const std::vector<int>& lcoreIdx) : lcoreIdx(lcoreIdx) {}
+    ThreadArray(const std::vector<int>& lcoreIdx, const std::vector<int>& ccoreIdx) : lcoreIdx(lcoreIdx),
+    ccoreIdx(ccoreIdx) {}
 
     // 启动所有线程的函数，需要传入线程函数以及对应的参数（示例中线程函数接受一个整数参数）
     template<typename Func, typename... Args>
     void startThreads(Func&& func, Args&&... args) {
         for (unsigned int i = 0; i < lcoreIdx.size(); ++i) {
-            threads.push_back(std::thread(func, args..., lcoreIdx[i]));
+            std::thread thd(func, args..., lcoreIdx[i]);
+            cpu_set_t cpuset;
+            CPU_ZERO(&cpuset);       // 清空核心集合
+            CPU_SET(ccoreIdx[i], &cpuset);     // 添加核心
+            // 设置线程亲和性
+            if (pthread_setaffinity_np(thd.native_handle(), sizeof(cpu_set_t), &cpuset) != 0) {
+                std::cerr << "bound ccore[" << i << ":"  << ccoreIdx[i] << "] failed" << std::endl;
+            }
+            threads.push_back(std::move(thd));
         }
     }
 
@@ -35,6 +44,7 @@ public:
 
 private:
     const std::vector<int>& lcoreIdx;
+    const std::vector<int>& ccoreIdx;
     std::vector<std::thread> threads;
 };
 

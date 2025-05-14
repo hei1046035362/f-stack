@@ -12,8 +12,8 @@ PKGCONF ?= pkg-config
 DEBUG= -g
 BINARY = gwrcv gwcliprc gwbwprc gwredis
 FF_LIBS+= $(shell $(PKGCONF) --static --libs libdpdk)
-FF_LIBS+= -L${FF_PATH}/lib -Wl,--whole-archive,-lfstack,--no-whole-archive -L$(FF_PATH)/adapter/micro_thread -lmt \
-		-L${FF_PATH}/app/libco/solib
+FF_LIBS+= -L${FF_PATH}/lib -Wl,--whole-archive,-lfstack,--no-whole-archive \
+		-L${FF_PATH}/app/libco/lib
 FF_LIBS+= -Wl,--no-whole-archive -lrt -lm -ldl -lcrypto -lpthread -lnuma -lhiredis -lstdc++
 
 # Comment the following line if you are not using the gnu c compiler
@@ -31,7 +31,7 @@ CC = g++
 
 # You shouldn't need to make any more changes below this line.
 INCCOMM=-I./valgrind -I$(FF_PATH)/lib -I$(FF_PATH)/adapter/micro_thread -I$(FF_PATH)/adapter/micro_thread/tgg -I${FF_PATH}/app/libco/
-SOURCE_FILES := $(wildcard cmd/*.c cmd/*.cpp comm/*.c comm/*.cpp tgg_comm/*.c tgg_comm/*.cpp ./*.c unittest/*.cpp)
+SOURCE_FILES := $(wildcard cmd/*.c cmd/*.cpp comm/*.c comm/*.cpp tgg_comm/*.c tgg_comm/*.cpp ./*.c)
 #.c.o:
 #	$(CC) -c $*.c
 
@@ -88,7 +88,7 @@ BWSERVER_OBJ = bwprc.o dpdk_init.o cmd/CmdProcessor.o tgg_comm/tgg_bw_cache.o\
 
 gwrcv: $(MASTER_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
-	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl $(FF_LIBS) $(CRESET)
+	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl $(FF_LIBS) -L$(FF_PATH)/adapter/micro_thread -lmt $(CRESET)
 
 gwcliprc: $(CLIPRC_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)

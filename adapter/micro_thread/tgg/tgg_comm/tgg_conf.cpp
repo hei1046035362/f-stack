@@ -4,6 +4,11 @@
 #include <rte_log.h>
 #include <unistd.h>
 #include <string.h>
+
+#ifndef MAX_LCORE_COUNT
+#define MAX_LCORE_COUNT 32
+#endif
+
 TggConfigure* TggConfigure::instance = new TggConfigure;
 // 输入参数解析
 const char* tgg_short_options = "c:t:p:g:";
@@ -89,9 +94,12 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
          __FILE__, __LINE__, lcore_mask);
         return -1;
     }
-    for (unsigned int i = 0; i < sizeof(int) * 8; ++i) {  // 循环遍历整数的每一位（以int类型为例，共32位）
-        if (lcore_mask & (1 << i)) {  // 通过与运算判断当前位是否为1
-            this->lcore_count++;
+    this->lcore_mask = lcore_mask;
+    unsigned int i = 0;
+    int lcore_count = 0;
+    for (; i < MAX_LCORE_COUNT; ++i) {  // 循环遍历整数的每一位（以int类型为例，共32位）
+        if (this->lcore_mask & (1 << i)) {  // 通过与运算判断当前位是否为1
+            lcore_count++;
             this->lcore_pos.push_back(i);  // 如果当前位是1，记录其位置（从右往左，从0开始计数）
         }
     }
@@ -111,6 +119,37 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     this->port = ret;
     if(this->port > 65535) {
         RTE_LOG(ERR, USER1, "[%s][%d] invalid gateway port:[%d].", __FILE__, __LINE__, this->port);
+        return -1;
+    }
+
+    // ccore_mask  cli的线程绑定那几个core
+    core_mask = pTgg_Ini.getValue("gateway", "ccore_mask");
+    int ccore_mask = parse_lcore_mask(core_mask);
+    if(ccore_mask <= 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] read config lcore mask failed:[%d].",
+         __FILE__, __LINE__, ccore_mask);
+        return -1;
+    }
+    // 收包进程绑定的core不能与cli处理线程绑定的core重叠
+    if(this->lcore_mask & ccore_mask) {
+        RTE_LOG(ERR, USER1, "[%s][%d] lcore mask[%x] can't duplicate with ccore mask:[%x].",
+         __FILE__, __LINE__, this->lcore_mask, ccore_mask);
+        return -1;
+    }
+    this->ccore_mask = ccore_mask;
+    int ccore_count = 0;
+    i = 0;
+    for (; i < MAX_LCORE_COUNT; ++i) {  // 循环遍历整数的每一位（以int类型为例，共32位）
+        if (this->ccore_mask & (1 << i)) {  // 通过与运算判断当前位是否为1
+            this->ccore_pos.push_back(i);  // 如果当前位是1，记录其位置（从右往左，从0开始计数）
+            ccore_count++;
+        }
+    }
+
+    // 收包进程数要等于cli处理线程数
+    if(lcore_count != ccore_count) {
+        RTE_LOG(ERR, USER1, "[%s][%d] lcore count[%d] not equal to ccore count:[%d].",
+         __FILE__, __LINE__, lcore_count, ccore_count);
         return -1;
     }
 
