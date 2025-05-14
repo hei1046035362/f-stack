@@ -41,7 +41,7 @@ const char* fd_zone_name_prev = "tgg_fd_zone";
 
 /// bw连接状态记录的fd数组
 uint32_t g_bwfdx_limit = 10*10000; // 单个进程1W 个fd
-static uint32_t s_bwzone_size = g_bwfdx_limit*sizeof(int);  // 单个进程存储最多10w个fd
+static uint32_t s_bwzone_size = g_bwfdx_limit*sizeof(tgg_bw_info);  // 单个进程存储最多10w个fd
 struct rte_memzone* g_bwfdx_zones[MAX_LCORE_COUNT] = {NULL};
 const char* bwfdx_zone_name_prev = "tgg_bwfd_zone";
 
@@ -115,10 +115,20 @@ struct rte_hash *g_idx_hash = NULL;  // 存放已使用的client idx，idx会在
 struct rte_hash *g_bwfdx_hash = NULL;  // 用于服务端连接的负载均衡，存放正在使用的bwfd, 确定客户端的数据要发送到哪个服务端
 struct rte_hash *g_bwwkkey_hash = NULL;  // 存放正在使用的bw的worker key
 
-static void init_cid()
+// 初始化锁
+static void init_locks()
 {
 	// 只要有一个进程初始化就可以了，这里选择primary进程做初始化
 	if (rte_eal_process_type() == RTE_PROC_PRIMARY) {
+		rte_rwlock_init(get_bwfdxhsh_lock());
+		rte_rwlock_init(get_bwwkkeyhsh_lock());
+		rte_rwlock_init(get_idxhsh_lock());
+		rte_rwlock_init(get_gidfd_lock());
+		rte_rwlock_init(get_uidfd_lock());
+		rte_rwlock_init(get_cidfd_lock());
+		rte_rwlock_init(get_uidgid_lock());
+		rte_spinlock_init(get_cli_lock());
+		rte_spinlock_init(get_bwfdx_lock());
 		rte_atomic32_init(get_idx_lock());
 	}
 }
@@ -199,8 +209,8 @@ make_mempool(const char *name, size_t units, size_t unit_size)
 	if (mempool == NULL) {
 		mempool = rte_mempool_create(mp_name,
 			units,
-			unit_size,
-			0,
+			unit_size + RTE_CACHE_LINE_SIZE,
+			RTE_MEMPOOL_CACHE_MAX_SIZE,
 			0, NULL, NULL, NULL, NULL,
 			rte_socket_id(), 0);
 		if (mempool == NULL) {
@@ -218,7 +228,7 @@ static struct rte_ring *
 find_ring(const char *name)
 {
 	unsigned int socket_id = rte_socket_id();
-	char ring_name[RTE_RING_NAMESIZE];
+	char ring_name[RTE_RING_NAMESIZE] = {0};
 	struct rte_ring *ring;
 
 	snprintf(ring_name, RTE_RING_NAMESIZE, "%s_%u", name, socket_id);
@@ -230,7 +240,7 @@ static struct rte_ring *
 make_ring(const char *name, size_t units)
 {
 	unsigned int socket_id = rte_socket_id();
-	char ring_name[RTE_RING_NAMESIZE];
+	char ring_name[RTE_RING_NAMESIZE] = {0};
 	struct rte_ring *ring;
 
 	snprintf(ring_name, RTE_RING_NAMESIZE, "%s_%u", name, socket_id);
@@ -299,9 +309,12 @@ void tgg_master_init()
 	RTE_LOG(INFO, USER1, "Init dpdk master for tgg...\n");
 	// 100W个FD  32M的空间
 	g_lock_zone = make_memzone(s_lock_zone_name, sizeof(tgg_lock));
-	init_cid();
-	for (uint32_t i = 0; i < rte_lcore_count(); i++) {
-		char zone_name[256] = {};
+	init_locks();
+	for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
+		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
+			continue;
+		}
+		char zone_name[RTE_MEMZONE_NAMESIZE] = {0};
 		sprintf(zone_name, "%s_%d", fd_zone_name_prev, i);
 		g_fd_zones[i] = make_memzone(zone_name, s_zone_size);
 		for (uint32_t j = 0; j < g_fd_limit; j++) {
@@ -310,24 +323,24 @@ void tgg_master_init()
 		}
 
 		// cli 处理队列
-		char cliprc_ring_name[256] = {};
+		char cliprc_ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(cliprc_ring_name, "%s_%d", cliprc_ring_name_prev, i);
 		g_ring_cliprcs[i] = make_ring(cliprc_ring_name, s_ring_size);
 
 		// cli 发送队列
-		char write_ring_name[256] = {};
+		char write_ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(write_ring_name, "%s_%d", write_ring_name_prev, i);
 		g_ring_writes[i] = make_ring(write_ring_name, s_ring_size);
 
 		// bw 接收
-		char bwrcv_ring_name[256] = {};
+		char bwrcv_ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(bwrcv_ring_name, "%s_%d", bwrcv_ring_name_prev, i);
 		g_ring_bwrcvs[i] = make_ring(bwrcv_ring_name, s_ring_size);
 
 	}
 	for (uint32_t i = 0; i < TggConfigure::getInstance()->get_bwsvr_count() ; i++) {
 		// bwfd zone
-		char zone_name[256] = {};
+		char zone_name[RTE_MEMZONE_NAMESIZE] = {0};
 		sprintf(zone_name, "%s_%d", bwfdx_zone_name_prev, i);
 		g_bwfdx_zones[i] = make_memzone(zone_name, s_bwzone_size);
 		for (uint32_t j = 0; j < g_bwfdx_limit; j++) {
@@ -335,7 +348,7 @@ void tgg_master_init()
 			tgg_set_bwfdx_status(i, j, 0);
 		}
 		// bw 发送
-		char bwsnd_ring_name[256] = {};
+		char bwsnd_ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(bwsnd_ring_name, "%s_%d", bwsnd_ring_name_prev, i);
 		g_ring_bwsnds[i] = make_ring(bwsnd_ring_name, s_ring_size);
 	}
@@ -359,7 +372,10 @@ void tgg_master_init()
 
 void tgg_master_uninit()
 {
-	for (uint32_t i = 0; i < rte_lcore_count(); i++) {
+	for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
+		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
+			continue;
+		}
 		rte_memzone_free(g_fd_zones[i]);
 		g_fd_zones[i] = NULL;
 
@@ -403,23 +419,26 @@ void tgg_master_uninit()
 
 void init_multi_for_secondary()
 {
-	for (uint32_t i = 0; i < rte_lcore_count(); i++) {
+	for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
+		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
+			continue;
+		}
 		// 初始化cli数组的zones
-		char zone_name[256] = {};
+		char zone_name[RTE_MEMZONE_NAMESIZE] = {0};
 		sprintf(zone_name, "%s_%d", fd_zone_name_prev, i);
 		g_fd_zones[i] = find_memzone(zone_name);
 		// 初始化发送队列ring
-		char ring_name[256] = {};
+		char ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(ring_name, "%s_%d", write_ring_name_prev, i);
 		g_ring_writes[i] = find_ring(ring_name);
 	}
 	for (uint32_t i = 0; i < TggConfigure::getInstance()->get_bwsvr_count(); i++) {
 		// 初始化bwfdx数组的zones
-		char zone_name[256] = {};
+		char zone_name[RTE_MEMZONE_NAMESIZE] = {0};
 		sprintf(zone_name, "%s_%d", bwfdx_zone_name_prev, i);
 		g_bwfdx_zones[i] = find_memzone(zone_name);
 		// bw 发送
-		char bwsnd_ring_name[256] = {};
+		char bwsnd_ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(bwsnd_ring_name, "%s_%d", bwsnd_ring_name_prev, i);
 		g_ring_bwsnds[i] = find_ring(bwsnd_ring_name);
 	}
@@ -443,21 +462,24 @@ void tgg_secondary_init()
 	g_idx_hash = get_hash_byname(s_idx_hash_name);
 	g_bwfdx_hash = get_hash_byname(s_bwfdx_hash_name);
 	g_bwwkkey_hash = get_hash_byname(s_bwwkkey_hash_name);
-	init_cid();
 }
 
 void tgg_secondary_uninit()
 {
 	// rte_mempool_free(g_mempool_read);
 	// rte_ring_free(g_ring_read);
-	NS_MICRO_THREAD::mt_uninit_frame();
 	rte_eal_cleanup();
 }
 
 void tgg_cliprc_init()
 {
-	for (uint32_t i = 0; i < rte_lcore_count(); i++) {
-		char ring_name[256] = {};
+	printf("lcore_count:%d\n", rte_lcore_count());
+	for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
+		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
+			continue;
+		}
+
+		char ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(ring_name, "%s_%d", cliprc_ring_name_prev, i);
 		g_ring_cliprcs[i] = find_ring(ring_name);
 	}
@@ -473,7 +495,7 @@ void tgg_cliprc_uninit()
 void tgg_bwprc_init(int bwcount)
 {
 	for (int i = 0; i < bwcount; i++) {
-		char ring_name[256] = {};
+		char ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(ring_name, "%s_%d", bwrcv_ring_name_prev, i);
 		g_ring_bwrcvs[i] = find_ring(ring_name);
 	}
@@ -492,6 +514,6 @@ void prc_exit(int exit_code, const char* fmt, ...)
 	va_start(ap, fmt);
 	rte_vlog(RTE_LOG_ERR, RTE_LOGTYPE_USER1, fmt, ap);
 	va_end(ap);
-	tgg_secondary_uninit();
+	rte_eal_cleanup();
 	exit(exit_code);
 }
