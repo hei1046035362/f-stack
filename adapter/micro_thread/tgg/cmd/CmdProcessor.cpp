@@ -55,7 +55,7 @@ void CmdBaseProcessor::Send2BW(const std::string& data)
     rsp += data;
     int ret = write(this->fd, rsp.c_str(), rsp.length());
     if(ret < 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] send data[%s] to BW failed.\n", __func__, __LINE__, data.c_str());        
+        RTE_LOG(ERR, USER1, "[%s][%d] send data[%s] to BW failed.\n", __FILE__, __LINE__, data.c_str());        
     }
 }
 
@@ -88,13 +88,13 @@ int CmdWorkerConnect::ExecCmd()
 {
     // int idx = tgg_get_bw_idx(this->prc_id, this->fd);
     // if(idx < 0) {
-    //     RTE_LOG(ERR, USER1, "[%s][%d] Get idx[%d] for fd[%d] Failed.\n", __func__, __LINE__, fd, idx);
+    //     RTE_LOG(ERR, USER1, "[%s][%d] Get idx[%d] for fd[%d] Failed.\n", __FILE__, __LINE__, fd, idx);
     //     return -1;
     // }
     // TODO Seckey是配置文件中的，不是跟连接绑定的？  抓包看seckey都是空的
     std::string bwSeckey = tgg_get_bwfdx_seckey(this->prc_id, this->fd);
     // if(bwSeckey.empty()) {
-    //     RTE_LOG(ERR, USER1, "[%s][%d] Get secret_key for fd[%d] Failed.\n", __func__, __LINE__, fd);
+    //     RTE_LOG(ERR, USER1, "[%s][%d] Get secret_key for fd[%d] Failed.\n", __FILE__, __LINE__, fd);
     //     close(this->fd);
     //     return -1;
     // }
@@ -103,7 +103,7 @@ int CmdWorkerConnect::ExecCmd()
         nlohmann::json worker_info = nlohmann::json::parse(std::string(jdata["body"]));
         if (worker_info["secret_key"].get<std::string>() != bwSeckey) {
             RTE_LOG(ERR, USER1, "[%s][%d] Gateway: Worker key[%s] does not match conn key[%s].", 
-                __func__, __LINE__, worker_info["secretKey"].get<std::string>().c_str(), bwSeckey.c_str());
+                __FILE__, __LINE__, worker_info["secretKey"].get<std::string>().c_str(), bwSeckey.c_str());
             close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             //tgg_close_bw_session(this->prc_id, this->fd);
             return -1;
@@ -143,7 +143,7 @@ int CmdWorkerConnect::ExecCmd()
 
     } catch (const nlohmann::json::exception& e) {
     // 捕获其他任何未预料到的异常
-        RTE_LOG(ERR, USER1, "[%s][%d] Exception catched:%s.\n", __func__, __LINE__, e.what());
+        RTE_LOG(ERR, USER1, "[%s][%d] Exception catched:%s.\n", __FILE__, __LINE__, e.what());
         close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
         // free_bw_session(this->prc_id, this->fd);
         return -1;
@@ -155,13 +155,13 @@ int CmdGatewayClientConnect::ExecCmd()
 {
     // int idx = tgg_get_bw_idx(this->prc_id, this->fd);
     // if(idx < 0) {
-    //     RTE_LOG(ERR, USER1, "[%s][%d] Get idx[%d] for fd[%d] Failed.\n", __func__, __LINE__, fd, idx);
+    //     RTE_LOG(ERR, USER1, "[%s][%d] Get idx[%d] for fd[%d] Failed.\n", __FILE__, __LINE__, fd, idx);
     //     return -1;
     // }
     // TODO Seckey是配置文件中的，不是跟连接绑定的？  抓包看seckey都是空的
     std::string bwSeckey = tgg_get_bwfdx_seckey(this->prc_id, this->fd);
     // if(bwSeckey.empty()) {
-    //     RTE_LOG(ERR, USER1, "[%s][%d] Get secret_key for fd[%d] Failed.\n", __func__, __LINE__, fd);
+    //     RTE_LOG(ERR, USER1, "[%s][%d] Get secret_key for fd[%d] Failed.\n", __FILE__, __LINE__, fd);
     //     close(this->fd);
     //     return -1;
     // }
@@ -170,7 +170,7 @@ int CmdGatewayClientConnect::ExecCmd()
         nlohmann::json worker_info = nlohmann::json::parse(std::string(jdata["body"]));
         if (worker_info["secret_key"].get<std::string>() != bwSeckey) {
             RTE_LOG(ERR, USER1, "[%s][%d] Gateway: Worker key[%s] does not match conn key[%s].", 
-                __func__, __LINE__, worker_info["secretKey"].get<std::string>().c_str(), bwSeckey.c_str());
+                __FILE__, __LINE__, worker_info["secretKey"].get<std::string>().c_str(), bwSeckey.c_str());
             close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             //tgg_close_bw_session(this->prc_id, this->fd);
             return -1;
@@ -178,7 +178,7 @@ int CmdGatewayClientConnect::ExecCmd()
 
     } catch (const nlohmann::json::exception& e) {
     // 捕获其他任何未预料到的异常
-        RTE_LOG(ERR, USER1, "[%s][%d] Exception catched:%s.\n", __func__, __LINE__, e.what());
+        RTE_LOG(ERR, USER1, "[%s][%d] Exception catched:%s.\n", __FILE__, __LINE__, e.what());
         close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
         // free_bw_session(this->prc_id, this->fd);
         return -1;
@@ -226,7 +226,7 @@ int CmdSendToGroup::ExecCmd()
             // 通过gid找到在线的fdx列表
             std::list<std::string> lstFds;
             if (tgg_get_fdsbygid(element.get<std::string>().c_str(), lstFds) < 0) {// 没找到gid
-                RTE_LOG(INFO, USER1, "[%s][%d] gid[%s] not exist.\n", __func__, __LINE__, element.get<std::string>().c_str());
+                RTE_LOG(INFO, USER1, "[%s][%d] gid[%s] not exist.\n", __FILE__, __LINE__, element.get<std::string>().c_str());
                 continue;
             }
             // 遍历group中的<fdx:idx>列表,根据fdx找到cid
@@ -234,7 +234,7 @@ int CmdSendToGroup::ExecCmd()
             while (itFd != lstFds.end()) {
                 int fdx = get_fd_by_fdidx(*itFd);
                 if(fdx < 0) {
-                    RTE_LOG(INFO, USER1, "[%s][%d] parse fdidx[%s] failed.\n", __func__, __LINE__, (*itFd).c_str());
+                    RTE_LOG(INFO, USER1, "[%s][%d] parse fdidx[%s] failed.\n", __FILE__, __LINE__, (*itFd).c_str());
                     itFd++;
                     continue;
                 }
@@ -244,7 +244,7 @@ int CmdSendToGroup::ExecCmd()
                 int cid = tgg_get_cli_cid(coreid, fd);
                 if(cid <= 0) {
                     RTE_LOG(INFO, USER1, "[%s][%d] cid for fdx[%d] gid[%s] not exist.\n", 
-                        __func__, __LINE__, fdx, element.get<std::string>().c_str());
+                        __FILE__, __LINE__, fdx, element.get<std::string>().c_str());
                     itFd++;
                     continue;
                 }
@@ -327,7 +327,7 @@ void CmdSelect::FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::j
     std::list<int>::const_iterator itFd = lst_fd.begin();
     while (itFd != lst_fd.end()) {
         if(*itFd < 0) {
-            RTE_LOG(INFO, USER1, "[%s][%d] invalid fd.\n", __func__, __LINE__);
+            RTE_LOG(INFO, USER1, "[%s][%d] invalid fd.\n", __FILE__, __LINE__);
             itFd++;
             continue;
         }
@@ -336,7 +336,7 @@ void CmdSelect::FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::j
         int cid = tgg_get_cli_cid(coreid, fd);
         if(cid <= 0) {
             RTE_LOG(INFO, USER1, "[%s][%d] cid for fd[%d] not exist.\n", 
-                __func__, __LINE__, fd);
+                __FILE__, __LINE__, fd);
             itFd++;
             continue;
         }
@@ -346,7 +346,7 @@ void CmdSelect::FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::j
         std::string uid = tgg_get_cli_uid(coreid, fd);
         if(uid.empty()) {
             RTE_LOG(INFO, USER1, "[%s][%d] uid for fd[%d] not exist.\n", 
-                __func__, __LINE__, fd);
+                __FILE__, __LINE__, fd);
             itFd++;
             continue;
         }
@@ -358,7 +358,7 @@ void CmdSelect::FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::j
                 } else {
                                             // 已经填充过了就不要再次执行了
                     RTE_LOG(INFO, USER1, "[%s][%d] cid[%d] groups already exist.\n", 
-                        __func__, __LINE__, cid);
+                        __FILE__, __LINE__, cid);
                 }
                 std::list<std::string>::iterator itGid = lst_gids.begin();
                 while(itGid != lst_gids.end()) {
@@ -373,7 +373,7 @@ void CmdSelect::FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::j
             } else {
                 // 已经填充过了就不要再次执行了
                 RTE_LOG(INFO, USER1, "[%s][%d] cid[%d] groups already exist.\n", 
-                    __func__, __LINE__, cid);
+                    __FILE__, __LINE__, cid);
             }
         }
         itFd++;
@@ -436,7 +436,7 @@ int CmdSelect::ExecCmd()
                                 lst_fds.push_back(fd);
                             } else {
                                 RTE_LOG(ERR, USER1, "[%s][%d] invalid fd_idx format:%s\n",
-                                 __func__, __LINE__, itFd->c_str());
+                                 __FILE__, __LINE__, itFd->c_str());
                             }
                             itFd++;
                         }
@@ -477,7 +477,7 @@ int CmdGetGroupIdList::ExecCmd()
 {
     std::list<std::string> lst_gid;
     if (tgg_get_allonlinegids(lst_gid) < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] get all online gids failed.\n", __func__, __LINE__);
+        RTE_LOG(INFO, USER1, "[%s][%d] get all online gids failed.\n", __FILE__, __LINE__);
     }
     nlohmann::json result = nlohmann::json::array();
     std::list<std::string>::iterator it = lst_gid.begin();
@@ -496,12 +496,12 @@ int CmdSetSession::ExecCmd()
     int cid = jdata["connection_id"];
     if(ext_data.empty() || cid < 0) {
         RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and cid[%d] shouldn't be empty.\n",
-                 __func__, __LINE__, ext_data.c_str(), cid);
+                 __FILE__, __LINE__, ext_data.c_str(), cid);
         return -1;
     }
     int clifdx = tgg_get_fdbycid(cid);
     if(clifdx < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] get clifdx by cid[%d] failed.\n", __func__, __LINE__, cid);
+        RTE_LOG(INFO, USER1, "[%s][%d] get clifdx by cid[%d] failed.\n", __FILE__, __LINE__, cid);
         return -1;
     }
     return tgg_set_cli_reserved(clifdx & 0xf, clifdx >> 8, ext_data.c_str());
@@ -513,12 +513,12 @@ int CmdUpdateSession::ExecCmd()
     // int cid = jdata["connection_id"];
     // if(ext_data.empty() || cid < 0) {
     //     RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and cid[%d] shouldn't be empty.\n",
-    //              __func__, __LINE__, ext_data.c_str(), cid);
+    //              __FILE__, __LINE__, ext_data.c_str(), cid);
     //     return -1;
     // }
     // int clifdx = tgg_get_fdbycid(cid);
     // if(clifdx < 0) {
-    //     RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%d] failed.\n", __func__, __LINE__, cid;
+    //     RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%d] failed.\n", __FILE__, __LINE__, cid;
     //     return -1;
     // }
     // int coreid = clifdx & 0xf;
@@ -528,7 +528,7 @@ int CmdUpdateSession::ExecCmd()
     // if(session.empty()) {
     //     if (tgg_set_cli_reserved(coreid, clifd, ext_data.c_str()) < 0) {
     //         RTE_LOG(INFO, USER1, "[%s][%d] update session failed cid[%d] session[%s] failed.\n", 
-    //                 __func__, __LINE__, cid, session.c_str());
+    //                 __FILE__, __LINE__, cid, session.c_str());
     //         return -1;
     //     }
     //     return 0;
@@ -561,12 +561,12 @@ int CmdBindUid::ExecCmd()
     int cid = jdata["connection_id"];
     if(suid.empty() || cid < 0) {
         RTE_LOG(INFO, USER1, "[%s][%d] bind uid failed, uid[%s] and cid[%d] shouldn't be empty.\n",
-                 __func__, __LINE__, suid.c_str(), cid);
+                 __FILE__, __LINE__, suid.c_str(), cid);
         return -1;
     }
     int fdx = tgg_get_fdbycid(cid);
     if(fdx < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%d] failed.\n", __func__, __LINE__, cid);
+        RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%d] failed.\n", __FILE__, __LINE__, cid);
         return -1;
     }
 
@@ -580,16 +580,16 @@ int CmdUnBindUid::ExecCmd()
     int cid = jdata["connection_id"];
     if(suid.empty() || cid < 0) {
         RTE_LOG(INFO, USER1, "[%s][%d] bind uid failed, uid[%s] and cid[%d] shouldn't be empty.\n",
-                 __func__, __LINE__, suid.c_str(), cid);
+                 __FILE__, __LINE__, suid.c_str(), cid);
         return -1;
     }
     int fdx = tgg_get_fdbycid(cid);
     if(fdx < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] get fdx by cid[%d] failed.\n", __func__, __LINE__, cid);
+        RTE_LOG(INFO, USER1, "[%s][%d] get fdx by cid[%d] failed.\n", __FILE__, __LINE__, cid);
         // TODO 有可能前面已经删除了，还需要观察
         return 0;
     }
-    RTE_LOG(INFO, USER1, "[%s][%d] free cid[%d].\n", __func__, __LINE__, cid);
+    RTE_LOG(INFO, USER1, "[%s][%d] free cid[%d].\n", __FILE__, __LINE__, cid);
     return tgg_free_session(fdx & 0xf, fdx >> 8);
 }
 
@@ -616,7 +616,7 @@ int CmdSendToUid::ExecCmd()
                 lst_fds.push_back(fd);
             } else {
                 RTE_LOG(ERR, USER1, "[%s][%d] invalid fd_idx format:%s\n",
-                 __func__, __LINE__, itFd->c_str());
+                 __FILE__, __LINE__, itFd->c_str());
             }
             itFd++;
         }
@@ -634,12 +634,12 @@ int CmdJoinGroup::ExecCmd()
     int cid = jdata["connection_id"];
     if(group.empty() || cid < 0) {
         RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and cid[%d] shouldn't be empty.\n",
-                 __func__, __LINE__, group.c_str(), cid);
+                 __FILE__, __LINE__, group.c_str(), cid);
         return -1;
     }
     int fd = tgg_get_fdbycid(cid);
     if(fd < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%d] failed.\n", __func__, __LINE__, cid);
+        RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%d] failed.\n", __FILE__, __LINE__, cid);
         return -1;
     }
     tgg_join_group(group.c_str(), cid);
@@ -653,12 +653,12 @@ int CmdLeaveGroup::ExecCmd()
     int cid = jdata["connection_id"];
     if(group.empty() || cid < 0) {
         RTE_LOG(INFO, USER1, "[%s][%d] set session failed, ext_data[%s] and cid[%d] shouldn't be empty.\n",
-                 __func__, __LINE__, group.c_str(), cid);
+                 __FILE__, __LINE__, group.c_str(), cid);
         return -1;
     }
     int fd = tgg_get_fdbycid(cid);
     if(fd < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%d] failed.\n", __func__, __LINE__, cid);
+        RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%d] failed.\n", __FILE__, __LINE__, cid);
         return -1;
     }
     tgg_exit_group(group.c_str(), cid);
@@ -670,7 +670,7 @@ int CmdUnGroup::ExecCmd()
     std::string group = jdata["ext_data"];
     if(group.empty()) {
         RTE_LOG(INFO, USER1, "[%s][%d] set session failed, group[%s] shouldn't be empty.\n",
-                 __func__, __LINE__, group.c_str());
+                 __FILE__, __LINE__, group.c_str());
         return -1;
     }
     tgg_del_gid(group.c_str());
@@ -684,7 +684,7 @@ int CmdGetClientSessionsByGroup::ExecCmd()
     std::string group = jdata["ext_data"];
     if(group.empty()) {
         RTE_LOG(INFO, USER1, "[%s][%d] set session failed, group[%s] shouldn't be empty.\n",
-                 __func__, __LINE__, group.c_str());
+                 __FILE__, __LINE__, group.c_str());
         std::string data = Php_Serialize(result);
         Send2BW(data);
         return -1;
@@ -703,7 +703,7 @@ int CmdGetClientSessionsByGroup::ExecCmd()
             int cid = tgg_get_cli_cid(coreid, fd);
             if(cid < 0) {
                 RTE_LOG(INFO, USER1, "[%s][%d] wrong cid[%d].\n",
-                    __func__, __LINE__, cid);
+                    __FILE__, __LINE__, cid);
                 itFd++;
                 continue;
             }
@@ -725,7 +725,7 @@ int CmdGetClientCountByGroup::ExecCmd()
     std::string group = jdata["ext_data"];
     if(group.empty()) {
         RTE_LOG(INFO, USER1, "[%s][%d] set session failed, group[%s] shouldn't be empty.\n",
-                 __func__, __LINE__, group.c_str());
+                 __FILE__, __LINE__, group.c_str());
         std::string data = Php_Serialize(result);
         Send2BW(data);
         return -1;
@@ -738,7 +738,7 @@ int CmdGetClientCountByGroup::ExecCmd()
             int clifdx = get_fd_by_fdidx(*itFd);
             if(clifdx < 0) {
                 RTE_LOG(INFO, USER1, "[%s][%d] gid_fd_string[%s] invalid.\n",
-                    __func__, __LINE__, itFd->c_str());
+                    __FILE__, __LINE__, itFd->c_str());
                 // TODO 已知格式错误，是否可以直接删除这个节点
                 itFd++;
                 continue;
@@ -746,7 +746,7 @@ int CmdGetClientCountByGroup::ExecCmd()
             int cid = tgg_get_cli_cid(clifdx & 0xf, clifdx >> 8);
             if(cid < 0) {
                 RTE_LOG(INFO, USER1, "[%s][%d] cid[%d] not found.\n",
-                    __func__, __LINE__, cid);
+                    __FILE__, __LINE__, cid);
                 itFd++;
                 continue;
             }
@@ -768,7 +768,7 @@ int CmdGetClientIdByUid::ExecCmd()
     std::string suid = jdata["ext_data"];
     if(suid.empty()) {
         RTE_LOG(INFO, USER1, "[%s][%d] set session failed, uid[%s] shouldn't be empty.\n",
-                 __func__, __LINE__, suid.c_str());
+                 __FILE__, __LINE__, suid.c_str());
         data = Php_Serialize(result);
         Send2BW(data);
         return -1;
@@ -785,7 +785,7 @@ int CmdGetClientIdByUid::ExecCmd()
             int cid = tgg_get_cli_cid(clifdx & 0xf, clifdx >> 8);
             if(cid < 0) {
                 RTE_LOG(INFO, USER1, "[%s][%d] invalid cid[%d].\n",
-                    __func__, __LINE__, cid);
+                    __FILE__, __LINE__, cid);
                 itFd++;
                 continue;
             }
@@ -820,7 +820,7 @@ int CmdBatchGetClientIdByUid::ExecCmd()
                 int cid = tgg_get_cli_cid(clifdx & 0xf, clifdx >> 8);
                 if(cid < 0) {
                     RTE_LOG(INFO, USER1, "[%s][%d] invalid cid[%d].\n",
-                        __func__, __LINE__, cid);
+                        __FILE__, __LINE__, cid);
                     itFd++;
                     continue;
                 }
@@ -852,7 +852,7 @@ static int json_parse_body(nlohmann::json& jdata)//const std::string& jdata, std
         printf("body: %s\n", obj.dump(4).c_str());
         cmd = obj["cmd"].get<std::int32_t>();
     } catch (const nlohmann::json::parse_error& e) {
-        RTE_LOG(ERR, USER1, "[%s][%d] parse json error:%s\n", __func__, __LINE__, e.what());
+        RTE_LOG(ERR, USER1, "[%s][%d] parse json error:%s\n", __FILE__, __LINE__, e.what());
         return -1;
     }
     if (cmd) {
@@ -862,12 +862,12 @@ static int json_parse_body(nlohmann::json& jdata)//const std::string& jdata, std
             std::string bin = Encrypt::hex2bin(obj["data"].get<std::string>());
             if (bin.length() <= 0) {
                 RTE_LOG(ERR, USER1, "[%s][%d] hex2bin failed:%s.\n",
-                    __func__, __LINE__, obj["data"].get<std::string>().c_str());
+                    __FILE__, __LINE__, obj["data"].get<std::string>().c_str());
             }
             if (message_pack(cmd, 1, 2,
                 (uint8_t)s_compress_flag, bin, result) < 0) {
                 RTE_LOG(ERR, USER1, "[%s][%d] message_pack failed:%s.\n", 
-                    __func__, __LINE__, bin.c_str());
+                    __FILE__, __LINE__, bin.c_str());
             }
         }
         jdata["body"] = result;
@@ -884,19 +884,19 @@ static bool bwdata_frame_check(tgg_bw_data* bdata, tgg_bw_protocal* bwdata)
     unsigned int ext_len = big_endian() ? htonl(bwdata->ext_len) : bwdata->ext_len;
     if(pack_len != bdata->data_len) {
         RTE_LOG(ERR, USER1, "[%s][%d] data fram length[%d] check failed, read buf_size[%d].\n", 
-            __func__, __LINE__, pack_len, bdata->data_len);
+            __FILE__, __LINE__, pack_len, bdata->data_len);
         return false;
     }
     // cmd 范围校验
     if(bwdata->cmd > CMD_MAX_INDEX || bwdata->cmd <= 0) {
         RTE_LOG(ERR, USER1, "[%s][%d] cmd check failed, invalid cmd[%d].\n", 
-            __func__, __LINE__, bwdata->cmd);
+            __FILE__, __LINE__, bwdata->cmd);
         return false;
     }
     // 扩展长度校验
     if(ext_len > pack_len - sizeof(tgg_bw_protocal)) {
         RTE_LOG(ERR, USER1, "[%s][%d] ext_len[%d] check failed, pack_len[%d].\n", 
-            __func__, __LINE__, ext_len, pack_len);
+            __FILE__, __LINE__, ext_len, pack_len);
         return false;
     }
     return true;
@@ -925,7 +925,7 @@ void exec_cmd_processor(int prc_id, int fd, void* data)
         tgg_close_bw_session(prc_id, fd);
         close(fd);
         RTE_LOG(ERR, USER1, "[%s][%d] command[%d] error or not authorized[%d].\n", 
-            __func__, __LINE__, cmd, authorized);
+            __FILE__, __LINE__, cmd, authorized);
         return ;
     }
 
@@ -1032,7 +1032,7 @@ void exec_cmd_processor(int prc_id, int fd, void* data)
             pro = new CmdBatchGetClientCountByGroup(prc_id, fd, data, jdata);// 暂时不需要
             break;
         default :
-            RTE_LOG(ERR, USER1, "[%s][%d] Gateway inner pack err, Unknown cmd=%d.\n", __func__, __LINE__, cmd);
+            RTE_LOG(ERR, USER1, "[%s][%d] Gateway inner pack err, Unknown cmd=%d.\n", __FILE__, __LINE__, cmd);
             break;
     }
     if(pro) {

@@ -55,7 +55,7 @@ bool WsConsumer::ConnectionValid(int core_id, int fd, void* data)
     if (_idx != ((tgg_read_data*)data)->idx) {
         // 说明当前的数据已经是上一个连接的数据了
         RTE_LOG(ERR, USER1, "[%s][%d] client idx[%d] not match to data idx[%d].",
-           __func__, __LINE__, _idx, ((tgg_read_data*)data)->idx);
+           __FILE__, __LINE__, _idx, ((tgg_read_data*)data)->idx);
         return false;
     }
     return true;
@@ -88,7 +88,7 @@ void WsConsumer::OnHandShake(const std::string& response)
     if (message_pack(2, 1, 0, 1, std::to_string(cid), sendData) < 0)
     {
         RTE_LOG(ERR, USER1, "[%s][%d] message_pack cid[%d] failed.\r\n", 
-            __func__, __LINE__, cid);
+            __FILE__, __LINE__, cid);
         _CleanAndClose();
         return;
     }
@@ -115,7 +115,7 @@ void WsConsumer::OnMessage(const std::string& msg)
 
 // TODO 不解析消息，直接转发给bw
 //     if(msg.empty()) {
-//         RTE_LOG(ERR, USER1, "[%s][%d] msg can't be empty.", __func__, __LINE__);
+//         RTE_LOG(ERR, USER1, "[%s][%d] msg can't be empty.", __FILE__, __LINE__);
 //         goto OnMessageEnd;
 //     }
 //     try {
@@ -123,7 +123,7 @@ void WsConsumer::OnMessage(const std::string& msg)
 //         std::string message;
 //         if(message_unpack(msg, message) < 0) {
 //             RTE_LOG(ERR, USER1, "[%s][%d] message_unpack msg failed,data:%s\r\n", 
-//                 __func__, __LINE__, Encrypt::bin2hex(msg).c_str());
+//                 __FILE__, __LINE__, Encrypt::bin2hex(msg).c_str());
 //             goto OnMessageEnd;
 //         }
 //         nlohmann::json jmsg = nlohmann::json::parse(message);
@@ -133,7 +133,7 @@ void WsConsumer::OnMessage(const std::string& msg)
 //             case 0:// 心跳
 //                 if (message_pack(cmd , 1, 1, compress, "", msg_send)) {
 //                     RTE_LOG(ERR, USER1, "[%s][%d] message_pack msg failed.\r\n", 
-//                         __func__, __LINE__);
+//                         __FILE__, __LINE__);
 //                         goto OnMessageEnd;
 //                 }
 //                 printf("send heart beat:%s\n", Encrypt::bin2hex(msg_send).c_str());
@@ -143,13 +143,13 @@ void WsConsumer::OnMessage(const std::string& msg)
 //                     nlohmann::json jbody = nlohmann::json::parse(jmsg["body"].get<std::string>());
 //                     std::string token = jbody["token"];
 //                     if (token.empty()) {
-//                         RTE_LOG(ERR, USER1, "[%s][%d] token can't be empty.", __func__, __LINE__);
+//                         RTE_LOG(ERR, USER1, "[%s][%d] token can't be empty.", __FILE__, __LINE__);
 //                         goto OnMessageEnd;
 //                     }
 //                     Encrypt encryptor = GetEncryptor();
 //                     std::string decryptor = encryptor.Aes128Decrypt(token);
 //                     if (decryptor.empty()) {
-//                         RTE_LOG(ERR, USER1, "[%s][%d] token decrypted error.", __func__, __LINE__);
+//                         RTE_LOG(ERR, USER1, "[%s][%d] token decrypted error.", __FILE__, __LINE__);
 //                         goto OnMessageEnd;
 //                     }
 //                     nlohmann::json jtoken = nlohmann::json::parse(decryptor);
@@ -159,7 +159,7 @@ void WsConsumer::OnMessage(const std::string& msg)
 //                     CmdBindUid buid(this->fd, this->data, jtoken);
 //                     if(buid.ExecCmd() == -1) {
 //                         RTE_LOG(ERR, USER1, "[%s][%d] add uid[%s] failed, closing connection...",
-//                             __func__, __LINE__, s_uid.c_str());
+//                             __FILE__, __LINE__, s_uid.c_str());
 //                         _CleanAndClose();
 //                         return;
 //                     }
@@ -174,7 +174,7 @@ void WsConsumer::OnMessage(const std::string& msg)
 //                         jmsg["compressFormat"], res, msg_send) < 0) {
 //                         // 数据封包失败
 //                         RTE_LOG(ERR, USER1, "[%s][%d] message_unpack msg failed,data:%s\r\n", 
-//                             __func__, __LINE__, res.c_str());
+//                             __FILE__, __LINE__, res.c_str());
 //                         goto OnMessageEnd;
 //                     }
 //                 }
@@ -182,7 +182,7 @@ void WsConsumer::OnMessage(const std::string& msg)
 //             default:
 //                 if (message_pack(0,1,0,jmsg["compressFormat"],"message error~\n", msg_send) < 0) {
 //                     RTE_LOG(ERR, USER1, "[%s][%d] message_pack msg failed.\r\n", 
-//                         __func__, __LINE__);
+//                         __FILE__, __LINE__);
 //                         goto OnMessageEnd;
 //                 }
 //                 break;
@@ -191,10 +191,10 @@ void WsConsumer::OnMessage(const std::string& msg)
 //         SendData(msg_send, FD_WRITE);
 //         return;
 //     } catch (const nlohmann::detail::parse_error& e) {
-//         RTE_LOG(ERR, USER1, "[%s][%d] parse json error:%s.", __func__, __LINE__, e.what());
+//         RTE_LOG(ERR, USER1, "[%s][%d] parse json error:%s.", __FILE__, __LINE__, e.what());
 //     } catch (const nlohmann::json::exception& e) {
 //     // 捕获其他任何未预料到的异常
-//         RTE_LOG(ERR, USER1, "[%s][%d] Exception catched:%s.", __func__, __LINE__, e.what());
+//         RTE_LOG(ERR, USER1, "[%s][%d] Exception catched:%s.", __FILE__, __LINE__, e.what());
 //     }
 // OnMessageEnd:
 //     _CleanData();
@@ -209,7 +209,7 @@ void WsConsumer::OnSend(const std::string& msg, int fd_opt)
     std::cout << "OnSend:" << Encrypt::bin2hex(msg) << std::endl;
     if (enqueue_data_single_fd(this->core_id, msg, this->fd, _idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
         RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%d,uid:%s,opt:%d",
-         __func__, __LINE__, _cid, _uid.c_str(), fd_opt);
+         __FILE__, __LINE__, _cid, _uid.c_str(), fd_opt);
         enqueue_data_single_fd(this->core_id, "", this->fd, _idx, FD_CLOSE);
     }
 }

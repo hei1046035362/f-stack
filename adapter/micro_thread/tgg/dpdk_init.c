@@ -144,7 +144,7 @@ find_memzone(const char *name)
 	memzone = (struct rte_memzone *)rte_memzone_lookup(mz_name);
 	if (!memzone) {
 		RTE_LOG(ERR, USER1, "[%s]:[%d]memzone[%s] not found.\n", 
-			 __func__, __LINE__, mz_name);
+			 __FILE__, __LINE__, mz_name);
 		return NULL;
 	}
 	return memzone;
@@ -164,14 +164,14 @@ make_memzone(const char *name, size_t size)
 		rte_memzone_free(memzone);
 		memzone = NULL;
 		RTE_LOG(ERR, USER1, "[%s][%d]memzone[%s] found, but len[%lu] not match[%lu]\n", 
-			__func__, __LINE__, mz_name, memzone->len, size);
+			__FILE__, __LINE__, mz_name, memzone->len, size);
 	}
 	if (memzone == NULL) {
 		memzone = (struct rte_memzone *)rte_memzone_reserve_aligned(mz_name, size, socket_id,
 				RTE_MEMZONE_2MB, RTE_CACHE_LINE_SIZE);
 		if (memzone == NULL){
 			rte_exit(EXIT_FAILURE,
-				"[%s][%d] Can't allocate memory zone %s, error:%s.\n", __func__, __LINE__,
+				"[%s][%d] Can't allocate memory zone %s, error:%s.\n", __FILE__, __LINE__,
 				mz_name, rte_strerror(rte_errno));
 		}
 	}
@@ -216,7 +216,7 @@ make_mempool(const char *name, size_t units, size_t unit_size)
 		if (mempool == NULL) {
 			rte_exit(EXIT_FAILURE,
 				"Can't allocate memory pool %s:%s:%d\n",
-				mp_name, __func__, __LINE__);
+				mp_name, __FILE__, __LINE__);
 		}
 	}
 	RTE_LOG(INFO, USER1, "New mempool allocated: %s.\n",
@@ -257,7 +257,7 @@ make_ring(const char *name, size_t units)
 		if (ring == NULL){
 			rte_exit(EXIT_FAILURE,
 				"Can't allocate ring %s:%s:%d\n",
-				ring_name, __func__, __LINE__);
+				ring_name, __FILE__, __LINE__);
 		}
 	}
 	RTE_LOG(INFO, USER1, "New ring allocated: %s\n",
@@ -297,7 +297,7 @@ struct rte_hash* init_hash(const char* hash_name, uint32_t ent_cnt, uint32_t key
 	if (!_hash) {
 		rte_exit(EXIT_FAILURE,
 			"Failed to create hash table[%s]:%s:%d\n",
-			hash_name, __func__, __LINE__);
+			hash_name, __FILE__, __LINE__);
 	}
 	RTE_LOG(INFO, USER1, "New hash created: %s\n",
 		hash_name);

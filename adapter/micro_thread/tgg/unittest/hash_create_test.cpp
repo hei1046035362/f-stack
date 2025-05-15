@@ -35,7 +35,7 @@ struct rte_hash* init_hash(const char* hash_name, int ent_cnt, int key_len)
     if (!_hash) {
         rte_exit(EXIT_FAILURE,
             "Failed to create hash table[%s]:%s:%d\n",
-            hash_name, __func__, __LINE__);
+            hash_name, __FILE__, __LINE__);
     }
     RTE_LOG(INFO, USER1, "New hash created: %s\n",
         hash_name);
