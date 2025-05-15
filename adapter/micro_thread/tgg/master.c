@@ -132,7 +132,7 @@ static int tgg_recv_enqueue(int clt_fd, const char* buf, int len, enum FD_OPT op
 	}
 	if (idx) {
 		RTE_LOG(WARNING, USER1, "[%s][%d] Get data from mempool[%s] failed times:%d", 
-			__func__, __LINE__, g_mempool_read->name, idx);
+			__FILE__, __LINE__, g_mempool_read->name, idx);
 		idx = 0;
 	}
 	g_tgg_stats.en_read_stats.malloc_st++;
@@ -145,7 +145,7 @@ static int tgg_recv_enqueue(int clt_fd, const char* buf, int len, enum FD_OPT op
 		rdata->data = dpdk_rte_malloc(rdata->data_len);
 		if (!rdata->data) {
 			// TODO 记录失败次数
-			RTE_LOG(WARNING, USER1, "[%s][%d] malloc data failed.\n", __func__, __LINE__);
+			RTE_LOG(WARNING, USER1, "[%s][%d] malloc data failed.\n", __FILE__, __LINE__);
 			// 分配内存失败，获取的入队列结构体要放回内存池
 			rte_mempool_put(g_mempool_read, rdata);
 			return -1;
@@ -162,7 +162,7 @@ static int tgg_recv_enqueue(int clt_fd, const char* buf, int len, enum FD_OPT op
 	}
 	if (idx) {
 		RTE_LOG(WARNING, USER1, "[%s][%d] enqueue data to ring[%s] failed times:%d", 
-			__func__, __LINE__, g_ring_cliprcs[g_core_id]->name, idx);
+			__FILE__, __LINE__, g_ring_cliprcs[g_core_id]->name, idx);
 	}
 
 	if (tgg_enqueue_cliprc(g_core_id, rdata) < 0) {
@@ -212,7 +212,7 @@ static void tgg_recv(void *arg)
 		}
 		if(ret == -4) {
 			// 主动断开连接
-			RTE_LOG(ERR, USER1, "[%s][%d] closing connection affected.\n", __func__, __LINE__);
+			RTE_LOG(ERR, USER1, "[%s][%d] closing connection affected.\n", __FILE__, __LINE__);
 			break;
 		}
 		g_tgg_stats.recv++;
@@ -250,7 +250,7 @@ static void tgg_recv(void *arg)
 	if (ret)  // 不是对端主动关闭的情况，服务端要主动发送关闭消息
 		tgg_recv_enqueue(clt_fd, NULL, 0, FD_CLOSE);
 
-	RTE_LOG(INFO, USER1, "[%s][%d] wait client[%d] close...\n", __func__, __LINE__, clt_fd);
+	RTE_LOG(INFO, USER1, "[%s][%d] wait client[%d] close...\n", __FILE__, __LINE__, clt_fd);
 	// 等待连接在缓存中的数据被消费完才能关闭
 	int index = 1000;// TODO 防止因process宕机丢包导致无法停止的问题，10s这个时间待商榷
 	while(tgg_get_cli_idx(g_core_id, clt_fd) != TGG_FD_CLOSING && index > 0) {
@@ -259,7 +259,7 @@ static void tgg_recv(void *arg)
 	}
 	close(clt_fd);
 	tgg_close_cli(g_core_id, clt_fd);
-	RTE_LOG(INFO, USER1, "[%s][%d] client[%d] closed.\n", __func__, __LINE__, clt_fd);
+	RTE_LOG(INFO, USER1, "[%s][%d] client[%d] closed.\n", __FILE__, __LINE__, clt_fd);
 }
 
 static void tgg_do_send(tgg_write_data* wdata)
@@ -273,7 +273,7 @@ static void tgg_do_send(tgg_write_data* wdata)
 		if(idx >= 0) {
 			// 新的连接旧的数据就不要发送了，直接清理空间
 			if (idx != fd_list->idx) {// 后台推送给前端时，可能会出现这种情况
-				RTE_LOG(ERR, USER1, "[%s][%d] Idx Changed, Closing Connection[%d].\n", __func__, __LINE__, cli_fd);
+				RTE_LOG(ERR, USER1, "[%s][%d] Idx Changed, Closing Connection[%d].\n", __FILE__, __LINE__, cli_fd);
 				// tgg_del_idx(fd_list->idx);
 				// tgg_set_cli_idx(cli_fd, TGG_FD_CLOSING);
 				continue;
@@ -284,17 +284,17 @@ static void tgg_do_send(tgg_write_data* wdata)
 				int ret = mt_send(cli_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
 				if (ret == -4) {
 					// 主动断开连接
-					RTE_LOG(ERR, USER1, "[%s][%d] closing connection affected.\n", __func__, __LINE__);
+					RTE_LOG(ERR, USER1, "[%s][%d] closing connection affected.\n", __FILE__, __LINE__);
 				} else if (ret < 0) {
 					RTE_LOG(ERR, USER1, "[%s][%d] send data to client fd[%d] idx[%d] error, ret[%d]\n", 
-						__func__, __LINE__, cli_fd, wdata->idx, ret);
+						__FILE__, __LINE__, cli_fd, wdata->idx, ret);
 				} else {
 					g_tgg_stats.en_read_stats.enqueue++;
 				}
 			}
 
 			if ( wdata->fd_opt & FD_CLOSE) {
-				RTE_LOG(INFO, USER1, "[%s][%d] Closing Connection[%d].\n", __func__, __LINE__, cli_fd);
+				RTE_LOG(INFO, USER1, "[%s][%d] Closing Connection[%d].\n", __FILE__, __LINE__, cli_fd);
 				tgg_del_idx(fd_list->idx);
 				tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSING);
 				mt_close(cli_fd);

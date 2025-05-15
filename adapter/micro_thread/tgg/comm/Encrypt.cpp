@@ -13,7 +13,7 @@ std::string Encrypt::hex2bin(const std::string& hex)
 {
     if (hex.length() % 2 != 0) {
         RTE_LOG(ERR, USER1, "[%s][%d] Hex string must have an even length.", 
-            __func__, __LINE__);
+            __FILE__, __LINE__);
         return "";
     }
     std::string binary;
@@ -71,7 +71,7 @@ std::string Encrypt::Base64Encode(const std::string& input)
         input.size());
     if (result < 0) {
         RTE_LOG(ERR, USER1, "[%s][%d] base64 encode failed,code:%d.", 
-            __func__, __LINE__, result);
+            __FILE__, __LINE__, result);
         return "";
     }
     // 去掉末尾的\0，base64操作之后会留下一些\0，length会包含这些\0，导致length不准确
@@ -90,7 +90,7 @@ std::string Encrypt::Base64Decode(const std::string& input)
         input.length());
     if (result < 0) {
         RTE_LOG(ERR, USER1, "[%s][%d] base64 decode failed,code:%d.", 
-            __func__, __LINE__, result);
+            __FILE__, __LINE__, result);
         return "";
     }
     return decryptedData;
@@ -163,12 +163,12 @@ std::string Encrypt::Aes128Decrypt(const std::string& crypted)
 bool Encrypt::Prepared() {
     if (key.empty() || key.length()!= 16) {
         RTE_LOG(ERR, USER1, "[%s][%d] Illigal authorized key:%s.", 
-            __func__, __LINE__, key.c_str());
+            __FILE__, __LINE__, key.c_str());
         return false;
     }
     if (!iv.empty() && iv.length()!= 16) {
         RTE_LOG(ERR, USER1, "[%s][%d] Illigal authorized iv:%s.", 
-            __func__, __LINE__, iv.c_str());
+            __FILE__, __LINE__, iv.c_str());
         return false;
     }
     return true;

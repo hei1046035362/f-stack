@@ -10,19 +10,19 @@ void Send2Client(int cid, const std::string& data, int fd_opt)
 {
     int fdidx = tgg_get_fdbycid(cid);
     if(fdidx < 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] client[%d] not exist.", __func__, __LINE__, cid);
+        RTE_LOG(ERR, USER1, "[%s][%d] client[%d] not exist.", __FILE__, __LINE__, cid);
         return;
     }
     int fd = fdidx >> 8;
     int core_id = fdidx & 0xf;
     int idx = tgg_get_cli_idx(core_id, fd);
     if(idx < 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] client[%d] already closed.", __func__, __LINE__, cid);
+        RTE_LOG(ERR, USER1, "[%s][%d] client[%d] already closed.", __FILE__, __LINE__, cid);
         return;
     }
     if(tgg_get_cli_authorized(core_id, fd) != AUTH_TYPE_TOKENCHECKED) {
         RTE_LOG(ERR, USER1, "[%s][%d] Send data to client[%d] should check Token at first.",
-            __func__, __LINE__, cid);
+            __FILE__, __LINE__, cid);
         return;
     }
     std::string sendData;
@@ -30,14 +30,14 @@ void Send2Client(int cid, const std::string& data, int fd_opt)
     if (message_pack(2, 1, 0, 1, data, sendData) < 0)
     {
         RTE_LOG(ERR, USER1, "[%s][%d] message_pack data[%s] failed.\r\n", 
-            __func__, __LINE__, data.c_str());
+            __FILE__, __LINE__, data.c_str());
         return;
     }
 
     std::cout << "send data["<< cid <<"]:" << Encrypt::bin2hex(sendData) << std::endl;
     if (enqueue_data_single_fd(core_id, sendData, fd, idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
         RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%d,opt:%d",
-         __func__, __LINE__, cid, fd_opt);
+         __FILE__, __LINE__, cid, fd_opt);
     }
 }
 
@@ -48,7 +48,7 @@ void BatchSend2ClientBycids(std::list<int> cids, const std::string& data, int fd
     while(itCid != cids.end()) {
         int fdidx = tgg_get_fdbycid(*itCid);
         if(fdidx < 0) {
-            RTE_LOG(INFO, USER1, "[%s][%d] client[%d] not exist.", __func__, __LINE__, *itCid);
+            RTE_LOG(INFO, USER1, "[%s][%d] client[%d] not exist.", __FILE__, __LINE__, *itCid);
             continue;
         }
         lstFds.push_back(fdidx);
@@ -61,7 +61,7 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
 {
     if(fds.size() <= 0) {
         RTE_LOG(ERR, USER1, "[%s][%d] fd list can't be empty.\r\n", 
-            __func__, __LINE__);
+            __FILE__, __LINE__);
         return;
     }
     // 不同的core_id，分到不同的组，发送的时候需要根据core_id发送到不同的队列
@@ -78,14 +78,14 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
             int idx = tgg_get_cli_idx(coreidFds.first, *itFd);
             if(idx < 0) {
                 int cid = tgg_get_cli_cid(coreidFds.first, *itFd);
-                RTE_LOG(INFO, USER1, "[%s][%d] client[%d] already closed.\n", __func__, __LINE__, cid);
+                RTE_LOG(INFO, USER1, "[%s][%d] client[%d] already closed.\n", __FILE__, __LINE__, cid);
                 itFd++;
                 continue;
             }
             if(tgg_get_cli_authorized(coreidFds.first, *itFd) != AUTH_TYPE_TOKENCHECKED) {
                 int cid = tgg_get_cli_cid(coreidFds.first, *itFd);
                 RTE_LOG(INFO, USER1, "[%s][%d] Send data to client[%d] should check Token at first.\n",
-                    __func__, __LINE__, cid);
+                    __FILE__, __LINE__, cid);
                 itFd++;
                 continue;
             }
@@ -94,7 +94,7 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
         }
         if(mapFdidx.size() <= 0) {
             RTE_LOG(ERR, USER1, "[%s][%d] no live fd found for.\r\n", 
-                __func__, __LINE__);
+                __FILE__, __LINE__);
             return;
         }
         std::string sendData;
@@ -102,14 +102,14 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
         if (message_pack(2, 1, 0, 1, data, sendData) < 0)
         {
             RTE_LOG(ERR, USER1, "[%s][%d] message_pack data[%s] failed.\r\n", 
-                __func__, __LINE__, data.c_str());
+                __FILE__, __LINE__, data.c_str());
             return;
         }
 
         std::cout << "send group data:" << Encrypt::bin2hex(sendData) << std::endl;
         if (enqueue_data_batch_fd(coreidFds.first, sendData, mapFdidx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
             RTE_LOG(ERR, USER1, "[%s][%d] Batch Enqueue data Failed\n",
-               __func__, __LINE__);
+               __FILE__, __LINE__);
         }
     }
 }
@@ -118,6 +118,6 @@ void Send2Server(int core_id, int fd, const std::string& data, int fd_opt)
 {
     if (enqueue_data_trans(core_id, fd, data, fd_opt) < 0) {// 函数内部会循环尝试发送10次
         RTE_LOG(ERR, USER1, "[%s][%d] Send data to server Failed\n",
-               __func__, __LINE__);
+               __FILE__, __LINE__);
     }
 }

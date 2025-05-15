@@ -69,14 +69,14 @@ int get_valid_idx()
 		}
 		if(looptimes <= 0) {
 			//rte_exit(-1, "nonIdx ");
-			RTE_LOG(ERR, USER1, "[%s][%d] None idx available.", __func__, __LINE__);
+			RTE_LOG(ERR, USER1, "[%s][%d] None idx available.", __FILE__, __LINE__);
 			return -1;
 		}
 		if(tgg_check_idx_exist(current_id_atomic) < 0) {
 			break;
 		}
 	}
-	RTE_LOG(ERR, USER1, "[%s][%d] invalid idx %d.", __func__, __LINE__, current_id_atomic);
+	RTE_LOG(ERR, USER1, "[%s][%d] valid idx %d.", __FILE__, __LINE__, current_id_atomic);
 	return current_id_atomic;
 }
 
@@ -453,7 +453,7 @@ int cache_ws_buffer(int core_id, int fd, void* data, int len, int pos, int iscom
     }
     if (wsdata->total_len >= MAX_WSDATA_LEN) {
     	RTE_LOG(ERR, USER1, "[%s][%d] Cache buffer len[%d] beyond MAX_WSDATA_LEN.",
-    		__func__, __LINE__, wsdata->total_len);
+    		__FILE__, __LINE__, wsdata->total_len);
     	rte_free(buffer);
     	return -1;
     }
@@ -659,7 +659,7 @@ tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& m
         // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
 	if (ret < 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d] get mem from write pool failed,code:%d.", 
-			__func__, __LINE__, ret);
+			__FILE__, __LINE__, ret);
 		return NULL;
 	}
 	tgg_fd_list* tail = NULL;
@@ -704,7 +704,7 @@ tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& m
 
 add_data_failed:
 	RTE_LOG(ERR, USER1, "[%s][%d] dpdk_rte_malloc mem failed.", 
-		__func__, __LINE__);
+		__FILE__, __LINE__);
 	iter_del_fdlist((void*)(wdata->lst_fd));
 	memset(wdata, 0, sizeof(tgg_write_data));
 	rte_mempool_put(g_mempool_write, wdata);
@@ -716,13 +716,13 @@ int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, in
 	if(mapfdidx.size() <= 0) {
 		// fd列表为空
 		RTE_LOG(ERR, USER1, "[%s][%d] mapfdidx is empty.", 
-			__func__, __LINE__);
+			__FILE__, __LINE__);
 		return 0;
 	}
 	tgg_write_data* wdata = format_send_data(data, mapfdidx, fdopt);
 	if (!wdata) {
 		RTE_LOG(ERR, USER1, "[%s][%d] Format send data failed.", 
-			__func__, __LINE__);
+			__FILE__, __LINE__);
 		return -1;
 	}
 	int idx = 10;
@@ -735,12 +735,12 @@ int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, in
 		++loop_times_sndcli;
 		if(loop_times_sndcli % 100 == 0) {
 			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.",
-				__func__, __LINE__, loop_times_sndcli);
+				__FILE__, __LINE__, loop_times_sndcli);
 		}
 	}
 	if (idx <= 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d] Enqueue write data failed.", 
-			__func__, __LINE__);
+			__FILE__, __LINE__);
 		return -1;
 	}
 	return 0;
@@ -761,7 +761,7 @@ tgg_read_data* format_send_server_data(int core_id, int fd, const std::string& s
         // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
 	if (ret < 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d] get mem from bwrcv pool failed,code:%d.", 
-			__func__, __LINE__, ret);
+			__FILE__, __LINE__, ret);
 		return NULL;
 	}
 	bwdata->data = dpdk_rte_malloc(sdata.length());
@@ -778,7 +778,7 @@ int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
 	tgg_bw_data* bwdata = format_send_server_data(core_id, fd, data, fdopt);
 	if (!bwdata) {
 		RTE_LOG(ERR, USER1, "[%s][%d] Format bw server data failed.", 
-			__func__, __LINE__);
+			__FILE__, __LINE__);
 		return -1;
 	}
 	int idx = 10;// 入队列可能会失败最多尝试10次
@@ -791,12 +791,12 @@ int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
 		++loop_times_sndserver;
 		if(loop_times_sndserver % 100 == 0) {
 			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.", 
-				__func__, __LINE__, loop_times_sndserver);
+				__FILE__, __LINE__, loop_times_sndserver);
 		}
 	}
 	if (idx <= 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d] Enqueue bw server data failed.", 
-			__func__, __LINE__);
+			__FILE__, __LINE__);
 		return -1;
 	}
 	return 0;
@@ -807,7 +807,7 @@ int enqueue_data_send_server(int core_id, int fd, const std::string& data, int f
 	tgg_bw_data* bwdata = format_send_server_data(core_id, fd, data, fdopt);
 	if (!bwdata) {
 		RTE_LOG(ERR, USER1, "[%s][%d] Format bw server data failed.", 
-			__func__, __LINE__);
+			__FILE__, __LINE__);
 		return -1;
 	}
 	int idx = 10;// 入队列可能会失败最多尝试10次
@@ -821,12 +821,12 @@ int enqueue_data_send_server(int core_id, int fd, const std::string& data, int f
 		++loop_times_sndserver;
 		if(loop_times_sndserver % 100 == 0) {
 			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.",
-				__func__, __LINE__, loop_times_sndserver);
+				__FILE__, __LINE__, loop_times_sndserver);
 		}
 	}
 	if (idx <= 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d] Enqueue bw server data failed.", 
-			__func__, __LINE__);
+			__FILE__, __LINE__);
 		return -1;
 	}
 	return 0;
