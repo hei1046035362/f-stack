@@ -66,10 +66,10 @@ static int parse_lcore_mask(const std::string& lcore_mask) {
             value = std::stoi(lcore_mask, nullptr, 10);
         }
     } catch (const std::invalid_argument& e) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Invalid argument: %s.", __func__, __LINE__, e.what());
+        RTE_LOG(ERR, USER1, "[%s][%d] Invalid argument: %s.", __FILE__, __LINE__, e.what());
         throw;
     } catch (const std::out_of_range& e) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Out of range: %s.", __func__, __LINE__, e.what());
+        RTE_LOG(ERR, USER1, "[%s][%d] Out of range: %s.", __FILE__, __LINE__, e.what());
         throw;
     }
 

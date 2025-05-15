@@ -40,7 +40,7 @@ int get_connection_info(int fd, const char* ip, unsigned short* port)
      }
      inet_ntop(AF_INET, &(remote_addr.sin_addr), (char*)ip, INET_ADDRSTRLEN);
      *port = big_endian() ? ntohs(remote_addr.sin_port) : remote_addr.sin_port;
-     RTE_LOG(INFO, USER1, "[%s][%d] Cmd from [%s]:[%d]\n", __func__, __LINE__, ip, *port);
+     RTE_LOG(INFO, USER1, "[%s][%d] Cmd from [%s]:[%d]\n", __FILE__, __LINE__, ip, *port);
      return 0;
 }
 
@@ -252,7 +252,7 @@ int gzdeflate(const std::string& input, std::string& outBuffer) {
 
     // 初始化deflate流
     if (deflateInit2(&deflateStream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY)!= Z_OK) {
-        RTE_LOG(ERR, USER1, "[%s][%d] deflate init Error.\n", __func__, __LINE__);
+        RTE_LOG(ERR, USER1, "[%s][%d] deflate init Error.\n", __FILE__, __LINE__);
         return -1;
     }
 
@@ -264,7 +264,7 @@ int gzdeflate(const std::string& input, std::string& outBuffer) {
     // 执行压缩操作
     if (deflate(&deflateStream, Z_FINISH)!= Z_STREAM_END) {
         deflateEnd(&deflateStream);
-        RTE_LOG(ERR, USER1, "[%s][%d] deflate failed.\n", __func__, __LINE__);
+        RTE_LOG(ERR, USER1, "[%s][%d] deflate failed.\n", __FILE__, __LINE__);
         return -1;
     }
 
@@ -272,7 +272,7 @@ int gzdeflate(const std::string& input, std::string& outBuffer) {
     uLongf actualOutSize = deflateStream.total_out;
 
     if(outBufferSize < deflateStream.total_out) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Less of reserved buffer length:%lu, total:%lu.\n", __func__, __LINE__, 
+        RTE_LOG(ERR, USER1, "[%s][%d] Less of reserved buffer length:%lu, total:%lu.\n", __FILE__, __LINE__, 
             outBufferSize, deflateStream.total_out);
         return -1;
     }
@@ -301,7 +301,7 @@ int gzinflate(const std::string& input, std::string& outBuffer)
 
     // 初始化inflate流
     if (inflateInit2(&inflateStream, -MAX_WBITS)!= Z_OK) {
-        RTE_LOG(ERR, USER1, "[%s][%d] inflate init Error.\n", __func__, __LINE__);
+        RTE_LOG(ERR, USER1, "[%s][%d] inflate init Error.\n", __FILE__, __LINE__);
         return -1;
     }
 
@@ -313,14 +313,14 @@ int gzinflate(const std::string& input, std::string& outBuffer)
     // 执行解压操作
     if (inflate(&inflateStream, Z_FINISH)!= Z_STREAM_END) {
         inflateEnd(&inflateStream);
-        RTE_LOG(ERR, USER1, "[%s][%d] inflate failed.\n", __func__, __LINE__);
+        RTE_LOG(ERR, USER1, "[%s][%d] inflate failed.\n", __FILE__, __LINE__);
         return -1;
     }
 
     // 获取实际解压后的大小
     uLongf actualOutSize = inflateStream.total_out;
     if(outBufferSize < inflateStream.total_out) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Less of reserved buffer length:%lu, total:%lu.\n", __func__, __LINE__, 
+        RTE_LOG(ERR, USER1, "[%s][%d] Less of reserved buffer length:%lu, total:%lu.\n", __FILE__, __LINE__, 
             outBufferSize, inflateStream.total_out);
         return -1;
     }

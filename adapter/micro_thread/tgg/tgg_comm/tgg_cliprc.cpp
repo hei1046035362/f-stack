@@ -31,5 +31,5 @@ void tgg_process_read(int lcore_idx)
         memset(rdata, 0, sizeof(tgg_read_data));
         rte_mempool_put(g_mempool_read, (void*)rdata);
     }
-    RTE_LOG(INFO, USER1, "[%s][%d] cliprc thread exit, handle lcore_idx:%d\n", __func__, __LINE__, lcore_idx);
+    RTE_LOG(INFO, USER1, "[%s][%d] cliprc thread exit, handle lcore_idx:%d\n", __FILE__, __LINE__, lcore_idx);
 }
