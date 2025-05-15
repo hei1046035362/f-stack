@@ -14,19 +14,19 @@ int tgg_bind_session(int core_id, int fd, const char* uid, int cid)
 	int idx = tgg_get_cli_idx(core_id, fd);
 	int fdid = (fd << 8) & core_id;
 	if (idx < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d]session is closing, uid[%s] cid[%d].\n", __func__, __LINE__, uid, cid);
+		RTE_LOG(ERR, USER1, "[%s][%d]session is closing, uid[%s] cid[%d].\n", __FILE__, __LINE__, uid, cid);
 		// tgg_free_session(fd);
 		return -1;
 	}
 	if(strlen(uid) <= 0 || cid <= 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] uid[%s] and cid[%d] should not be empty.\n", __func__, __LINE__, uid, cid);
+		RTE_LOG(ERR, USER1, "[%s][%d] uid[%s] and cid[%d] should not be empty.\n", __FILE__, __LINE__, uid, cid);
 		return -1;
 	}
 	// 添加到 hash<gid, list<fd>>
 	std::list<std::string> lstgid;
 	// 查找uid所在的所有的群组
 	if (tgg_get_gidsbyuid(uid, lstgid) < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] uid[%s] not exist.\n", __func__, __LINE__, uid);
+		RTE_LOG(ERR, USER1, "[%s][%d] uid[%s] not exist.\n", __FILE__, __LINE__, uid);
 		return -1;
 	}
 	std::list<std::string>::iterator itgid = lstgid.begin();
@@ -34,19 +34,19 @@ int tgg_bind_session(int core_id, int fd, const char* uid, int cid)
 	// 新增连接时需要对g_gid_hash进行的操作
 		if (tgg_add_gid((*itgid).c_str(), fdid, idx) < 0){
 			RTE_LOG(ERR, USER1, "[%s][%d] add fdid[%d] idx[%d] for gid[%s] failed.\n",
-			 __func__, __LINE__, fdid, idx, (*itgid).c_str());
+			 __FILE__, __LINE__, fdid, idx, (*itgid).c_str());
 			goto bind_end;
 		}
 		itgid++;
 	}
 	// 添加到 hash<uid, list<fd>>
 	if (tgg_add_uid(uid, fdid, idx) < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] add uid[%s] fdid[%d] failed.\n", __func__, __LINE__, uid, fd);
+		RTE_LOG(ERR, USER1, "[%s][%d] add uid[%s] fdid[%d] failed.\n", __FILE__, __LINE__, uid, fd);
 		goto bind_end;
 	}
 	// 添加到 hash<cid, fd>
 	if (tgg_add_cid(cid, fdid) < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] add cid[%d] fdid[%d] failed.\n", __func__, __LINE__, cid, fd);
+		RTE_LOG(ERR, USER1, "[%s][%d] add cid[%d] fdid[%d] failed.\n", __FILE__, __LINE__, cid, fd);
 		goto bind_end;
 	}
 	tgg_set_cli_uid(core_id, fd, uid);
@@ -114,12 +114,12 @@ int tgg_join_group(const char* gid, int cid)
 	int fd = fdid >> 8;
 	int idx = tgg_get_cli_idx(core_id, fd);
 	if (fd < 0 || idx < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, cid[%d] not found.", __func__, __LINE__, cid);
+		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, cid[%d] not found.", __FILE__, __LINE__, cid);
 		return -1;
 	}
 	if (tgg_add_gid(gid, fd, idx) < 0){
 		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, add gid not found, gid[%s] cid[%d].", 
-			__func__, __LINE__, gid, cid);
+			__FILE__, __LINE__, gid, cid);
 		return -1;
 	}
 	std::string uid = tgg_get_cli_uid(core_id, fd);
@@ -128,7 +128,7 @@ int tgg_join_group(const char* gid, int cid)
 	}
 	if (tgg_add_uidgid(uid.c_str(), gid) < 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, uid[%s] gid[%s] cid[%d].", 
-			__func__, __LINE__, uid.c_str(), gid, cid);
+			__FILE__, __LINE__, uid.c_str(), gid, cid);
 		tgg_del_fd4gid(gid, fdid, idx);
 		return -1;
 	}
@@ -142,18 +142,18 @@ int tgg_exit_group(const char* gid, int cid)
 	int fd = fdid >> 8;
 	int idx = tgg_get_cli_idx(core_id, fd);
 	if (fd < 0 || idx < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] connection invalid, cid[%d] not found.", __func__, __LINE__, cid);
+		RTE_LOG(ERR, USER1, "[%s][%d] connection invalid, cid[%d] not found.", __FILE__, __LINE__, cid);
 		return -1;
 	}
 	if (tgg_del_fd4gid(gid, fdid, idx) < 0){
 		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, add gid not found, gid[%s] cid[%d].", 
-			__func__, __LINE__, gid, cid);
+			__FILE__, __LINE__, gid, cid);
 		return -1;
 	}
 	std::string uid = tgg_get_cli_uid(core_id, fd);
 	if (tgg_del_gid_uidgid(uid.c_str(), gid) < 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d] join group failed, uid[%s] gid[%s] cid[%d].", 
-			__func__, __LINE__, uid.c_str(), gid, cid);
+			__FILE__, __LINE__, uid.c_str(), gid, cid);
 		return -1;
 	}
 	return 0;
