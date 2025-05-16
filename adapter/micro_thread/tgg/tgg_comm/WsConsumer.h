@@ -18,9 +18,10 @@ public:
 protected:
     bool ConnectionValid(int core_id, int fd, void* data);
 
-    virtual void OnClose();
+    virtual void OnConnect();
+
     // 握手
-    virtual void OnHandShake(const std::string& response);
+    virtual void OnHandShake(const std::string& response, HttpRequest& req);
 
     virtual void OnPing(const std::string& response);
 
@@ -30,6 +31,8 @@ protected:
 
     // 这个接口只负责发送(入队列)，加解密都不做
     virtual void OnSend(const std::string& msg, int fd_opt);
+
+    virtual void OnClose();
 
 private:
     void _CleanAndClose();

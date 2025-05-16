@@ -150,9 +150,10 @@ void *write_routine( void *arg )
     co_enable_hook_sys();
     // g_prc_id = *((int*)arg);
     std::map<int, int> map_msgtype;// 客户端上行透传 消息类型映射
-    map_msgtype[FD_NEW] = ClientProtocal::CMD_ON_CLIENT_CONNECT;
-    map_msgtype[FD_WRITE] = ClientProtocal::CMD_ON_CLIENT_MESSAGE;
-    map_msgtype[FD_CLOSE] = ClientProtocal::CMD_ON_CLIENT_CLOSE;
+    map_msgtype[FD_NEW] = GatewayProtocal::CMD_ON_CONNECT;
+    map_msgtype[FD_HANDLESHAKE] = GatewayProtocal::CMD_ON_WEBSOCKET_CONNECT;
+    map_msgtype[FD_WRITE] = GatewayProtocal::CMD_ON_MESSAGE;
+    map_msgtype[FD_CLOSE] = GatewayProtocal::CMD_ON_CLOSE;
     while(g_run) {
         tgg_bw_data* bdata = NULL;
         if (tgg_dequeue_bwsnd(g_prc_id, &bdata) < 0 || !bdata) {
@@ -180,7 +181,11 @@ void *write_routine( void *arg )
             .gateway_port = TggConfigure::getInstance()->get_gateway_port(),
             .ext_len = 0// TODO 暂时不知道上行数据是否能用上
         };
-        BwPackageHandler::encode(result, &header, std::string((char*)bdata->data, bdata->data_len));
+        std::string sdata;
+        if(bdata->data_len > 0) {
+            sdata = std::string((char*)bdata->data, bdata->data_len);
+        }
+        BwPackageHandler::encode(result, &header, sdata);
         int ret = write(fd, result.c_str(), result.length());
         int loops = 3;// 如果失败最多重试3次，否则丢弃
         while(ret == -1 && EAGAIN == errno && loops--) {
@@ -353,7 +358,7 @@ extern int g_run;
 static  pthread_t s_bwtrans_thread;
 
 extern struct rte_mempool* g_mempool_bwrcv;
-
+#define MAX_CALC_LOAD_BALANCE_TRY 3
 static void* deal_trans(void*)
 {
     while(g_run) {
@@ -362,6 +367,8 @@ static void* deal_trans(void*)
             usleep(10);
             continue;
         }
+        RTE_LOG(ERR, USER1, "[%s][%d] get data:%s.\n", 
+            __FILE__, __LINE__, (char*)(bdata->data));
         int bwfdx = tgg_get_cli_bwfdx(bdata->coreid, bdata->fd);
         if(bwfdx && tgg_get_bw_prcstatus(bwfdx & 0xf) && tgg_get_bwfdx_status((bwfdx & 0xf), bwfdx >> 8)) {
             // 已经绑定服务端，正常透传
@@ -369,12 +376,18 @@ static void* deal_trans(void*)
             tgg_enqueue_bwsnd( (bwfdx & 0xf), bdata);
         } else {
             // 重新绑定或首次绑定，先绑定再透传
-            int index = 3;
+            int index = MAX_CALC_LOAD_BALANCE_TRY;
             while (--index) {
                 // 随机取一个可用的服务端连接
                 // int pos = bdata->fd % tgg_get_bwfdx_count();
                 // bwfdx = tgg_get_bwfdx_bypos(pos);
                 bwfdx = tgg_get_load_balance();
+                if(bwfdx == -1) {
+                    RTE_LOG(ERR, USER1, "[%s][%d] get load balance failed.\n", 
+                        __FILE__, __LINE__);
+                    usleep(10);
+                    continue;
+                }
                 if(tgg_get_bw_prcstatus(bwfdx & 0xf)) {
                     tgg_init_bwfdx_prc(bwfdx & 0xf);
                 }
@@ -382,9 +395,9 @@ static void* deal_trans(void*)
                     break;
                 }
             }
-            if(index < 2) {
-                RTE_LOG(ERR, USER1, "[%s][%d] get bwfdx failed, tried times:%d.\n", 
-                    __FILE__, __LINE__, 10-index);
+            if(index < MAX_CALC_LOAD_BALANCE_TRY - 1) {
+                RTE_LOG(ERR, USER1, "[%s][%d] get bwfdx for fd[%d] idx[%d] failed, tried times:%d.\n", 
+                    __FILE__, __LINE__, bdata->fd, bdata->idx, MAX_CALC_LOAD_BALANCE_TRY-index);
             }
             if (bwfdx <= 0) {// 入队列失败之后，清理数据，否则上行队列会满，而无法接收新数据
                 RTE_LOG(ERR, USER1, "[%s][%d] get bwfdx failed.\n", 

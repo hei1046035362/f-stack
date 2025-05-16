@@ -20,7 +20,7 @@ void Send2Client(int cid, const std::string& data, int fd_opt)
         RTE_LOG(ERR, USER1, "[%s][%d] client[%d] already closed.", __FILE__, __LINE__, cid);
         return;
     }
-    if(tgg_get_cli_authorized(core_id, fd) != AUTH_TYPE_TOKENCHECKED) {
+    if(tgg_get_cli_authorized(core_id, fd) != AUTH_TYPE_HANDLESHAKED) {
         RTE_LOG(ERR, USER1, "[%s][%d] Send data to client[%d] should check Token at first.",
             __FILE__, __LINE__, cid);
         return;
@@ -82,7 +82,7 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
                 itFd++;
                 continue;
             }
-            if(tgg_get_cli_authorized(coreidFds.first, *itFd) != AUTH_TYPE_TOKENCHECKED) {
+            if(tgg_get_cli_authorized(coreidFds.first, *itFd) != AUTH_TYPE_HANDLESHAKED) {
                 int cid = tgg_get_cli_cid(coreidFds.first, *itFd);
                 RTE_LOG(INFO, USER1, "[%s][%d] Send data to client[%d] should check Token at first.\n",
                     __FILE__, __LINE__, cid);
