@@ -29,17 +29,18 @@ enum L4_TYPE
 enum AUTH_TYPE
 {
     AUTH_TYPE_UNKNOWN = 0,
-    AUTH_TYPE_HANDLESHAKED,
-    AUTH_TYPE_TOKENCHECKED
+    AUTH_TYPE_CLIENTCONNECT,
+    AUTH_TYPE_HANDLESHAKED
 };
 
 // 需要对fd进行的操作类型
 enum FD_OPT
 {
     FD_NEW = 1,
-    FD_READ = 2,
-    FD_WRITE = 4,
-    FD_CLOSE = 8
+    FD_HANDLESHAKE = 2,
+    FD_READ = 4,
+    FD_WRITE = 8,
+    FD_CLOSE = 16
 };
 
 // fd的状态
@@ -80,6 +81,7 @@ typedef struct st_cli_info {
     tgg_ws_data* ws_data;    // 缓存websocket的数据，用于处理分包的情况下
     // int need_keep;    // 是否为长连接                         process填充
     // int l4_type;    // 应用层协议类型，http/websocket        process填充
+    char ip_str[INET_ADDRSTRLEN];  // ws握手时需要打包发送给bw
     int ip;
     unsigned short port;
     int bwfdx;        // 绑定的bw

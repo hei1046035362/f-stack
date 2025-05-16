@@ -356,7 +356,7 @@ void CmdSelect::FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::j
                 if (!result[cid].contains("groups")) {
                     result[cid]["groups"] = nlohmann::json::array();
                 } else {
-                                            // 已经填充过了就不要再次执行了
+                    // 已经填充过了就不要再次执行了
                     RTE_LOG(INFO, USER1, "[%s][%d] cid[%d] groups already exist.\n", 
                         __FILE__, __LINE__, cid);
                 }

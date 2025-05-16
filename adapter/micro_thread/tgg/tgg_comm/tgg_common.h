@@ -12,6 +12,7 @@ bool big_endian();
 int tgg_get_cli_idx(int core_id, int fd);
 int tgg_get_cli_status(int core_id, int fd);
 int tgg_get_cli_authorized(int core_id, int fd);
+std::string tgg_get_cli_ip_str(int core_id, int fd);
 uint32_t tgg_get_cli_ip(int core_id, int fd);
 ushort tgg_get_cli_port(int core_id, int fd);
 int tgg_get_cli_bwfdx(int core_id, int fd);
@@ -29,7 +30,7 @@ int tgg_set_cli_uid(int core_id, int fd, const char* uid);
 int tgg_set_cli_cid(int core_id, int fd, int cid);
 int tgg_set_cli_reserved(int core_id, int fd, const char* reserved);
 void tgg_close_cli(int core_id, int fd);
-int tgg_init_cli(int core_id, int fd, uint32_t ip, ushort port);
+int tgg_init_cli(int core_id, int fd, char* ip_str, uint32_t ip, ushort port);
 
 
 
@@ -114,8 +115,9 @@ int tgg_exit_group(const char* gid, int cid);
 // 获取可用的idx
 int get_valid_idx();
 
-// 通过idx生成cid
-int get_valid_cid(int prc_id, int idx);
+// 通过cid生成发送给客户端的client_id
+// 和服务端交互的是cid(core_id<<24|idx),和客户端交互的是ccid(ip+port+cid)
+std::string get_valid_ccid(int cid);
 
 // 清理队列
 void clean_bw_data(tgg_bw_data* bdata);
