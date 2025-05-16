@@ -9,13 +9,15 @@
 #include "tgg_comm/tgg_bw_cache.h"
 #include "tgg_transport.h"
 #include "tgg_struct.h"
-
+#include "tgg_comm/tgg_conf.h"
 
 int WsConsumer::ConsumerData(void* data)
 {
     tgg_read_data* rdata = (tgg_read_data*)data;
     if (!ConnectionValid(rdata->coreid, rdata->fd, data)) {
-        _CleanAndClose();
+        // TODO close fd or just drop data
+        _CleanData();
+        // _CleanAndClose();
         return 0;
     }
     if (rdata->fd_opt & FD_CLOSE) {
@@ -24,10 +26,17 @@ int WsConsumer::ConsumerData(void* data)
         return 0;
     }else if (rdata->fd_opt & FD_NEW) {
         // bind bw connection
+        OnConnect();
         return 0;
     }
 
     InitWebsocket(rdata->fd, tgg_get_cli_authorized(rdata->coreid, rdata->fd));
+    this->fd = rdata->fd;
+    this->data = data;
+    this->core_id = core_id;
+    _cid = tgg_get_cli_cid(core_id, fd);
+    _uid = tgg_get_cli_uid(core_id, fd);
+
     int ret = ReadData(rdata->data, rdata->data_len);
     if (ret < 0) {
         _CleanAndClose();
@@ -39,8 +48,6 @@ int WsConsumer::ConsumerData(void* data)
 
 bool WsConsumer::ConnectionValid(int core_id, int fd, void* data)
 {
-    this->fd = fd;
-    this->data = data;
     _idx = tgg_get_cli_idx(core_id, fd);
     if(_idx < 0) {// fd超过了可用范围
         return false;
@@ -50,8 +57,6 @@ bool WsConsumer::ConnectionValid(int core_id, int fd, void* data)
     //     // TODO 状态迁移待改进，连接已经关闭了
     //     return false;
     // }
-    _cid = tgg_get_cli_cid(core_id, fd);
-    _uid = tgg_get_cli_uid(core_id, fd);
     if (_idx != ((tgg_read_data*)data)->idx) {
         // 说明当前的数据已经是上一个连接的数据了
         RTE_LOG(ERR, USER1, "[%s][%d] client idx[%d] not match to data idx[%d].",
@@ -63,7 +68,7 @@ bool WsConsumer::ConnectionValid(int core_id, int fd, void* data)
 
 void WsConsumer::OnClose()
 {// 子类继承后要执行clean_buffer清理缓存
-    if (tgg_get_cli_authorized(this->core_id, this->fd) == AUTH_TYPE_TOKENCHECKED) {
+    if (tgg_get_cli_authorized(this->core_id, this->fd) == AUTH_TYPE_HANDLESHAKED) {
         // TODO 构造消息让gwbwrcv去解绑还是就在这里解绑？  
         // 当前选择关闭时直接解绑，防止消息丢失导致连接未解绑
         tgg_free_session(this->core_id, this->fd);
@@ -72,28 +77,109 @@ void WsConsumer::OnClose()
         // ubuid.ExecCmd();// 解绑，从hash表中删除连接
     }
     std::string data = "\x88\x02\x03\xe8";// 关闭websocket
-    SendONnoAuth(data, FD_WRITE);
+    SendONnoAuth(data, FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     Send2Server(this->core_id, this->fd, "", FD_CLOSE);
     // SendData("", FD_CLOSE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
 }
-// 握手
-void WsConsumer::OnHandShake(const std::string& response)
+
+void WsConsumer::OnConnect()
 {
-    OnSend(response, FD_WRITE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
-    tgg_set_cli_authorized(this->core_id, this->fd, AUTH_TYPE_HANDLESHAKED);
-    int cid = get_valid_cid(this->core_id, this->_idx);
+    tgg_set_cli_authorized(this->core_id, this->fd, AUTH_TYPE_CLIENTCONNECT);
+    int cid = ((this->core_id << 24) | this->_idx);
     tgg_set_cli_cid(this->core_id, this->fd, cid);
-    // TODO 这里是直接发送给服务端还是自己处理？
-    std::string sendData;
-    if (message_pack(2, 1, 0, 1, std::to_string(cid), sendData) < 0)
-    {
-        RTE_LOG(ERR, USER1, "[%s][%d] message_pack cid[%d] failed.\r\n", 
-            __FILE__, __LINE__, cid);
+    // std::string ccid = get_valid_ccid(cid);
+    this->_cid = cid;
+    Send2Server(this->core_id, this->fd, "", FD_NEW);
+}
+
+
+static bool is_valid_tgg_ws_request(const HttpRequest &req)
+{
+    // 检查必需的头字段
+    std::map<std::string, std::string>::const_iterator ittoken = req.query.find("token");
+    if (req.query.find("client_properties") == req.query.end() ||
+        req.query.find("authorization") == req.query.end() ||
+        ittoken == req.query.end()) {
+        return false;
+    }
+    // token 是否能解析出来
+    Encrypt encryptor = GetEncryptor();
+    std::string decryptor = encryptor.Aes128Decrypt(ittoken->second);
+    if (decryptor.empty()) {
+        RTE_LOG(ERR, USER1, "[%s][%d] token[%s] decrypted error.", __FILE__, __LINE__, ittoken->second.c_str());
+        return false;
+    }
+    return true;
+}
+
+void build_server_data(const HttpRequest &req, const std::string& ip_str, ushort port, nlohmann::json& data) {
+    nlohmann::json server_vars;
+    server_vars["REQUEST_METHOD"] = req.method;
+    server_vars["REQUEST_URI"] = req.uri;
+    server_vars["SERVER_PROTOCOL"] = "HTTP/" + req.protocol;
+    server_vars["SERVER_NAME"] = req.headers.count("Host") ? 
+        req.headers.at("Host") : "unknown";
+    server_vars["CONTENT_TYPE"] = req.headers.count("Content-Type") ? 
+        req.headers.at("Content-Type") : "";
+    // 构建QUERY_STRING原始字符串
+    size_t query_pos = req.uri.find('?');
+    server_vars["QUERY_STRING"] = (query_pos != std::string::npos) ? 
+        req.uri.substr(query_pos + 1) : "";
+
+    server_vars["REMOTE_ADDR"] = ip_str;
+    server_vars["REMOTE_PORT"] = port;
+    server_vars["SERVER_PORT"] = TggConfigure::getInstance()->get_gateway_port();
+
+    for (const auto& [key, value] : req.headers) {
+        std::string upperKey = key;
+        std::transform(upperKey.begin(), upperKey.end(), upperKey.begin(), ::toupper);
+        std::replace(upperKey.begin(), upperKey.end(), '-', '_');
+        server_vars["HTTP_" + upperKey] = value;
+    }
+    nlohmann::json query_params;
+    for (const auto& [key, value] : req.query) {
+        query_params[key] = value;
+    }
+    nlohmann::json cookies;
+    for (const auto& [key, value] : req.cookies) {
+        cookies[key] = value;
+    }
+    data["get"] = query_params; // GET 参数（需解析为 map）
+    data["server"] = server_vars;
+    data["cookie"] = cookies;
+    // return server_vars;
+}
+
+// 握手
+void WsConsumer::OnHandShake(const std::string& response, HttpRequest& req)
+{
+    if(!is_valid_tgg_ws_request(req)) {
+        RTE_LOG(ERR, USER1, "[%s][%d] tgg ws request[%s] check failed.\r\n", 
+            __FILE__, __LINE__, req.uri.c_str());
         _CleanAndClose();
         return;
     }
-    SendONnoAuth(sendData, FD_WRITE);
-    Send2Server(this->core_id, this->fd, "", FD_NEW);
+    nlohmann::json data;
+    std::string ip_str = tgg_get_cli_ip_str(this->core_id, this->fd);
+    ushort port = tgg_get_cli_port(this->core_id, this->fd);
+    build_server_data(req, ip_str, port, data);
+    tgg_set_cli_authorized(this->core_id, this->fd, AUTH_TYPE_HANDLESHAKED);
+    // TODO 这里是直接发送给服务端还是自己处理？
+    // std::string sendData;
+    // if (message_pack(2, 1, 0, 1, ccid, sendData) < 0)
+    // {
+    //     RTE_LOG(ERR, USER1, "[%s][%d] message_pack cid[%d] failed.\r\n", 
+    //         __FILE__, __LINE__, cid);
+    //     _CleanAndClose();
+    //     return;
+    // }
+    // SendONnoAuth(sendData, FD_WRITE);
+    OnSend(response, FD_WRITE);// 响应客户端的http请求
+    std::string result = data.dump();
+    RTE_LOG(ERR, USER1, "[%s][%d] OnHandShake:%s.\r\n", 
+        __FILE__, __LINE__, result.c_str());
+
+    Send2Server(this->core_id, this->fd, result, FD_HANDLESHAKE);// 通知服务端websocket 握手完成
 }
 
 void WsConsumer::OnPing(const std::string& response)
@@ -113,7 +199,7 @@ void WsConsumer::OnMessage(const std::string& msg)
 
 
 
-// TODO 不解析消息，直接转发给bw
+// // TODO 不解析消息，直接转发给bw
 //     if(msg.empty()) {
 //         RTE_LOG(ERR, USER1, "[%s][%d] msg can't be empty.", __FILE__, __LINE__);
 //         goto OnMessageEnd;
@@ -129,6 +215,7 @@ void WsConsumer::OnMessage(const std::string& msg)
 //         nlohmann::json jmsg = nlohmann::json::parse(message);
 //         int cmd = jmsg["cmd"].get<std::int32_t>();
 //         int compress = jmsg["compressFormat"].get<std::int32_t>();
+//         printf("transport msg:%s\n", message.c_str());
 //         switch(jmsg["cmd"].get<std::int32_t>()) {
 //             case 0:// 心跳
 //                 if (message_pack(cmd , 1, 1, compress, "", msg_send)) {
@@ -140,6 +227,7 @@ void WsConsumer::OnMessage(const std::string& msg)
 //                 break;
 //             case 1:// 通信消息
 //                 {
+//                     printf("nomal msg\n");
 //                     nlohmann::json jbody = nlohmann::json::parse(jmsg["body"].get<std::string>());
 //                     std::string token = jbody["token"];
 //                     if (token.empty()) {
@@ -155,7 +243,7 @@ void WsConsumer::OnMessage(const std::string& msg)
 //                     nlohmann::json jtoken = nlohmann::json::parse(decryptor);
 //                     std::string s_uid = std::to_string(jtoken["user_id"].get<std::uint64_t>());
 //                     s_uid.resize(20);
-//                     // TODO uid和cid绑定
+//                     TODO uid和cid绑定
 //                     CmdBindUid buid(this->fd, this->data, jtoken);
 //                     if(buid.ExecCmd() == -1) {
 //                         RTE_LOG(ERR, USER1, "[%s][%d] add uid[%s] failed, closing connection...",
@@ -163,12 +251,12 @@ void WsConsumer::OnMessage(const std::string& msg)
 //                         _CleanAndClose();
 //                         return;
 //                     }
-//                     // char resArray[32] = {0};
+//                     char resArray[32] = {0};
 //                     std::string res = "bind ";
 //                     res += s_uid;
 //                     res += "\n";
 //                     // sprintf(resArray, "bind %lu\n", jtoken["user_id"].get<std::uint64_t>());
-//                     // std::string res = std::string(resArray, strlen(resArray));
+//                     // // std::string res = std::string(resArray, strlen(resArray));
 //                     tgg_set_cli_authorized(this->fd, AUTH_TYPE_TOKENCHECKED);
 //                     if (message_pack(jmsg["cmd"].get<std::int32_t>() , 1 , 0,
 //                         jmsg["compressFormat"], res, msg_send) < 0) {
@@ -187,7 +275,7 @@ void WsConsumer::OnMessage(const std::string& msg)
 //                 }
 //                 break;
 //         }
-//         // msg_send = std::string(vec.begin(), vec.end());
+//         msg_send = std::string(vec.begin(), vec.end());
 //         SendData(msg_send, FD_WRITE);
 //         return;
 //     } catch (const nlohmann::detail::parse_error& e) {
@@ -224,6 +312,8 @@ void WsConsumer::_CleanAndClose()
 void WsConsumer::_CleanData()
 {
     CleanBuffer();
-    clean_read_data((tgg_read_data*)(this->data));
+    if(this->data) {// 防止可能还没有给this->data赋值，连接就已经关闭了
+        clean_read_data((tgg_read_data*)(this->data));
+    }
 }
 

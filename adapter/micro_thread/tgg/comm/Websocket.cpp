@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <sstream>
+#include <map>
 #include <algorithm>
 #include <unordered_map>
 #include <openssl/sha.h>
@@ -11,30 +12,134 @@
 
 static const size_t WS_MAX_RECV_FRAME_SZ = 10485760;
 
+// URL解码函数（参考网页[9][10]）
+std::string url_decode(const std::string &src) {
+    std::string decoded;
+    for (size_t i = 0; i < src.size(); ++i) {
+        if (src[i] == '%' && i + 2 < src.size()) {
+            int hex_val;
+            std::istringstream hex_stream(src.substr(i+1, 2));
+            if (hex_stream >> std::hex >> hex_val) {
+                decoded += static_cast<char>(hex_val);
+                i += 2;
+            }
+        } else if (src[i] == '+') {
+            decoded += ' ';
+        } else {
+            decoded += src[i];
+        }
+    }
+    return decoded;
+}
 
-    // 生成websocket连接的唯一键
+// 解析HTTP请求（参考网页[7][11]的握手处理）
+void parse_http_request(const std::string &raw_request, HttpRequest& req) {
+    std::istringstream stream(raw_request);
+    std::string line;
+
+    // 解析请求行
+    if (std::getline(stream, line)) {
+        std::istringstream line_stream(line);
+        line_stream >> req.method >> req.uri >> req.protocol;
+        req.protocol = req.protocol.substr(5); // 去除"HTTP/"
+    }
+
+    // 解析请求头
+    while (std::getline(stream, line) && line != "\r") {
+        size_t colon_pos = line.find(':');
+        if (colon_pos != std::string::npos) {
+            std::string key = line.substr(0, colon_pos);
+            std::string value = line.substr(colon_pos + 2); // 跳过": "
+            value.erase(std::remove(value.begin(), value.end(), '\r'), value.end());
+            req.headers[key] = value;
+        }
+    }
+
+    // 解析QUERY_STRING（参考网页[9]的URL参数处理）
+    size_t query_start = req.uri.find('?');
+    if (query_start != std::string::npos) {
+        std::string query_str = req.uri.substr(query_start + 1);
+        std::istringstream query_stream(query_str);
+        std::string pair;
+        while (std::getline(query_stream, pair, '&')) {
+            size_t eq_pos = pair.find('=');
+            std::string key = (eq_pos != std::string::npos) ? 
+                url_decode(pair.substr(0, eq_pos)) : url_decode(pair);
+            std::string value = (eq_pos != std::string::npos) ? 
+                url_decode(pair.substr(eq_pos + 1)) : "";
+            req.query[key] = value;
+        }
+    }
+
+    // 新增：解析 Cookies（需在请求头解析完成后添加）
+    if (req.headers.find("Cookie") != req.headers.end()) {
+        std::string cookieStr = req.headers["Cookie"];
+        std::istringstream cookieStream(cookieStr);
+        std::string cookiePair;
+
+        while (std::getline(cookieStream, cookiePair, ';')) {
+            // 去除首尾空格（网页4提到的清理逻辑）
+            cookiePair.erase(cookiePair.begin(), 
+                std::find_if(cookiePair.begin(), cookiePair.end(), 
+                    [](int ch) { return !std::isspace(ch); }));
+            cookiePair.erase(std::find_if(cookiePair.rbegin(), cookiePair.rend(),
+                [](int ch) { return !std::isspace(ch); }).base(), cookiePair.end());
+
+            // 分割键值对（类似查询参数处理）
+            size_t eqPos = cookiePair.find('=');
+            if (eqPos != std::string::npos) {
+                std::string key = url_decode(cookiePair.substr(0, eqPos));
+                std::string value = url_decode(
+                    cookiePair.substr(eqPos + 1)
+                );
+                req.cookies[key] = value;  // 需在 HttpRequest 结构体中定义 cookies 成员
+            }
+        }
+    }
+}
+
+
+bool is_valid_websocket_handshake(const HttpRequest &req) {
+    // 检查必需的头字段
+    if (req.headers.find("Upgrade") == req.headers.end() ||
+        req.headers.find("Connection") == req.headers.end() ||
+        req.headers.find("Sec-WebSocket-Key") == req.headers.end()) {
+        return false;
+    }
+
+    // 验证协议升级字段
+    std::string upgrade = req.headers.at("Upgrade");
+    std::string connection = req.headers.at("Connection");
+    std::transform(upgrade.begin(), upgrade.end(), upgrade.begin(), ::tolower);
+    std::transform(connection.begin(), connection.end(), connection.begin(), ::tolower);
+
+    return (upgrade == "websocket" && connection.find("upgrade") != std::string::npos);
+}
+
+// 生成websocket连接的唯一键
 std::string Websocket::_GenerateAcceptKey(const std::string& key)
 {
     std::string concat_key = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";    
     return Encrypt::Base64Encode(Encrypt::sha1(concat_key));
 }
 
-std::string Websocket::_HandleHandshake(const std::string& request)
+std::string Websocket::_HandleHandshake(const std::string& request, HttpRequest& req)
 {
-    std::istringstream stream(request);
-    std::string line;
-    std::string web_key;
-
-    while (std::getline(stream, line)) {
-        if (line.find("Sec-WebSocket-Key:") != std::string::npos) {
-            web_key = tgg_trim(line.substr(line.find(":") + 1));
-            break;
-        }
-    }
-    if(web_key.empty()) {
+    // std::istringstream stream(request);
+    // std::string line;
+    // std::string web_key;
+    // int check_count = 2;
+    if((request.size() < 5) || (request.substr(0, 5) != "GET /")) {
+        std::cerr << "Invalid http request:" << request << std::endl;
         return "";
     }
-    std::string accept_key = _GenerateAcceptKey(web_key);
+    parse_http_request(request, req);
+
+    if (!is_valid_websocket_handshake(req)) {
+        std::cerr << "Invalid WebSocket handshake" << request << std::endl;
+        return "";
+    }
+    std::string accept_key = _GenerateAcceptKey(req.headers["Sec-WebSocket-Key"]);
 
         // 构建握手响应
     std::ostringstream response;
@@ -46,6 +151,11 @@ std::string Websocket::_HandleHandshake(const std::string& request)
     << "Server: workerman/4.1.15\r\n"
     << "\r\n";
     return response.str();
+}
+
+void form_con_req_to_bw_data()
+{
+
 }
 
 std::string Websocket::EncodeWebsocketMessage(int opcode, const std::string& message)
@@ -201,11 +311,12 @@ void Websocket::CleanBuffer()
 int Websocket::ReadData(void* data, int len)
 {
         if (!handshake) {
-            std::string response = _HandleHandshake(std::string((char*)data, len));
+            HttpRequest req;
+            std::string response = _HandleHandshake(std::string((char*)data, len), req);
             if (response.empty()) {
                 return -1;
             }
-            OnHandShake(response.c_str());
+            OnHandShake(response.c_str(), req);
             return 1;
         }
         int type;

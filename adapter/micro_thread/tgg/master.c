@@ -76,7 +76,7 @@ uint32_t get_local_addr(int sockfd)
      return ip_decimal;
 }
 
-static int get_remote_info(int sockfd, uint32_t& ip, ushort& port)
+static int get_remote_info(int sockfd, uint32_t& ip, ushort& port, char* ip_str)
 {
      // 获取IP地址信息
      struct sockaddr_in local_addr;
@@ -86,7 +86,7 @@ static int get_remote_info(int sockfd, uint32_t& ip, ushort& port)
          close(sockfd);
          return -1;
      }
-     char ip_str[INET_ADDRSTRLEN];
+     // char ip_str[INET_ADDRSTRLEN];
      inet_ntop(AF_INET, &(local_addr.sin_addr), ip_str, INET_ADDRSTRLEN);
      // printf("ip str:%s\n", ip_str);
      struct in_addr ip_addr;
@@ -185,11 +185,12 @@ static void tgg_recv(void *arg)
 	delete p;
 	uint32_t ip;
 	ushort port;
-	if (get_remote_info(clt_fd, ip, port) < 0) {
+	char ip_str[INET_ADDRSTRLEN] = {0};
+	if (get_remote_info(clt_fd, ip, port, ip_str) < 0) {
 		close(clt_fd);
 		return;
 	}
-	if(tgg_init_cli(g_core_id, clt_fd, ip, port) < 0) {
+	if(tgg_init_cli(g_core_id, clt_fd, ip_str, ip, port) < 0) {
 		close(clt_fd);
 		tgg_close_cli(g_core_id, clt_fd);
 		return;
@@ -296,8 +297,8 @@ static void tgg_do_send(tgg_write_data* wdata)
 			if ( wdata->fd_opt & FD_CLOSE) {
 				RTE_LOG(INFO, USER1, "[%s][%d] Closing Connection[%d].\n", __FILE__, __LINE__, cli_fd);
 				tgg_del_idx(fd_list->idx);
-				tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSING);
 				mt_close(cli_fd);
+				tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSING);
 			}
 		}
 

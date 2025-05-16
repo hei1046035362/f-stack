@@ -3,6 +3,16 @@
 
 #include <string>
 #include <vector>
+#include <map>
+struct HttpRequest {
+    std::string method;          // REQUEST_METHOD (e.g. "GET")
+    std::string uri;             // REQUEST_URI (e.g. "/?locale=zh-CN...")
+    std::string protocol;        // SERVER_PROTOCOL (e.g. "HTTP/1.1")
+    std::map<std::string, std::string> headers; // 所有请求头
+    std::map<std::string, std::string> query;   // QUERY_STRING 解析后的键值对
+    std::map<std::string, std::string> cookies;
+};
+
 
 // TODO: 为了快速开发，目前websocket的缓存和握手状态都在st_cli_info中，后续需要重新封装一下
 //          方法要和数据隔离
@@ -34,10 +44,12 @@ protected:
     };
 private:
 
+    // 新的连接处理
+    std::string _ClientConnect(const std::string& request);
     // 生成websocket连接的唯一键
     std::string _GenerateAcceptKey(const std::string& key);
 
-    std::string _HandleHandshake(const std::string& request);
+    std::string _HandleHandshake(const std::string& request, HttpRequest& req);
         
     /* parse base frame according to
      * https://www.rfc-editor.org/rfc/rfc6455#section-5.2
@@ -52,7 +64,8 @@ protected:
     void SendONnoAuth(const std::string& data, int fd_opt);
 public:
     // 所有发送数据都在子类执行，这里只做websocket相关的公共操作
-    virtual void OnHandShake(const std::string& response) = 0;
+    virtual void OnConnect() = 0;
+    virtual void OnHandShake(const std::string& response, HttpRequest& req) = 0;
     virtual void OnMessage(const std::string& msg) = 0;
     virtual void OnClose() = 0;// 子类继承后要执行clean_buffer清理缓存
     virtual void OnPing(const std::string& response) {};
