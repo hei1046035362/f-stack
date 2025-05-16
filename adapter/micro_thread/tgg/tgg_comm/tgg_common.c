@@ -27,6 +27,7 @@ extern struct rte_ring* g_ring_bwsnds[MAX_LCORE_COUNT];
 extern struct rte_mempool* g_mempool_read;
 extern struct rte_mempool* g_mempool_write;
 extern struct rte_mempool* g_mempool_bwrcv;
+extern char g_ccid_str[21];  // 8位地址+4位端口+8位idx+1位结束符'\0'
 
 tgg_stats g_tgg_stats = {0};
 
@@ -80,9 +81,14 @@ int get_valid_idx()
 	return current_id_atomic;
 }
 
-int get_valid_cid(int prc_id, int idx)
+std::string get_valid_ccid(int cid)
 {
-	return ((prc_id << 24) & idx);
+	std::string scid(g_ccid_str, TGG_IPPORT_LEN);
+    std::string rsp;
+    rsp.resize(sizeof(int));
+    memcpy(const_cast<char* >(rsp.data()), &cid, sizeof(int));
+    return scid + rsp;
+	// return ((prc_id << 24) | idx);
 }
 
 
@@ -98,7 +104,7 @@ void tgg_close_cli(int core_id, int fd)
 	cli->status |= FD_STATUS_CLOSING | FD_STATUS_CLOSED;
 }
 
-int tgg_init_cli(int core_id, int fd, uint32_t ip, ushort port)
+int tgg_init_cli(int core_id, int fd, char* ip_str, uint32_t ip, ushort port)
 {
 	SpinLock lock(get_cli_lock());
 	tgg_cli_info* cli = &((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd];
@@ -113,6 +119,7 @@ int tgg_init_cli(int core_id, int fd, uint32_t ip, ushort port)
 		return -1;
 	}
 	cli->authorized = 0;
+	memcpy(cli->ip_str, ip_str, INET_ADDRSTRLEN);
 	cli->ip = ip;
 	cli->port = port;
 	cli->status = FD_STATUS_READYFORCONNECT;
@@ -136,6 +143,12 @@ int tgg_get_cli_authorized(int core_id, int fd)
 	SpinLock lock(get_cli_lock());
 	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].authorized;	
 }
+std::string tgg_get_cli_ip_str(int core_id, int fd)
+{
+	SpinLock lock(get_cli_lock());
+	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].ip_str;
+}
+
 uint32_t tgg_get_cli_ip(int core_id, int fd)
 {
 	SpinLock lock(get_cli_lock());
@@ -695,10 +708,10 @@ tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& m
 			goto add_data_failed;
 		}
 		memcpy((char*)(wdata->data), sdata.c_str(), sdata.length());
-		wdata->data_len = sdata.length();
 	} else {
-		wdata->data_len = 0;
+		wdata->data = NULL;
 	}
+		wdata->data_len = sdata.length();
 	wdata->fd_opt = fdopt;
 	return wdata;
 
@@ -764,8 +777,12 @@ tgg_read_data* format_send_server_data(int core_id, int fd, const std::string& s
 			__FILE__, __LINE__, ret);
 		return NULL;
 	}
-	bwdata->data = dpdk_rte_malloc(sdata.length());
-	memcpy(bwdata->data, sdata.c_str(), sdata.length());
+	if(sdata.length() > 0) {
+		bwdata->data = dpdk_rte_malloc(sdata.length());
+		memcpy(bwdata->data, sdata.c_str(), sdata.length());
+	} else {
+		bwdata->data = NULL;
+	}
 	bwdata->data_len = sdata.length();
 	bwdata->fd_opt = fdopt;
 	bwdata->fd = fd;
@@ -781,20 +798,20 @@ int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
 			__FILE__, __LINE__);
 		return -1;
 	}
-	int idx = 10;// 入队列可能会失败最多尝试10次
-	while (tgg_enqueue_trans(bwdata) < 0 && idx-- > 0 ) {
+	int maxtry = 10;// 入队列可能会失败最多尝试10次
+	while (tgg_enqueue_trans(bwdata) < 0 && maxtry-- > 0 ) {
 		usleep(10);
 	}
 	static int loop_times_sndserver = 0;
 	// 前期调试要看是否经常出现重试
-	if (idx < 9) {
+	if (maxtry < 9) {
 		++loop_times_sndserver;
 		if(loop_times_sndserver % 100 == 0) {
 			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.", 
 				__FILE__, __LINE__, loop_times_sndserver);
 		}
 	}
-	if (idx <= 0) {
+	if (maxtry <= 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d] Enqueue bw server data failed.", 
 			__FILE__, __LINE__);
 		return -1;
@@ -810,21 +827,21 @@ int enqueue_data_send_server(int core_id, int fd, const std::string& data, int f
 			__FILE__, __LINE__);
 		return -1;
 	}
-	int idx = 10;// 入队列可能会失败最多尝试10次
+	int maxtry = 10;// 入队列可能会失败最多尝试10次
 	int queue_id = fd % TggConfigure::getInstance()->get_bwsvr_count();
-	while (tgg_enqueue_bwsnd(queue_id, bwdata) < 0 && idx-- > 0 ) {
+	while (tgg_enqueue_bwsnd(queue_id, bwdata) < 0 && maxtry-- > 0 ) {
 		usleep(10);
 	}
 	static int loop_times_sndserver = 0;
 	// 前期调试要看是否经常出现重试
-	if (idx < 9) {
+	if (maxtry < 9) {
 		++loop_times_sndserver;
 		if(loop_times_sndserver % 100 == 0) {
 			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.",
 				__FILE__, __LINE__, loop_times_sndserver);
 		}
 	}
-	if (idx <= 0) {
+	if (maxtry <= 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d] Enqueue bw server data failed.", 
 			__FILE__, __LINE__);
 		return -1;
@@ -847,7 +864,7 @@ void* dpdk_rte_malloc(int size)
 {
 	void* pdata = rte_malloc("tgg_malloc", size, 0);
 	if (!pdata)	{
-		RTE_LOG(ERR, USER1, "malloc data failed.\n");
+		RTE_LOG(ERR, USER1, "[%s][%d]malloc data failed.\n", __FILE__, __LINE__);
 	}
 	// TODO 这里需要把pdata管理起来，因dpdk的secondary进程出core而未释放时会导致大页内存泄漏
 	// 		可以用链表管理起来，然后注册rte_service给master进程去管理，也可以放到定时任务管理

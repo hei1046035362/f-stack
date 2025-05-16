@@ -5,6 +5,8 @@
 #include <rte_mempool.h>
 #include <rte_malloc.h>
 #include <sys/wait.h>
+#include <sys/prctl.h>
+#include <linux/prctl.h>
 #include "tgg_comm/tgg_common.h"
 #include "tgg_comm/tgg_struct.h"
 #include "tgg_comm/tgg_bwserver.h"
@@ -157,6 +159,7 @@ void check_heart_beat(pid_data* pdata)
 	}
     pdata->heart_beat = 0;
 }
+
 void monitor_process(int argc, char **argv)
 {
 	// 定期检查子进程状态
@@ -167,7 +170,8 @@ void monitor_process(int argc, char **argv)
             pid_t result = waitpid(s_pids[i].pid, &status, WNOHANG); // 非阻塞等待
             
             if (result == 0) {
-                printf("子进程[%d]仍在运行\n", s_pids[i].pid);
+                continue;
+                // printf("子进程[%d]仍在运行\n", s_pids[i].pid);
             } else if (result == -1) {
                 // 出现错误
                 perror("waitpid 错误");
@@ -204,6 +208,7 @@ void monitor_process(int argc, char **argv)
 
 void tgg_sig_init()
 {
+    prctl(PR_SET_PDEATHSIG, SIGTERM);
 	if (signal(SIGINT, signal_handler) == SIG_ERR) {
         perror("Error setting signal handler");
         exit(-1);
