@@ -37,6 +37,7 @@ protected:
 private:
     void _CleanAndClose();
     void _CleanData();
+    bool _CheckToken(const std::string& token);
 private:
     int _idx;
     int _status;
