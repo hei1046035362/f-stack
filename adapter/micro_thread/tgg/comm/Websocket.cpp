@@ -158,6 +158,31 @@ void form_con_req_to_bw_data()
 
 }
 
+// 编码关闭帧
+std::string Websocket::EncodeCloseFrame(const std::string& reason)
+{
+    std::vector<uint8_t> frame;
+    uint16_t status_code = 1000;
+    const uint8_t CLOSE_OPCODE = 0x08;
+    // 2. 构造有效载荷
+    std::vector<uint8_t> payload;
+    // 大端序状态码
+    payload.push_back((status_code >> 8) & 0xFF);
+    payload.push_back(status_code & 0xFF);
+    
+    // 截断原因短语至123字节
+    std::string trimmed_reason = reason.substr(0, 123);
+    payload.insert(payload.end(), trimmed_reason.begin(), trimmed_reason.end());
+    // 3. 构建帧头
+    frame.push_back(0b10000000 | CLOSE_OPCODE); // FIN=1 + Opcode=8
+    // 4. 处理掩码和长度
+    frame.push_back(payload.size()); // 服务端不掩码
+    // 5. 组合完整帧
+    frame.insert(frame.end(), payload.begin(), payload.end());
+    
+    return std::string(frame.begin(), frame.end());
+}
+
 std::string Websocket::EncodeWebsocketMessage(int opcode, const std::string& message)
 {
     std::vector<uint8_t> frame;
@@ -310,7 +335,7 @@ void Websocket::CleanBuffer()
 // return  -1 缓存失败，要关闭连接并删除源数据data 0 缓存数据，本次不处理  1 消息处理完成，需要清理缓存
 int Websocket::ReadData(void* data, int len)
 {
-        if (!handshake) {
+        if (handshake != AUTH_TYPE_HANDLESHAKED) {
             HttpRequest req;
             std::string response = _HandleHandshake(std::string((char*)data, len), req);
             if (response.empty()) {
@@ -382,7 +407,12 @@ int Websocket::ReadData(void* data, int len)
 
 void Websocket::SendONnoAuth(const std::string& data, int fd_opt)
 {
-    std::string result = EncodeWebsocketMessage(BINARY_FRAME, data);
+    std::string result;
+    if(fd_opt & FD_CLOSE) {
+        result = EncodeCloseFrame("");
+    } else {
+        result = EncodeWebsocketMessage(BINARY_FRAME, data);
+    }
     OnSend(result, fd_opt);
 }
 
