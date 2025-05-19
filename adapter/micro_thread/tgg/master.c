@@ -13,6 +13,9 @@
 #include "tgg_comm/tgg_conf.h"
 
 static const char* s_dump_file = "/var/corefiles/tgg_gw_master_core";
+
+// 1、心跳检测间隔，没收到数据就会结束fd，
+// 2、freebsd底层销毁并回收fd的时间是30s，这个时间最好是大于30
 static int s_fd_timeout = 60*1000;
 extern const char* g_rte_malloc_type;
 extern struct rte_mempool* g_mempool_read;
@@ -29,6 +32,13 @@ int g_run_status = 1;
 
 using namespace NS_MICRO_THREAD;
 
+static void print_hex(const char *data, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        printf("%02X ", (unsigned char)data[i]); // 大写十六进制
+        // printf("%02x ", (unsigned char)data[i]); // 小写十六进制
+    }
+    printf("\n");
+}
 
 void signal_handler(int signum)
 {
@@ -180,33 +190,32 @@ static int tgg_recv_enqueue(int clt_fd, const char* buf, int len, enum FD_OPT op
 static void tgg_recv(void *arg)
 {
 	int ret;
-	int *p = (int *)arg;
-	int clt_fd = *p;
-	delete p;
+	int cli_fd = *((int *)arg);
+	delete (int *)arg;
 	uint32_t ip;
 	ushort port;
 	char ip_str[INET_ADDRSTRLEN] = {0};
-	if (get_remote_info(clt_fd, ip, port, ip_str) < 0) {
-		close(clt_fd);
+	if (get_remote_info(cli_fd, ip, port, ip_str) < 0) {
+		close(cli_fd);
 		return;
 	}
-	if(tgg_init_cli(g_core_id, clt_fd, ip_str, ip, port) < 0) {
-		close(clt_fd);
-		tgg_close_cli(g_core_id, clt_fd);
+	if(tgg_init_cli(g_core_id, cli_fd, ip_str, ip, port) < 0) {
+		close(cli_fd);
+		tgg_close_cli(g_core_id, cli_fd);
 		return;
 	}
 	// tgg_set_cli_idx(0);
-	int status = tgg_get_cli_status(g_core_id, clt_fd);
+	int status = tgg_get_cli_status(g_core_id, cli_fd);
 	// 通知后台有新的连接
-	if (tgg_recv_enqueue(clt_fd, "", 0, FD_NEW) < 0) {
-		close(clt_fd);
-		tgg_close_cli(g_core_id, clt_fd);
+	if (tgg_recv_enqueue(cli_fd, "", 0, FD_NEW) < 0) {
+		close(cli_fd);
+		tgg_close_cli(g_core_id, cli_fd);
 		return;
 	}
 	while (g_run_status) {
 		char buf[64 * 1024] = {0};
 		// 1、接收数据  mt_recv在没有数据包的情况下会阻塞，让出cpu给其他的action执行
-		ret = mt_recv(clt_fd, (void *)buf, 64 * 1024, 0, s_fd_timeout);
+		ret = mt_recv(cli_fd, (void *)buf, 64 * 1024, 0, s_fd_timeout);
 		if(ret == -1 && errno == ETIME) {
 			printf("client heart beat timeout.\n");
 			break;
@@ -227,12 +236,18 @@ static void tgg_recv(void *arg)
 			printf("recv close from client.\n");
 			break;
 		}
-		printf("recv:%s\n", (char*)buf);
+		// 调试打印
+		if(!strncmp(buf, "GET", 3)) {// GET请求消息
+			printf("fd:%d idx:%d recv data:%s\n", cli_fd, tgg_get_cli_idx(g_core_id, cli_fd), (char*)buf);
+		} else {// 其他消息
+	    	printf("fd:%d idx:%d revc data:", cli_fd, tgg_get_cli_idx(g_core_id, cli_fd));
+			print_hex(buf, ret);
+		}
 		// enum FD_OPT opt;
 		// if (!status) {
 		// 	// 首次连接
 		// 	status |= FD_STATUS_NEWSESSION;
-		// 	tgg_set_cli_status(clt_fd, status);
+		// 	tgg_set_cli_status(cli_fd, status);
 		// 	opt = FD_NEW;
 		// } else {
 			// 后续数据包
@@ -240,27 +255,27 @@ static void tgg_recv(void *arg)
 		// }
 
 		// 入队列失败，内存不够了，直接退出循环关闭连接
-		if (tgg_recv_enqueue(clt_fd, buf, ret, FD_READ) < 0)
+		if (tgg_recv_enqueue(cli_fd, buf, ret, FD_READ) < 0)
 			break;
 	}
 	// 对端主动关闭了
 	// memset(cli->uid, 0, sizeof(cli->uid));
 	status = FD_STATUS_CLOSING;
-	tgg_set_cli_status(g_core_id, clt_fd, status);
+	tgg_set_cli_status(g_core_id, cli_fd, status);
 	// 为确保fd正确关闭,对应的内存正确释放,就必须要入队列一个关闭的操作
-	if (ret)  // 不是对端主动关闭的情况，服务端要主动发送关闭消息
-		tgg_recv_enqueue(clt_fd, NULL, 0, FD_CLOSE);
+	// if (ret)  // 不是对端主动关闭的情况，服务端要主动发送关闭消息
+	tgg_recv_enqueue(cli_fd, NULL, 0, FD_CLOSE);// 是不是对端主动发送的，都要通知，
 
-	RTE_LOG(INFO, USER1, "[%s][%d] wait client[%d] close...\n", __FILE__, __LINE__, clt_fd);
+	RTE_LOG(INFO, USER1, "[%s][%d] wait client[%d] close...\n", __FILE__, __LINE__, cli_fd);
 	// 等待连接在缓存中的数据被消费完才能关闭
 	int index = 1000;// TODO 防止因process宕机丢包导致无法停止的问题，10s这个时间待商榷
-	while(tgg_get_cli_idx(g_core_id, clt_fd) != TGG_FD_CLOSING && index > 0) {
+	while(tgg_get_cli_idx(g_core_id, cli_fd) != TGG_FD_CLOSING && index > 0) {
 	    mt_sleep(10);
 	    index--;
 	}
-	close(clt_fd);
-	tgg_close_cli(g_core_id, clt_fd);
-	RTE_LOG(INFO, USER1, "[%s][%d] client[%d] closed.\n", __FILE__, __LINE__, clt_fd);
+	close(cli_fd);// 这里不能使用mt_close,mt_close只设置标记，不会发送fin包，fd依然还存在
+	tgg_close_cli(g_core_id, cli_fd);
+	RTE_LOG(INFO, USER1, "[%s][%d] client[%d] closed.\n", __FILE__, __LINE__, cli_fd);
 }
 
 static void tgg_do_send(tgg_write_data* wdata)
@@ -269,7 +284,12 @@ static void tgg_do_send(tgg_write_data* wdata)
 	while (fd_list) {
 		int cli_fd = fd_list->fdid;// 数据传递时fdid存的是fd
 		int idx = tgg_get_cli_idx(g_core_id, cli_fd);
-
+		// if(!strncmp((char*)wdata->data, "HTTP", 4)) {// GET请求消息
+		// 	printf("fd:%d idx:%d send data:%s\n", cli_fd, idx, (char*)wdata->data);
+		// } else {// 其他消息
+	    // 	printf("fd:%d idx:%d send data:", cli_fd, idx);
+		// 	print_hex((char*)wdata->data, wdata->data_len);
+		// }
 		// 只有未关闭的连接才需要走以下逻辑，已经关闭的连接，不再发送数据
 		if(idx >= 0) {
 			// 新的连接旧的数据就不要发送了，直接清理空间
@@ -282,6 +302,7 @@ static void tgg_do_send(tgg_write_data* wdata)
 
 			// 是否需要发送数据
 			if (wdata->fd_opt & FD_WRITE) {
+				RTE_LOG(ERR, USER1, "[%s][%d] sending data.\n", __FILE__, __LINE__);
 				int ret = mt_send(cli_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
 				if (ret == -4) {
 					// 主动断开连接
@@ -295,9 +316,10 @@ static void tgg_do_send(tgg_write_data* wdata)
 			}
 
 			if ( wdata->fd_opt & FD_CLOSE) {
-				RTE_LOG(INFO, USER1, "[%s][%d] Closing Connection[%d].\n", __FILE__, __LINE__, cli_fd);
+				RTE_LOG(ERR, USER1, "[%s][%d] Closing Connection[%d].\n", __FILE__, __LINE__, cli_fd);
 				tgg_del_idx(fd_list->idx);
-				mt_close(cli_fd);
+				// mt_close(cli_fd);// 在这里结束会报错，四次挥手不完整：epoll schedule failed, errno: 62
+								 // 但正常结束流程里close，需要等待30s，不可配置，freebsd内部控制
 				tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSING);
 			}
 		}

@@ -462,6 +462,11 @@ void init_multi_for_secondary()
 		char ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(ring_name, "%s_%d", write_ring_name_prev, i);
 		g_ring_writes[i] = find_ring(ring_name);
+
+		// char ring_name[RTE_RING_NAMESIZE] = {0};
+		memset(ring_name, 0, RTE_RING_NAMESIZE);
+		sprintf(ring_name, "%s_%d", cliprc_ring_name_prev, i);
+		g_ring_cliprcs[i] = find_ring(ring_name);
 	}
 	for (uint32_t i = 0; i < TggConfigure::getInstance()->get_bwsvr_count(); i++) {
 		// 初始化bwfdx数组的zones
@@ -508,16 +513,16 @@ void tgg_cliprc_init()
 	int gate_ip = convert_ip2int(TggConfigure::getInstance()->get_gateway_addr().c_str());
 	init_ccid_prefix(gate_ip, TggConfigure::getInstance()->get_gateway_port());
 
-	printf("lcore_count:%d\n", rte_lcore_count());
-	for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
-		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
-			continue;
-		}
+	// printf("lcore_count:%d\n", rte_lcore_count());
+	// for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
+	// 	if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
+	// 		continue;
+	// 	}
 
-		char ring_name[RTE_RING_NAMESIZE] = {0};
-		sprintf(ring_name, "%s_%d", cliprc_ring_name_prev, i);
-		g_ring_cliprcs[i] = find_ring(ring_name);
-	}
+	// 	char ring_name[RTE_RING_NAMESIZE] = {0};
+	// 	sprintf(ring_name, "%s_%d", cliprc_ring_name_prev, i);
+	// 	g_ring_cliprcs[i] = find_ring(ring_name);
+	// }
 	tgg_secondary_init();
 }
 
