@@ -59,7 +59,7 @@ bool WsConsumer::ConnectionValid(int core_id, int fd, void* data)
     // }
     if (_idx != ((tgg_read_data*)data)->idx) {
         // 说明当前的数据已经是上一个连接的数据了
-        RTE_LOG(ERR, USER1, "[%s][%d] client idx[%d] not match to data idx[%d].",
+        RTE_LOG(ERR, USER1, "[%s][%d] client idx[%d] not match to data idx[%d].\n",
            __FILE__, __LINE__, _idx, ((tgg_read_data*)data)->idx);
         return false;
     }
@@ -71,13 +71,17 @@ void WsConsumer::OnClose()
     if (tgg_get_cli_authorized(this->core_id, this->fd) == AUTH_TYPE_HANDLESHAKED) {
         // TODO 构造消息让gwbwrcv去解绑还是就在这里解绑？  
         // 当前选择关闭时直接解绑，防止消息丢失导致连接未解绑
-        tgg_free_session(this->core_id, this->fd);
+        if (tgg_free_session(this->core_id, this->fd) < 0) {
+            RTE_LOG(ERR, USER1, "[%s][%d] free session failed, idx[%d].\r\n", 
+                __FILE__, __LINE__, userid.c_str(tgg_get_cli_cid(this->core_id, this->fd)));
+        }
         // nlohmann::json obj;
         // CmdUnBindUid ubuid(this->core_id, this->fd, this->data, obj);
         // ubuid.ExecCmd();// 解绑，从hash表中删除连接
     }
-    std::string data = "\x88\x02\x03\xe8";// 关闭websocket
-    SendONnoAuth(data, FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
+    // std::string data = "\x88\x02\x03\xe8\x00\x00";// 关闭websocket
+    // OnSend(data, FD_WRITE|FD_CLOSE);
+    SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     Send2Server(this->core_id, this->fd, "", FD_CLOSE);
     // SendData("", FD_CLOSE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
 }
@@ -92,27 +96,30 @@ void WsConsumer::OnConnect()
     Send2Server(this->core_id, this->fd, "", FD_NEW);
 }
 
-
-static bool is_valid_tgg_ws_request(const HttpRequest &req)
+// 检查请求是否符合tgg的要求，不符合直接断开连接
+static bool tgg_request_valid_check(const HttpRequest &req, std::string& token, std::string& properties)
 {
     // 检查必需的头字段
     std::map<std::string, std::string>::const_iterator ittoken = req.query.find("token");
-    if (req.query.find("client_properties") == req.query.end() ||
+    std::map<std::string, std::string>::const_iterator itproperties = req.query.find("client_properties");
+    if (itproperties == req.query.end() ||
         req.query.find("authorization") == req.query.end() ||
         ittoken == req.query.end()) {
         return false;
     }
     // token 是否能解析出来
     Encrypt encryptor = GetEncryptor();
-    std::string decryptor = encryptor.Aes128Decrypt(ittoken->second);
-    if (decryptor.empty()) {
-        RTE_LOG(ERR, USER1, "[%s][%d] token[%s] decrypted error.", __FILE__, __LINE__, ittoken->second.c_str());
+    token = encryptor.Aes128Decrypt(ittoken->second);
+    if (token.empty()) {
+        RTE_LOG(ERR, USER1, "[%s][%d] token[%s] decrypted error.\n", __FILE__, __LINE__, ittoken->second.c_str());
         return false;
     }
+    RTE_LOG(ERR, USER1, "[%s][%d] OnHandShake ok, token:%s.\n", __FILE__, __LINE__, token.c_str());
+    properties = itproperties->second;
     return true;
 }
-
-void build_server_data(const HttpRequest &req, const std::string& ip_str, ushort port, nlohmann::json& data) {
+// 封装发送给bw的握手请求数据
+static void build_server_data(const HttpRequest &req, const std::string& ip_str, ushort port, nlohmann::json& data) {
     nlohmann::json server_vars;
     server_vars["REQUEST_METHOD"] = req.method;
     server_vars["REQUEST_URI"] = req.uri;
@@ -150,12 +157,34 @@ void build_server_data(const HttpRequest &req, const std::string& ip_str, ushort
     // return server_vars;
 }
 
+bool WsConsumer::_CheckToken(const std::string& token)
+{
+    nlohmann::json jtoken = nlohmann::json::parse(token);
+    uint64_t uid = jtoken["user_id"].get<std::uint64_t>();
+    std::string userid = std::to_string(uid);
+    if(uid == 0 || userid.length() >= TGG_UID_LEN) {
+        RTE_LOG(ERR, USER1, "[%s][%d] invalid uid[%s] failed.\r\n", 
+            __FILE__, __LINE__, userid.c_str());
+        return false;
+    }
+    // TODO  直接拿token里面的uid还是等bw发送bind消息再赋值？销毁连接时会去查询
+    // tgg_set_cli_uid(this->core_id, this->fd, userid.c_str());
+    return true;
+}
+
 // 握手
 void WsConsumer::OnHandShake(const std::string& response, HttpRequest& req)
 {
-    if(!is_valid_tgg_ws_request(req)) {
+    std::string token, properties;
+    if(!tgg_request_valid_check(req, token, properties)) {
         RTE_LOG(ERR, USER1, "[%s][%d] tgg ws request[%s] check failed.\r\n", 
             __FILE__, __LINE__, req.uri.c_str());
+        _CleanAndClose();
+        return;
+    }
+    if(!_CheckToken(token)) {
+        RTE_LOG(ERR, USER1, "[%s][%d] check token[%s] failed.\r\n", 
+            __FILE__, __LINE__, token.c_str());
         _CleanAndClose();
         return;
     }
@@ -291,8 +320,11 @@ void WsConsumer::OnMessage(const std::string& msg)
 void WsConsumer::OnSend(const std::string& msg, int fd_opt)
 {
     // 连接已关闭或尚未建立
-    if(tgg_get_cli_idx(this->core_id, this->fd) < 0)
+    if(tgg_get_cli_idx(this->core_id, this->fd) < 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] Send data Failed, connection invalid: cid:%d,uid:%s,opt:%d",
+            __FILE__, __LINE__, _cid, _uid.c_str(), fd_opt);        
         return;
+    }
 
     std::cout << "OnSend:" << Encrypt::bin2hex(msg) << std::endl;
     if (enqueue_data_single_fd(this->core_id, msg, this->fd, _idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次

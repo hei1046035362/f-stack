@@ -79,6 +79,8 @@ public:
     void SendData(const std::string& data, int fd_opt);
 
 
+    static std::string EncodeCloseFrame(const std::string& reason);
+
     static std::string EncodeWebsocketMessage(int opcode, const std::string& message);
 
     static std::string DecodeWebsocketMessage(const std::vector<uint8_t>& frame);
