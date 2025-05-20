@@ -19,6 +19,3 @@ int create_tcp_socket(const unsigned short shPort ,const char *pszIP ,bool bReus
 
 void clean_queue_data();
 
-// 透传处理线程
-int init_bwtrans();
-void uninit_bwtrans();

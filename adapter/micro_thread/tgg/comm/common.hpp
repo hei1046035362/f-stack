@@ -16,4 +16,6 @@ void split_string(const std::string& str, char delimiter, std::vector<std::strin
 // 函数：将无符号整数转换为十六进制字符串
 std::string uint32_to_hex(uint32_t ip);
 
+uint64_t get_system_ms(void);
+
 #endif // __COMMON_HPP__
