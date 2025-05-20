@@ -16,7 +16,7 @@ extern int g_fd_limit;
 extern struct rte_memzone* g_fd_zones[MAX_LCORE_COUNT];
 extern int g_bwfdx_limit;
 extern struct rte_memzone* g_bwfdx_zones[MAX_LCORE_COUNT];
-
+extern struct rte_memzone* g_bwprc_zone;
 extern struct rte_ring* g_ring_read;
 extern struct rte_ring* g_ring_cliprcs[MAX_LCORE_COUNT];// 客户端上行
 extern struct rte_ring* g_ring_writes[MAX_LCORE_COUNT];
@@ -431,6 +431,38 @@ int tgg_clean_bwfdx(int prc_id, int fd)
 	// bw->cmd = 0;
 	return 0;
 }
+
+// 获取有效的进程序号
+int tgg_get_valid_bwprc(int bwcount, uint64_t now)
+{
+	for (int i = 0; i < bwcount; i++) {
+		SpinLock lock(get_bwprc_lock());
+		pid_data* prc = (pid_data*)(g_bwprc_zone->addr) + i;
+		// 如果超过两倍心跳的时间都没有更新，就视为前一个进程已退出
+		if (prc->heart_beat == 0 || prc->heart_beat + 2*BW_PRC_HEART_BEAT < now) {
+			prc->heart_beat = now;
+			return i;
+		}
+	}
+	return -1;
+}
+
+// 更新心跳
+void tgg_update_bwprc(int prc_id, uint64_t now)
+{
+	SpinLock lock(get_bwprc_lock());
+	pid_data* prc = (pid_data*)g_bwprc_zone->addr + prc_id;
+	prc->heart_beat = now;
+}
+
+// 进程退出前主动清理，下一个进程就能快速启动
+void tgg_clean_bwprc(int prc_id)
+{
+	SpinLock lock(get_bwprc_lock());
+	pid_data* prc = (pid_data*)g_bwprc_zone->addr + prc_id;
+	memset(prc, 0, sizeof(pid_data));
+}
+
 
 
 int cache_ws_buffer(int core_id, int fd, void* data, int len, int pos, int iscomplete)

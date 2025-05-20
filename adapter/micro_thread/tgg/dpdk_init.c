@@ -45,6 +45,11 @@ static uint32_t s_bwzone_size = g_bwfdx_limit*sizeof(tgg_bw_info);  // 单个进
 struct rte_memzone* g_bwfdx_zones[MAX_LCORE_COUNT] = {NULL};
 const char* bwfdx_zone_name_prev = "tgg_bwfd_zone";
 
+// bw进程数组
+struct rte_memzone* g_bwprc_zone = NULL;
+const char* bwprc_zone_name = "tgg_bwprc_zone";
+
+
 /// 进程锁
 struct rte_memzone* g_lock_zone = NULL;
 const char* s_lock_zone_name = "tgg_lock_zone";
@@ -160,6 +165,7 @@ static void init_locks()
 		rte_rwlock_init(get_uidgid_lock());
 		rte_spinlock_init(get_cli_lock());
 		rte_spinlock_init(get_bwfdx_lock());
+		rte_spinlock_init(get_bwprc_lock());
 		rte_atomic32_init(get_idx_lock());
 	}
 }
@@ -398,6 +404,8 @@ void tgg_master_init()
 	g_idx_hash = init_hash(s_idx_hash_name, g_fd_limit, sizeof(int));
 	g_bwfdx_hash = init_hash(s_bwfdx_hash_name, g_fd_limit, sizeof(int));
 	g_bwwkkey_hash = init_hash(s_bwwkkey_hash_name, g_fd_limit, g_bwwkkey_len);
+	g_bwprc_zone = make_memzone(bwprc_zone_name, TggConfigure::getInstance()->get_bwsvr_count()*sizeof(pid_data));
+
 	RTE_LOG(INFO, USER1, "Init dpdk master for tgg done.\n");
 }
 
@@ -446,6 +454,8 @@ void tgg_master_uninit()
 	g_bwfdx_hash = NULL;
 	rte_hash_free(g_bwwkkey_hash);
 	g_bwwkkey_hash = NULL;
+	rte_memzone_free(g_bwprc_zone);
+	g_bwprc_zone = NULL;
 }
 
 void init_multi_for_secondary()
@@ -534,12 +544,13 @@ void tgg_cliprc_uninit()
 // bw 消息处理进程处理dpdk操作相关数据结构初始化
 void tgg_bwprc_init(int bwcount)
 {
-	for (int i = 0; i < bwcount; i++) {
-		char ring_name[RTE_RING_NAMESIZE] = {0};
-		sprintf(ring_name, "%s_%d", bwrcv_ring_name_prev, i);
-		g_ring_bwrcvs[i] = find_ring(ring_name);
-	}
-	//tgg_secondary_init();
+	// for (int i = 0; i < bwcount; i++) {
+	// 	char ring_name[RTE_RING_NAMESIZE] = {0};
+	// 	sprintf(ring_name, "%s_%d", bwrcv_ring_name_prev, i);
+	// 	g_ring_bwrcvs[i] = find_ring(ring_name);
+	// }
+	tgg_secondary_init();
+	g_bwprc_zone = find_memzone(bwprc_zone_name);
 }
 
 void tgg_bwprc_uninit(int bwcount)

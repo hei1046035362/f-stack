@@ -231,8 +231,10 @@ int tgg_init_config(int& argc, char* argv[])
     int c;
     int index = 0;
     int index_argv_g = -1;
+    bool has_value = false;
     std::string fstack_filename = "/etc/tgg_gw/config.ini";
     std::string tgg_filename = "/etc/tgg_gw/tgg_conf.ini";
+    optind = 1;
     while((c = getopt_long(argc, argv, tgg_short_options, tgg_long_options, &index)) != -1) {
         switch (c) {
             case 'c':
@@ -242,7 +244,11 @@ int tgg_init_config(int& argc, char* argv[])
                 tgg_filename = strdup(optarg);
                 // 找到 -g 及其值在 argv 中的位置
                 for (int i = 1; i < argc; ++i) {
-                    if (strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "--tgg-conf") == 0) {
+                    if (strcmp(argv[i], "-g") == 0) {
+                        index_argv_g = i;
+                        has_value = true;
+                        break;
+                    } else if(strcmp(argv[i], "--tgg-conf") == 0) {
                         index_argv_g = i;
                         break;
                     }
@@ -257,7 +263,9 @@ int tgg_init_config(int& argc, char* argv[])
         // 删除 -g 选项
         remove_option_from_argv(argc, argv, index_argv_g);
         // 删除 -g 的值
-        remove_option_from_argv(argc, argv, index_argv_g + 1);
+        if(has_value) {
+            remove_option_from_argv(argc, argv, index_argv_g);
+        }
     }
 
     if (TggConfigure::getInstance()->init(fstack_filename.c_str(), tgg_filename.c_str()) < 0) {

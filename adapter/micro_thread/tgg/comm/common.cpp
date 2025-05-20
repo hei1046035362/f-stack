@@ -1,5 +1,6 @@
 #include <iostream>
 #include <regex>
+#include <sys/time.h>
 #include "common.hpp"
 
 std::string tgg_trim(const std::string& str) {
@@ -71,3 +72,9 @@ std::string uint32_to_hex(uint32_t ip) {
     sprintf(buffer, "%08X", ip);
     return std::string(buffer);
 }
+
+uint64_t get_system_ms(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (tv.tv_sec * 1000ULL + tv.tv_usec / 1000ULL);
+};
