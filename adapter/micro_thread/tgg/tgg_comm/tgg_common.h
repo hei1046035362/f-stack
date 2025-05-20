@@ -5,6 +5,8 @@
 #include <map>
 #include "tgg_struct.h"
 
+#define BW_PRC_HEART_BEAT 5000  // bwprc进程心跳最大5s
+
 void init_endians();
 
 bool big_endian();
@@ -64,6 +66,9 @@ int tgg_get_bw_prcstatus(int prc_id);
 int tgg_set_bw_prcstatus(int prc_id, int status);
 int tgg_clean_bwfdx(int prc_id, int fd);
 
+int tgg_get_valid_bwprc(int bwcount, uint64_t now);
+void tgg_update_bwprc(int prc_id, uint64_t now);
+void tgg_clean_bwprc(int prc_id);
 
 
 

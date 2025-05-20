@@ -102,8 +102,13 @@ int main(int argc, char *argv[])
 	prc_dpdk_eal_init(argc, argv);
 	// mt_init_frame(argc, argv);
 	tgg_process_init();
+	// 启动透传线程
+	init_bwtrans();
 	// init_bwserver();
 	tgg_gw_process(NULL);
+
+	// 主进程结束，开始销毁资源
+	uninit_bwtrans();
 	// uninit_bwserver();
 	// TODO 进程退出时要回收资源
 	tgg_process_uninit();

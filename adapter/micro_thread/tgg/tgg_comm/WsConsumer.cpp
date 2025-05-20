@@ -73,7 +73,7 @@ void WsConsumer::OnClose()
         // 当前选择关闭时直接解绑，防止消息丢失导致连接未解绑
         if (tgg_free_session(this->core_id, this->fd) < 0) {
             RTE_LOG(ERR, USER1, "[%s][%d] free session failed, idx[%d].\r\n", 
-                __FILE__, __LINE__, userid.c_str(tgg_get_cli_cid(this->core_id, this->fd)));
+                __FILE__, __LINE__, tgg_get_cli_cid(this->core_id, this->fd));
         }
         // nlohmann::json obj;
         // CmdUnBindUid ubuid(this->core_id, this->fd, this->data, obj);
