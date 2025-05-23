@@ -120,10 +120,6 @@ int tgg_exit_group(const char* gid, int cid);
 // 获取可用的idx
 int get_valid_idx();
 
-// 通过cid生成发送给客户端的client_id
-// 和服务端交互的是cid(core_id<<24|idx),和客户端交互的是ccid(ip+port+cid)
-std::string get_valid_ccid(int cid);
-
 // 清理队列
 void clean_bw_data(tgg_bw_data* bdata);
 void clean_read_data(tgg_read_data* rdata);

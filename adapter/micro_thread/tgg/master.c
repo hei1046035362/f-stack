@@ -297,9 +297,9 @@ static void tgg_recv(void *arg)
 
 static void tgg_do_send(tgg_write_data* wdata)
 {
-	tgg_fd_list* fd_list = wdata->lst_fd;
-	while (fd_list) {
-		int cli_fd = fd_list->fdid;// 数据传递时fdid存的是fd
+	tgg_fd_id_list* fd_id_list = wdata->lst_fd;
+	while (fd_id_list) {
+		int cli_fd = fd_id_list->fdid;// 数据传递时fdid存的是fd
 		int idx = tgg_get_cli_idx(g_core_id, cli_fd);
 		if(!strncmp((char*)wdata->data, "HTTP", 4)) {// GET请求消息
 			printf("fd:%d idx:%d send data:%s\n", cli_fd, idx, (char*)wdata->data);
@@ -309,10 +309,10 @@ static void tgg_do_send(tgg_write_data* wdata)
 		// 只有未关闭的连接才需要走以下逻辑，已经关闭的连接，不再发送数据
 		if(idx >= 0) {
 			// 新的连接旧的数据就不要发送了，直接清理空间
-			if (idx != fd_list->idx) {// 后台推送给前端时，可能会出现这种情况
+			if (idx != fd_id_list->idx) {// 后台推送给前端时，可能会出现这种情况
 				RTE_LOG(ERR, USER1, "[%s][%d] Idx[%d:%d] Changed, Closing Connection[%d].\n",
-				 __FILE__, __LINE__, idx, fd_list->idx, cli_fd);
-				// tgg_del_idx(fd_list->idx);
+				 __FILE__, __LINE__, idx, fd_id_list->idx, cli_fd);
+				// tgg_del_idx(fd_id_list->idx);
 				// tgg_set_cli_idx(cli_fd, TGG_FD_CLOSING);
 				goto send_client_end;
 			}
@@ -341,9 +341,9 @@ static void tgg_do_send(tgg_write_data* wdata)
 
 send_client_end:
 		wdata->lst_fd = wdata->lst_fd->next;
-		memset(fd_list, 0, sizeof(tgg_fd_list));
-		rte_free(fd_list);
-		fd_list = wdata->lst_fd;
+		memset(fd_id_list, 0, sizeof(tgg_fd_list));
+		rte_free(fd_id_list);
+		fd_id_list = wdata->lst_fd;
 	}
 	// 所有fd都发送完了之后，需要清理并回收内存
 	memset(wdata->data, 0, wdata->data_len);
