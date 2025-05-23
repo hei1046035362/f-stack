@@ -124,13 +124,21 @@ typedef struct st_read_data {
 // list<fd>
 typedef struct st_tgg_fd_list {
     int fdid;// 存储在hash表中的是fdid，在线程或进程之间传递时是fd
-    int idx;
+    // int idx;
     struct st_tgg_fd_list* next;
 } tgg_fd_list;
 
+// list<fd,idx>
+typedef struct st_tgg_fd_idx_list {
+    int fdid;// 存储在hash表中的是fdid，在线程或进程之间传递时是fd
+    int idx;
+    struct st_tgg_fd_idx_list* next;
+} tgg_fd_id_list;
+
+
 // process回传给master处理
 typedef struct st_write_data {
-    tgg_fd_list* lst_fd;            // socket fd(可能存在同时发多个fd)
+    tgg_fd_id_list* lst_fd;            // socket fd(可能存在同时发多个fd)
     int fd_opt;        // 对fd的操作类型(写/关闭)
     int idx;
     unsigned int data_len;

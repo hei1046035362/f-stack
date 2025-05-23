@@ -102,16 +102,17 @@ const char* g_rte_malloc_type = "tgg_dpdk_malloc";
 const char* s_gid_hash_name = "tgg_gid_hash";
 const char* s_uid_hash_name = "tgg_uid_hash";
 const char* s_cid_hash_name = "tgg_cid_hash";
-const char* s_uidgid_hash_name = "tgg_uidgid_hash";
+const char* s_cidgid_hash_name = "tgg_cidgid_hash";
 const char* s_idx_hash_name = "tgg_idx_hash";
 const char* s_bwfdx_hash_name = "tgg_bwfdx_hash";
 const char* s_bwwkkey_hash_name = "tgg_bwwkkey_hash";
 
 
-struct rte_hash *g_gid_hash = NULL;
-struct rte_hash *g_uid_hash = NULL;
-struct rte_hash *g_cid_hash = NULL;
-struct rte_hash *g_uidgid_hash = NULL;
+// 涉及到的所有hash结构
+struct rte_hash *g_gid_hash = NULL;// map[gid] = list{fdx}    每个gid，存放属于这个gid的cid对应的fdx列表
+struct rte_hash *g_uid_hash = NULL;// map[uid] = list{fdx}    每个uid，存放属于这个uid的cid对应的fdx列表
+struct rte_hash *g_cid_hash = NULL;// map[cid] = {fdx}        通过cid查找fd的map
+struct rte_hash *g_cidgid_hash = NULL;// map[cid] = list{gid}    每个cid，存放这个cid所属的gid列表
 
 struct rte_hash *g_idx_hash = NULL;  // 存放已使用的client idx，idx会在指定的数字内循环，直到找到一个可用的
 									//  客户端的连接需要在不同的进程中保留状态码，而fd是可重用的
@@ -119,37 +120,6 @@ struct rte_hash *g_idx_hash = NULL;  // 存放已使用的client idx，idx会在
 // bwserver持有
 struct rte_hash *g_bwfdx_hash = NULL;  // 用于服务端连接的负载均衡，存放正在使用的bwfd, 确定客户端的数据要发送到哪个服务端
 struct rte_hash *g_bwwkkey_hash = NULL;  // 存放正在使用的bw的worker key
-
-// 创建全局唯一ccid时使用的缓冲区，防止频繁申请和释放内存
-char g_ccid_str[21] = {0};  // 8位地址+4位端口+8位idx+1位结束符'\0'
-
-static uint32_t convert_ip2int(const char* ip)
-{
-    struct in_addr ipaddr;
-    if (inet_pton(AF_INET, ip, &ipaddr) != 1) {
-        fprintf(stderr, "Invalid IP address format.\n");
-        exit(-1);
-    }
-    if(big_endian()) {
-    	return ntohl(ipaddr.s_addr);
-    }
-    return ipaddr.s_addr;
-}
-// 初始化ccid的前缀  16进制的8位ip+4位port
-static void init_ccid_prefix(uint32_t ip, ushort port)
-{
-	char* ptr = (char*)g_ccid_str;
-	for (int j = 0; j < 6; j++) {
-		if ( j < 4) {
-			// ip
-			sprintf(ptr, "%02X", (ip >> (24 - j * 8)) & 0xFF);
-		} else {
-			// 端口
-			sprintf(ptr, "%02X", (port >> (8 - (j -4) * 8)) & 0xFF);
-		}
-		ptr += 2;
-	}
-}
 
 // 初始化锁
 static void init_locks()
@@ -162,7 +132,7 @@ static void init_locks()
 		rte_rwlock_init(get_gidfd_lock());
 		rte_rwlock_init(get_uidfd_lock());
 		rte_rwlock_init(get_cidfd_lock());
-		rte_rwlock_init(get_uidgid_lock());
+		rte_rwlock_init(get_cidgid_lock());
 		rte_spinlock_init(get_cli_lock());
 		rte_spinlock_init(get_bwfdx_lock());
 		rte_spinlock_init(get_bwprc_lock());
@@ -401,7 +371,7 @@ void tgg_master_init()
 	g_gid_hash = init_hash(s_gid_hash_name, g_fd_limit, TGG_GID_LEN);
 	g_uid_hash = init_hash(s_uid_hash_name, g_fd_limit, TGG_UID_LEN);
 	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, sizeof(int));
-	g_uidgid_hash = init_hash(s_uidgid_hash_name, g_fd_limit, TGG_UID_LEN);
+	g_cidgid_hash = init_hash(s_cidgid_hash_name, g_fd_limit, sizeof(int));
 	g_idx_hash = init_hash(s_idx_hash_name, g_fd_limit, sizeof(int));
 	g_bwfdx_hash = init_hash(s_bwfdx_hash_name, g_fd_limit, sizeof(int));
 	g_bwwkkey_hash = init_hash(s_bwwkkey_hash_name, g_fd_limit, g_bwwkkey_len);
@@ -447,8 +417,8 @@ void tgg_master_uninit()
 	g_gid_hash = NULL;
 	rte_hash_free(g_cid_hash);
 	g_cid_hash = NULL;
-	rte_hash_free(g_uidgid_hash);
-	g_uidgid_hash = NULL;
+	rte_hash_free(g_cidgid_hash);
+	g_cidgid_hash = NULL;
 	rte_hash_free(g_idx_hash);
 	g_idx_hash = NULL;
 	rte_hash_free(g_bwfdx_hash);
@@ -505,7 +475,7 @@ void tgg_secondary_init()
 	g_gid_hash = get_hash_byname(s_gid_hash_name);
 	g_uid_hash = get_hash_byname(s_uid_hash_name);
 	g_cid_hash = get_hash_byname(s_cid_hash_name);
-	g_uidgid_hash = get_hash_byname(s_uidgid_hash_name);
+	g_cidgid_hash = get_hash_byname(s_cidgid_hash_name);
 	g_idx_hash = get_hash_byname(s_idx_hash_name);
 	g_bwfdx_hash = get_hash_byname(s_bwfdx_hash_name);
 	g_bwwkkey_hash = get_hash_byname(s_bwwkkey_hash_name);
@@ -513,27 +483,11 @@ void tgg_secondary_init()
 
 void tgg_secondary_uninit()
 {
-	// rte_mempool_free(g_mempool_read);
-	// rte_ring_free(g_ring_read);
 	rte_eal_cleanup();
 }
 
 void tgg_cliprc_init()
 {
-	// ip和端口 是固定的，只需要初始化的时候赋值就可以了
-	int gate_ip = convert_ip2int(TggConfigure::getInstance()->get_gateway_addr().c_str());
-	init_ccid_prefix(gate_ip, TggConfigure::getInstance()->get_gateway_port());
-
-	// printf("lcore_count:%d\n", rte_lcore_count());
-	// for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
-	// 	if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
-	// 		continue;
-	// 	}
-
-	// 	char ring_name[RTE_RING_NAMESIZE] = {0};
-	// 	sprintf(ring_name, "%s_%d", cliprc_ring_name_prev, i);
-	// 	g_ring_cliprcs[i] = find_ring(ring_name);
-	// }
 	tgg_secondary_init();
 }
 
@@ -545,11 +499,6 @@ void tgg_cliprc_uninit()
 // bw 消息处理进程处理dpdk操作相关数据结构初始化
 void tgg_bwprc_init(int bwcount)
 {
-	// for (int i = 0; i < bwcount; i++) {
-	// 	char ring_name[RTE_RING_NAMESIZE] = {0};
-	// 	sprintf(ring_name, "%s_%d", bwrcv_ring_name_prev, i);
-	// 	g_ring_bwrcvs[i] = find_ring(ring_name);
-	// }
 	tgg_secondary_init();
 	g_bwprc_zone = find_memzone(bwprc_zone_name);
 }
