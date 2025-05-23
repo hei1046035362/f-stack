@@ -2,6 +2,7 @@
 #include <regex>
 #include <sys/time.h>
 #include "common.hpp"
+#include <iomanip>
 
 std::string tgg_trim(const std::string& str) {
     auto start = str.begin();
@@ -78,3 +79,31 @@ uint64_t get_system_ms(void) {
     gettimeofday(&tv, NULL);
     return (tv.tv_sec * 1000ULL + tv.tv_usec / 1000ULL);
 };
+
+std::string hex2bin(const std::string& hex)
+{
+    if (hex.length() % 2 != 0) {
+        printf("[%s][%d] Hex string must have an even length.", 
+            __FILE__, __LINE__);
+        return "";
+    }
+    std::string binary;
+    for (size_t i = 0; i < hex.length(); i += 2) {
+        // 提取两个字符
+        std::string byteString = hex.substr(i, 2);
+        // 转换成整数
+        char byte = static_cast<char>(strtol(byteString.c_str(), nullptr, 16));
+        binary.push_back(byte); // 添加到结果字符串
+    }
+
+    return binary;
+}
+
+std::string bin2hex(const std::string& input)
+{
+    std::stringstream ss;
+    for (unsigned char c : input) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c);
+    }
+    return ss.str();
+}

@@ -5,6 +5,7 @@
 #include "tgg_comm/tgg_common.h"
 #include "tgg_comm/WsConsumer.h"
 #include "tgg_comm/tgg_bw_cache.h"
+#include "comm/common.hpp"
 #include <chrono>
 extern struct rte_mempool* g_mempool_read;
 extern int g_run;
@@ -50,10 +51,24 @@ static void* deal_trans(void*)
             usleep(10);
             continue;
         }
-        RTE_LOG(ERR, USER1, "[%s][%d] get data:%s.\n", 
-            __FILE__, __LINE__, (char*)(bdata->data));
+        if(bdata->data_len > 3 && !strncmp((char*)bdata->data, "GET", 3)) {// GET请求消息
+            printf("fd:%d idx:%d trans data:%s\n", bdata->fd, 
+                tgg_get_cli_idx(bdata->coreid, bdata->fd), (char*)(bdata->data));
+        } else {// 其他消息
+            if(bdata->data_len == 0) {
+                printf("fd:%d idx:%d trans without data\n", bdata->fd, 
+                    tgg_get_cli_idx(bdata->coreid, bdata->fd));
+            } else {
+                std::string hex = bin2hex(std::string((char*)(bdata->data), bdata->data_len));
+                if(!strncmp(hex.c_str(), "fffe", 4)) {
+                    
+                }
+                printf("fd:%d idx:%d trans data:%s\n", bdata->fd, 
+                    tgg_get_cli_idx(bdata->coreid, bdata->fd), hex.c_str());
+            }
+        }
         int bwfdx = tgg_get_cli_bwfdx(bdata->coreid, bdata->fd);
-        if(bwfdx && tgg_get_bw_prcstatus(bwfdx & 0xf) && tgg_get_bwfdx_status((bwfdx & 0xf), bwfdx >> 8)) {
+        if(bwfdx && tgg_get_bwfdx_status((bwfdx & 0xf), bwfdx >> 8)) {
             // 已经绑定服务端，正常透传
             bdata->bwfdx = bwfdx;
             tgg_enqueue_bwsnd( (bwfdx & 0xf), bdata);
@@ -70,9 +85,6 @@ static void* deal_trans(void*)
                         __FILE__, __LINE__);
                     usleep(10);
                     continue;
-                }
-                if(tgg_get_bw_prcstatus(bwfdx & 0xf)) {
-                    tgg_init_bwfdx_prc(bwfdx & 0xf);
                 }
                 if(bwfdx > 0 && tgg_get_bwfdx_status((bwfdx & 0xf), bwfdx >> 8)) {
                     break;
@@ -92,7 +104,12 @@ static void* deal_trans(void*)
                 // 负载++
                 tgg_add_bwfdx_load(bwfdx & 0xf, bwfdx >> 8);
                 bdata->bwfdx = bwfdx;
-                tgg_enqueue_bwsnd( (bwfdx & 0xf), bdata);
+                if (tgg_enqueue_bwsnd( (bwfdx & 0xf), bdata) < 0) {
+                    // TODO 判断进程是否还在，不在了的话要做些什么操作
+                    RTE_LOG(ERR, USER1, "[%s][%d] enque bwsnd failed, bwfdx:%d.\n", 
+                        __FILE__, __LINE__, bwfdx);
+                    clean_bw_data(bdata);
+                }
             }
         }
     }

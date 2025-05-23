@@ -10,6 +10,8 @@
 #include "tgg_transport.h"
 #include "tgg_struct.h"
 #include "tgg_comm/tgg_conf.h"
+#include "comm/common.hpp"
+#include <rte_log.h>
 
 int WsConsumer::ConsumerData(void* data)
 {
@@ -20,6 +22,9 @@ int WsConsumer::ConsumerData(void* data)
         // _CleanAndClose();
         return 0;
     }
+    this->fd = rdata->fd;
+    this->data = data;
+    this->core_id = rdata->coreid;
     if (rdata->fd_opt & FD_CLOSE) {
         // unbind bw connection
         _CleanAndClose();
@@ -31,9 +36,6 @@ int WsConsumer::ConsumerData(void* data)
     }
 
     InitWebsocket(rdata->fd, tgg_get_cli_authorized(rdata->coreid, rdata->fd));
-    this->fd = rdata->fd;
-    this->data = data;
-    this->core_id = core_id;
     _cid = tgg_get_cli_cid(core_id, fd);
     _uid = tgg_get_cli_uid(core_id, fd);
 
@@ -68,17 +70,6 @@ bool WsConsumer::ConnectionValid(int core_id, int fd, void* data)
 
 void WsConsumer::OnClose()
 {// 子类继承后要执行clean_buffer清理缓存
-    if (tgg_get_cli_authorized(this->core_id, this->fd) == AUTH_TYPE_HANDLESHAKED) {
-        // TODO 构造消息让gwbwrcv去解绑还是就在这里解绑？  
-        // 当前选择关闭时直接解绑，防止消息丢失导致连接未解绑
-        if (tgg_free_session(this->core_id, this->fd) < 0) {
-            RTE_LOG(ERR, USER1, "[%s][%d] free session failed, idx[%d].\r\n", 
-                __FILE__, __LINE__, tgg_get_cli_cid(this->core_id, this->fd));
-        }
-        // nlohmann::json obj;
-        // CmdUnBindUid ubuid(this->core_id, this->fd, this->data, obj);
-        // ubuid.ExecCmd();// 解绑，从hash表中删除连接
-    }
     // std::string data = "\x88\x02\x03\xe8\x00\x00";// 关闭websocket
     // OnSend(data, FD_WRITE|FD_CLOSE);
     SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
@@ -93,7 +84,9 @@ void WsConsumer::OnConnect()
     tgg_set_cli_cid(this->core_id, this->fd, cid);
     // std::string ccid = get_valid_ccid(cid);
     this->_cid = cid;
-    Send2Server(this->core_id, this->fd, "", FD_NEW);
+    if(Send2Server(this->core_id, this->fd, "", FD_NEW) == NO_BW_AVALIABLE) {
+        OnClose();        
+    }
 }
 
 // 检查请求是否符合tgg的要求，不符合直接断开连接
@@ -207,8 +200,10 @@ void WsConsumer::OnHandShake(const std::string& response, HttpRequest& req)
     std::string result = data.dump();
     RTE_LOG(ERR, USER1, "[%s][%d] OnHandShake:%s.\r\n", 
         __FILE__, __LINE__, result.c_str());
-
-    Send2Server(this->core_id, this->fd, result, FD_HANDLESHAKE);// 通知服务端websocket 握手完成
+    // 通知服务端websocket 握手完成
+    if (Send2Server(this->core_id, this->fd, result, FD_HANDLESHAKE) == NO_BW_AVALIABLE) {
+        OnClose();
+    };
 }
 
 void WsConsumer::OnPing(const std::string& response)
@@ -223,98 +218,15 @@ void WsConsumer::OnPong(const std::string& response)
 
 void WsConsumer::OnMessage(const std::string& msg)
 {
-    Send2Server(this->core_id, this->fd, msg, FD_WRITE);
-
-
-
-
-// // TODO 不解析消息，直接转发给bw
-//     if(msg.empty()) {
-//         RTE_LOG(ERR, USER1, "[%s][%d] msg can't be empty.", __FILE__, __LINE__);
-//         goto OnMessageEnd;
-//     }
-//     try {
-//         std::string msg_send;
-//         std::string message;
-//         if(message_unpack(msg, message) < 0) {
-//             RTE_LOG(ERR, USER1, "[%s][%d] message_unpack msg failed,data:%s\r\n", 
-//                 __FILE__, __LINE__, Encrypt::bin2hex(msg).c_str());
-//             goto OnMessageEnd;
-//         }
-//         nlohmann::json jmsg = nlohmann::json::parse(message);
-//         int cmd = jmsg["cmd"].get<std::int32_t>();
-//         int compress = jmsg["compressFormat"].get<std::int32_t>();
-//         printf("transport msg:%s\n", message.c_str());
-//         switch(jmsg["cmd"].get<std::int32_t>()) {
-//             case 0:// 心跳
-//                 if (message_pack(cmd , 1, 1, compress, "", msg_send)) {
-//                     RTE_LOG(ERR, USER1, "[%s][%d] message_pack msg failed.\r\n", 
-//                         __FILE__, __LINE__);
-//                         goto OnMessageEnd;
-//                 }
-//                 printf("send heart beat:%s\n", Encrypt::bin2hex(msg_send).c_str());
-//                 break;
-//             case 1:// 通信消息
-//                 {
-//                     printf("nomal msg\n");
-//                     nlohmann::json jbody = nlohmann::json::parse(jmsg["body"].get<std::string>());
-//                     std::string token = jbody["token"];
-//                     if (token.empty()) {
-//                         RTE_LOG(ERR, USER1, "[%s][%d] token can't be empty.", __FILE__, __LINE__);
-//                         goto OnMessageEnd;
-//                     }
-//                     Encrypt encryptor = GetEncryptor();
-//                     std::string decryptor = encryptor.Aes128Decrypt(token);
-//                     if (decryptor.empty()) {
-//                         RTE_LOG(ERR, USER1, "[%s][%d] token decrypted error.", __FILE__, __LINE__);
-//                         goto OnMessageEnd;
-//                     }
-//                     nlohmann::json jtoken = nlohmann::json::parse(decryptor);
-//                     std::string s_uid = std::to_string(jtoken["user_id"].get<std::uint64_t>());
-//                     s_uid.resize(20);
-//                     TODO uid和cid绑定
-//                     CmdBindUid buid(this->fd, this->data, jtoken);
-//                     if(buid.ExecCmd() == -1) {
-//                         RTE_LOG(ERR, USER1, "[%s][%d] add uid[%s] failed, closing connection...",
-//                             __FILE__, __LINE__, s_uid.c_str());
-//                         _CleanAndClose();
-//                         return;
-//                     }
-//                     char resArray[32] = {0};
-//                     std::string res = "bind ";
-//                     res += s_uid;
-//                     res += "\n";
-//                     // sprintf(resArray, "bind %lu\n", jtoken["user_id"].get<std::uint64_t>());
-//                     // // std::string res = std::string(resArray, strlen(resArray));
-//                     tgg_set_cli_authorized(this->fd, AUTH_TYPE_TOKENCHECKED);
-//                     if (message_pack(jmsg["cmd"].get<std::int32_t>() , 1 , 0,
-//                         jmsg["compressFormat"], res, msg_send) < 0) {
-//                         // 数据封包失败
-//                         RTE_LOG(ERR, USER1, "[%s][%d] message_unpack msg failed,data:%s\r\n", 
-//                             __FILE__, __LINE__, res.c_str());
-//                         goto OnMessageEnd;
-//                     }
-//                 }
-//                 break;
-//             default:
-//                 if (message_pack(0,1,0,jmsg["compressFormat"],"message error~\n", msg_send) < 0) {
-//                     RTE_LOG(ERR, USER1, "[%s][%d] message_pack msg failed.\r\n", 
-//                         __FILE__, __LINE__);
-//                         goto OnMessageEnd;
-//                 }
-//                 break;
-//         }
-//         msg_send = std::string(vec.begin(), vec.end());
-//         SendData(msg_send, FD_WRITE);
-//         return;
-//     } catch (const nlohmann::detail::parse_error& e) {
-//         RTE_LOG(ERR, USER1, "[%s][%d] parse json error:%s.", __FILE__, __LINE__, e.what());
-//     } catch (const nlohmann::json::exception& e) {
-//     // 捕获其他任何未预料到的异常
-//         RTE_LOG(ERR, USER1, "[%s][%d] Exception catched:%s.", __FILE__, __LINE__, e.what());
-//     }
-// OnMessageEnd:
-//     _CleanData();
+    int cli_status = tgg_get_cli_authorized(this->core_id, this->fd);
+    if(cli_status != AUTH_TYPE_HANDLESHAKED) {
+        RTE_LOG(ERR, USER1, "[%s][%d] cli[%d] status[%d] is not handleshaked, msg[%s] droped.\n", 
+            __FILE__, __LINE__, this->_cid, cli_status, msg.c_str());
+        return;
+    }
+    if(Send2Server(this->core_id, this->fd, msg, FD_WRITE) == NO_BW_AVALIABLE) {
+        OnClose();
+    };
 }
 
 void WsConsumer::OnSend(const std::string& msg, int fd_opt)
@@ -326,7 +238,7 @@ void WsConsumer::OnSend(const std::string& msg, int fd_opt)
         return;
     }
 
-    std::cout << "OnSend:" << Encrypt::bin2hex(msg) << std::endl;
+    std::cout << "OnSend fd[" << this->fd << "]idx[" << _idx << "]:" << bin2hex(msg) << std::endl;
     if (enqueue_data_single_fd(this->core_id, msg, this->fd, _idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
         RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%d,uid:%s,opt:%d",
          __FILE__, __LINE__, _cid, _uid.c_str(), fd_opt);

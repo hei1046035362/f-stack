@@ -168,6 +168,18 @@ void *write_routine( void *arg )
             clean_bw_data(bdata);
             continue;
         }
+        // TODO cid的加入和删除 最佳的位置是在cliprc中校验之后，然而rte_hash在多线程环境中增加元素会崩溃，
+        // 所以暂时放在这里，放在这里也没有问题，因为没有跟bw发送过connect消息的连接，后续也用不上
+        if (bdata->fd_opt & FD_NEW) {
+            int fdid = (bdata->fd << 8) | bdata->coreid;
+            int cid = ((bdata->coreid << 24) | tgg_get_cli_idx(bdata->coreid, bdata->fd));
+            // 添加到 hash<cid, fd>
+            if (tgg_add_cid(cid, fdid) < 0) {
+                RTE_LOG(ERR, USER1, "[%s][%d] add cid[%d] fdid[%d] failed.\n", __FILE__, __LINE__, cid, fdid);
+                clean_bw_data(bdata);
+                continue;
+            }
+        }
         std::string result;
         tgg_bw_protocal header = {
             .pack_len = (unsigned int)sizeof(tgg_bw_protocal) + bdata->data_len,

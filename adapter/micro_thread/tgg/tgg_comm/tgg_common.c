@@ -30,8 +30,6 @@ extern struct rte_mempool* g_mempool_bwrcv;
 extern char g_ccid_str[21];  // 8位地址+4位端口+8位idx+1位结束符'\0'
 
 tgg_stats g_tgg_stats = {0};
-
-
 static bool s_big_endian = false;
 
 union EndiannessTester {
@@ -100,7 +98,7 @@ void tgg_close_cli(int core_id, int fd)
 	memset(cli->uid, 0, sizeof(cli->uid));
 	memset(cli->reserved, 0, sizeof(cli->reserved));
 	cli->idx = TGG_FD_CLOSED;
-	cli->authorized = 0;
+	cli->authorized = AUTH_TYPE_UNKNOWN;
 	cli->status |= FD_STATUS_CLOSING | FD_STATUS_CLOSED;
 }
 
@@ -409,6 +407,7 @@ void tgg_close_bw_session(int prc_id, int fd)
 		std::string workerkey = tgg_get_bwfdx_workerkey(prc_id, fd);
 		tgg_del_bwwkkey(workerkey.c_str());
 	}
+	printf("[%s][%d]close bw session prc:[%d] fd:[%d].\n", __FILE__, __LINE__, prc_id, fd);
 	tgg_clean_bwfdx(prc_id, fd);
 }
 
@@ -770,20 +769,20 @@ int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, in
 			__FILE__, __LINE__);
 		return -1;
 	}
-	int idx = 10;
-	while (tgg_enqueue_write(core_id, wdata) < 0 && idx-- > 0 ) {
+	int count = 10;
+	while (tgg_enqueue_write(core_id, wdata) < 0 && count-- > 0 ) {
 		usleep(10);
 	}
 	static int loop_times_sndcli = 0;
 	// 前期调试要看是否经常出现重试
-	if (idx < 9) {
+	if (count < 9) {
 		++loop_times_sndcli;
 		if(loop_times_sndcli % 100 == 0) {
 			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.",
 				__FILE__, __LINE__, loop_times_sndcli);
 		}
 	}
-	if (idx <= 0) {
+	if (count <= 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d] Enqueue write data failed.", 
 			__FILE__, __LINE__);
 		return -1;
