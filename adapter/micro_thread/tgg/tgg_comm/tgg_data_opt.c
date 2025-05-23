@@ -10,7 +10,7 @@ extern int g_fd_limit;
 // 执行bind   cid bind uid的时候需要执行这个函数
 int tgg_bind_session(int core_id, int fd, const char* uid, int cid)
 {
-	int status = tgg_get_cli_status(core_id, fd);
+	// int status = tgg_get_cli_status(core_id, fd);
 	int idx = tgg_get_cli_idx(core_id, fd);
 	int fdid = (fd << 8) & core_id;
 	if (idx < 0) {
@@ -22,50 +22,46 @@ int tgg_bind_session(int core_id, int fd, const char* uid, int cid)
 		RTE_LOG(ERR, USER1, "[%s][%d] uid[%s] and cid[%d] should not be empty.\n", __FILE__, __LINE__, uid, cid);
 		return -1;
 	}
-	// 添加到 hash<gid, list<fd>>
-	std::list<std::string> lstgid;
-	// 查找uid所在的所有的群组
-	if (tgg_get_gidsbyuid(uid, lstgid) < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] uid[%s] not exist.\n", __FILE__, __LINE__, uid);
-		return -1;
-	}
-	std::list<std::string>::iterator itgid = lstgid.begin();
-	while(itgid != lstgid.end()) {
-	// 新增连接时需要对g_gid_hash进行的操作
-		if (tgg_add_gid((*itgid).c_str(), fdid, idx) < 0){
-			RTE_LOG(ERR, USER1, "[%s][%d] add fdid[%d] idx[%d] for gid[%s] failed.\n",
-			 __FILE__, __LINE__, fdid, idx, (*itgid).c_str());
-			goto bind_end;
-		}
-		itgid++;
-	}
+	// // 添加到 hash<gid, list<fd>>
+	// std::list<std::string> lstgid;
+	// // 查找uid所在的所有的群组
+	// if (tgg_get_gidsbyuid(uid, lstgid) < 0) {
+	// 	RTE_LOG(ERR, USER1, "[%s][%d] uid[%s] not exist.\n", __FILE__, __LINE__, uid);
+	// 	return -1;
+	// }
+	// std::list<std::string>::iterator itgid = lstgid.begin();
+	// while(itgid != lstgid.end()) {
+	// // 新增连接时需要对g_gid_hash进行的操作
+	// 	if (tgg_add_gid((*itgid).c_str(), fdid, idx) < 0){
+	// 		RTE_LOG(ERR, USER1, "[%s][%d] add fdid[%d] idx[%d] for gid[%s] failed.\n",
+	// 		 __FILE__, __LINE__, fdid, idx, (*itgid).c_str());
+	// 		goto bind_end;
+	// 	}
+	// 	itgid++;
+	// }
 	// 添加到 hash<uid, list<fd>>
 	if (tgg_add_uid(uid, fdid, idx) < 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d] add uid[%s] fdid[%d] failed.\n", __FILE__, __LINE__, uid, fd);
-		goto bind_end;
-	}
-	// 添加到 hash<cid, fd>
-	if (tgg_add_cid(cid, fdid) < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] add cid[%d] fdid[%d] failed.\n", __FILE__, __LINE__, cid, fd);
-		goto bind_end;
+		return -1;
+		// goto bind_end;
 	}
 	tgg_set_cli_uid(core_id, fd, uid);
 	// 三个hash表都添加完成之后，就设置为已连接
-	status |= FD_STATUS_CONNECTED;
-	tgg_set_cli_status(core_id, fd, status);
+	// status |= FD_STATUS_CONNECTED;
+	// tgg_set_cli_status(core_id, fd, status);
 	return 0;
 
-bind_end:
-	itgid = lstgid.begin();
-	while(itgid != lstgid.end()) {
-		tgg_del_fd4gid((*itgid).c_str(), fdid, idx);
-		itgid++;
-	}
-	tgg_del_fd4uid(uid, fdid, idx);
-	tgg_del_cid(cid);
-	return -1;
+// bind_end:
+// 	itgid = lstgid.begin();
+// 	while(itgid != lstgid.end()) {
+// 		tgg_del_fd4gid((*itgid).c_str(), fdid, idx);
+// 		itgid++;
+// 	}
+// 	tgg_del_fd4uid(uid, fdid, idx);
+// 	return -1;
 }
 
+// 关闭一个客户端连接时要触发的释放内容
 int tgg_free_session(int core_id, int fd)
 {
 	// int status = tgg_get_cli_status(fd);
@@ -80,7 +76,7 @@ int tgg_free_session(int core_id, int fd)
 		return 0;
 	}
 	std::string uid = tgg_get_cli_uid(core_id, fd);
-	int cid = tgg_get_cli_cid(core_id, fd);
+	// int cid = tgg_get_cli_cid(core_id, fd);
 	int fdid = (fd << 8) & core_id;
 	if(!uid.empty()) {
 		// 从 hash<gid, list<fd>>中删除
@@ -96,10 +92,10 @@ int tgg_free_session(int core_id, int fd)
 		// 从 hash<uid, list<fd>>中删除fd
 		tgg_del_fd4uid(uid.c_str(), fdid, idx);
 	}
-	// 从hash<cid, fd>中删除
-	if(cid > 0) {
-		tgg_del_cid(cid);
-	}
+	// // 从hash<cid, fd>中删除
+	// if(cid > 0) {
+	// 	tgg_del_cid(cid);
+	// }
 
 	// 清空cli信息  这个信息在由master close以后再清理，这里只清理hash表，由process调用
 	// tgg_close_cli(fd);

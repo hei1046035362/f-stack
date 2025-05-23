@@ -102,6 +102,13 @@ int main(int argc, char *argv[])
 	prc_dpdk_eal_init(argc, argv);
 	// mt_init_frame(argc, argv);
 	tgg_process_init();
+	int fdid = 123;
+	int cid = 321;
+    // 添加到 hash<cid, fd>
+    if (tgg_add_cid(cid, fdid) < 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] add cid[%d] fdid[%d] failed.\n", __FILE__, __LINE__, cid, fdid);
+    }
+    printf("[%s][%d] add cid[%d] fdid[%d] success.\n", __FILE__, __LINE__, cid, fdid);
 	// 启动透传线程
 	init_bwtrans();
 	// init_bwserver();

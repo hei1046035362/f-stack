@@ -70,7 +70,7 @@ clean:
 
 
 MASTER_OBJ = dpdk_init.o master.o tgg_comm/tgg_common.o tgg_comm/tgg_bw_cache.o \
-			tgg_comm/tgg_lock.o comm/RWIni.o tgg_comm/tgg_conf.o comm/common.o
+			tgg_comm/tgg_lock.o comm/RWIni.o tgg_comm/tgg_conf.o comm/common.o tgg_comm/tgg_data_opt.o
 
 
 CLIPRC_OBJ = cliprc.o dpdk_init.o tgg_comm/tgg_bw_cache.o \
