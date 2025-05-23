@@ -1,3 +1,4 @@
+#pragma once
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -6,6 +7,7 @@
 #include "cmd/GatewayProtocal.h"
 #include "comm/Serialize.hpp"
 #include <type_traits>
+#include "comm/common.hpp"
 
 template<typename T, typename = typename std::enable_if<
     std::is_same<T, bool>::value ||
@@ -42,9 +44,9 @@ public:
         result.resize(bwdata->pack_len);
         // 拼接ext_data和body
         if (bwdata->ext_len > 0) {
-            result.replace(sizeof(tgg_bw_protocal), bwdata->ext_len, extend_data.c_str());
+            result.replace(sizeof(tgg_bw_protocal), bwdata->ext_len, extend_data);
         }
-        result.replace(sizeof(tgg_bw_protocal) + bwdata->ext_len, body.size(), body.c_str());
+        result.replace(sizeof(tgg_bw_protocal) + bwdata->ext_len, body.size(), body);
 
         // bwdata->local_ip = inet_addr(local_ip.c_str());
         // bwdata->client_ip = inet_addr(client_ip.c_str());
@@ -74,12 +76,16 @@ public:
         if(body_len > 0) {
             std::string body(bwdata->data + bwdata->ext_len, // body的起始位置
                              body_len); // body的长度
-            if (bwdata->flag & FLAG_BODY_IS_SCALAR) {
-                bwjdata["body"] = body.c_str();
-            } else {
-                // 这里简单模拟反序列化，实际可能需要更安全可靠的处理
-                bwjdata["body"] = deserialize(body).c_str();
-            }
+            // if (bwdata->flag & FLAG_BODY_IS_SCALAR) {
+            //} else 
+            // if(!bwdata->flag) {
+            //     // 这里简单模拟反序列化，实际可能需要更安全可靠的处理
+            //     nlohmann::json jbody = Php_UnSerialize(body);
+            //     bwjdata["body"] = jbody.dump();
+            // } else {
+            // body 有三种类型，php格式的json，普通json，fffe开头的透传数据，这里只存二进制，后续再解析
+                bwjdata["body"] = bin2hex(body);// json无法直接存储二进制数据，后续执行命令的时候再转回来
+            // }
         } else {
             bwjdata["body"] = "";
         }

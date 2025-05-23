@@ -13,6 +13,10 @@ bool is_ipport_format(const std::string& str);
 
 void split_string(const std::string& str, char delimiter, std::vector<std::string>& result);
 
+std::string hex2bin(const std::string& hex);
+
+std::string bin2hex(const std::string& input);
+
 // 函数：将无符号整数转换为十六进制字符串
 std::string uint32_to_hex(uint32_t ip);
 

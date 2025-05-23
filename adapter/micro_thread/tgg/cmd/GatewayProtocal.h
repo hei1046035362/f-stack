@@ -77,13 +77,13 @@ enum GatewayProtocal {
     CMD_BATCH_GET_CLIENT_COUNT_BY_GROUP = 28,
 
     // worker连接gateway事件
-    CMD_WORKER_CONNECT = 200,
+    CMD_WORKER_CONNECT = 202,
 
     // 心跳
     CMD_PING = 201,
 
     // GatewayClient连接gateway事件
-    CMD_GATEWAY_CLIENT_CONNECT = 202,
+    CMD_GATEWAY_CLIENT_CONNECT = 200,
 
     // 根据client_id获取session
     CMD_GET_SESSION_BY_CLIENT_ID = 203,

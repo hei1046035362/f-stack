@@ -103,6 +103,7 @@ void tgg_process_init()
 
 void tgg_process_uninit()
 {
+    clean_queue_data();
     tgg_clean_bwprc(g_prc_id);
 	tgg_bwprc_uninit(TggConfigure::getInstance()->get_bwsvr_count());
 }
