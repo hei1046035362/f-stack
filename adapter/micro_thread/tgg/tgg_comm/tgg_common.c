@@ -27,7 +27,6 @@ extern struct rte_ring* g_ring_bwsnds[MAX_LCORE_COUNT];
 extern struct rte_mempool* g_mempool_read;
 extern struct rte_mempool* g_mempool_write;
 extern struct rte_mempool* g_mempool_bwrcv;
-extern char g_ccid_str[21];  // 8位地址+4位端口+8位idx+1位结束符'\0'
 
 tgg_stats g_tgg_stats = {0};
 static bool s_big_endian = false;
@@ -79,17 +78,6 @@ int get_valid_idx()
 	return current_id_atomic;
 }
 
-std::string get_valid_ccid(int cid)
-{
-	std::string scid(g_ccid_str, TGG_IPPORT_LEN);
-    std::string rsp;
-    rsp.resize(sizeof(int));
-    memcpy(const_cast<char* >(rsp.data()), &cid, sizeof(int));
-    return scid + rsp;
-	// return ((prc_id << 24) | idx);
-}
-
-
 void tgg_close_cli(int core_id, int fd)
 {
 	SpinLock lock(get_cli_lock());
@@ -99,7 +87,6 @@ void tgg_close_cli(int core_id, int fd)
 	memset(cli->reserved, 0, sizeof(cli->reserved));
 	cli->idx = TGG_FD_CLOSED;
 	cli->authorized = AUTH_TYPE_UNKNOWN;
-	cli->status |= FD_STATUS_CLOSING | FD_STATUS_CLOSED;
 }
 
 int tgg_init_cli(int core_id, int fd, char* ip_str, uint32_t ip, ushort port)
@@ -120,7 +107,6 @@ int tgg_init_cli(int core_id, int fd, char* ip_str, uint32_t ip, ushort port)
 	memcpy(cli->ip_str, ip_str, INET_ADDRSTRLEN);
 	cli->ip = ip;
 	cli->port = port;
-	cli->status = FD_STATUS_READYFORCONNECT;
 	return 0;
 }
 
@@ -706,12 +692,12 @@ tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& m
 			__FILE__, __LINE__, ret);
 		return NULL;
 	}
-	tgg_fd_list* tail = NULL;
-	tgg_fd_list* pcur = NULL;
-	tgg_fd_list* head = NULL;
+	tgg_fd_id_list* tail = NULL;
+	tgg_fd_id_list* pcur = NULL;
+	tgg_fd_id_list* head = NULL;
 	std::map<int, int>::iterator it = mapfdidx.begin();
 	while (it != mapfdidx.end()) {
-		pcur = (tgg_fd_list*)dpdk_rte_malloc(sizeof(tgg_fd_list));
+		pcur = (tgg_fd_id_list*)dpdk_rte_malloc(sizeof(tgg_fd_id_list));
 		if (!pcur) {
             // TODO 如果只有一个失败了，其他的是不是可以继续发送，而不是全部都不发了
 			goto add_data_failed;

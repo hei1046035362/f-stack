@@ -13,7 +13,7 @@ typedef struct  st_lock_cache {
     rte_rwlock_t gidfd_lock;    // hash<gid, fd>的操作锁
     rte_rwlock_t uidfd_lock;    // hash<uid, fd>的操作锁
     rte_rwlock_t cidfd_lock;    // hash<cid, fd>的操作锁
-    rte_rwlock_t uidgid_lock;   // hash<uid, gid>的操作锁
+    rte_rwlock_t cidgid_lock;   // hash<uid, gid>的操作锁
     rte_spinlock_t cli_lock;    // array[fd,{cid,uid,status,reserved[128]}]的操作锁
                                     // TODO 多个进程共用一把锁，对性能会有一定影响，需要考虑优化
     rte_spinlock_t bwfdx_lock;    // bwfdx 操作锁
@@ -28,7 +28,7 @@ rte_rwlock_t* get_idxhsh_lock();
 rte_rwlock_t* get_gidfd_lock();
 rte_rwlock_t* get_uidfd_lock();
 rte_rwlock_t* get_cidfd_lock();
-rte_rwlock_t* get_uidgid_lock();
+rte_rwlock_t* get_cidgid_lock();
 rte_spinlock_t* get_cli_lock();
 rte_spinlock_t* get_bwfdx_lock();
 rte_atomic32_t* get_idx_lock();
