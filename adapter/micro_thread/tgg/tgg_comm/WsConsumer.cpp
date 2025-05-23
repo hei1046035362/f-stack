@@ -82,7 +82,6 @@ void WsConsumer::OnConnect()
     tgg_set_cli_authorized(this->core_id, this->fd, AUTH_TYPE_CLIENTCONNECT);
     int cid = ((this->core_id << 24) | this->_idx);
     tgg_set_cli_cid(this->core_id, this->fd, cid);
-    // std::string ccid = get_valid_ccid(cid);
     this->_cid = cid;
     if(Send2Server(this->core_id, this->fd, "", FD_NEW) == NO_BW_AVALIABLE) {
         OnClose();        
