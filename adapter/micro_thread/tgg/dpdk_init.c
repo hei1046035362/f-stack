@@ -326,8 +326,9 @@ struct rte_hash* init_hash(const char* hash_name, uint32_t ent_cnt, uint32_t key
 		.socket_id = (int)rte_socket_id(),
 		.extra_flag = RTE_HASH_EXTRA_FLAGS_EXT_TABLE | 
 						RTE_HASH_EXTRA_FLAGS_MULTI_WRITER_ADD | 
-						RTE_HASH_EXTRA_FLAGS_RW_CONCURRENCY_LF |
-						RTE_HASH_EXTRA_FLAGS_NO_FREE_ON_DEL, // 无锁并发+扩展桶
+						RTE_HASH_EXTRA_FLAGS_TRANS_MEM_SUPPORT
+						//RTE_HASH_EXTRA_FLAGS_RW_CONCURRENCY_LF |
+						//RTE_HASH_EXTRA_FLAGS_NO_FREE_ON_DEL, // 无锁并发+扩展桶
 	};
 
 	_hash = rte_hash_create(&hash_params);
@@ -336,7 +337,7 @@ struct rte_hash* init_hash(const char* hash_name, uint32_t ent_cnt, uint32_t key
 			"Failed to create hash table[%s]:%s:%d\n",
 			hash_name, __FILE__, __LINE__);
 	}
-	RTE_LOG(INFO, USER1, "New hash created: %s\n",
+	RTE_LOG(ERR, USER1, "New hash created: %s\n",
 		hash_name);
 	return _hash;
 }
@@ -399,7 +400,7 @@ void tgg_master_init()
 	g_mempool_bwrcv = make_mempool(s_pool_bwrcv_name, s_mempool_size, s_mempool_bwrcv_cache);
 	g_gid_hash = init_hash(s_gid_hash_name, g_fd_limit, TGG_GID_LEN);
 	g_uid_hash = init_hash(s_uid_hash_name, g_fd_limit, TGG_UID_LEN);
-	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, TGG_CID_LEN);
+	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, sizeof(int));
 	g_uidgid_hash = init_hash(s_uidgid_hash_name, g_fd_limit, TGG_UID_LEN);
 	g_idx_hash = init_hash(s_idx_hash_name, g_fd_limit, sizeof(int));
 	g_bwfdx_hash = init_hash(s_bwfdx_hash_name, g_fd_limit, sizeof(int));
@@ -492,7 +493,7 @@ void init_multi_for_secondary()
 
 void tgg_secondary_init()
 {
-	RTE_LOG(INFO, USER1, "Init dpdk secodary for tgg...\n");
+	RTE_LOG(ERR, USER1, "Init dpdk secodary for tgg...\n");
 	// 100W个FD  32M的空间
 	init_multi_for_secondary();
 	g_lock_zone = find_memzone(s_lock_zone_name);

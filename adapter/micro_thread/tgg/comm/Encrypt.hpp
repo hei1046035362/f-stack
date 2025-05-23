@@ -6,7 +6,6 @@
 #include <openssl/evp.h>
 #include <openssl/ssl.h>
 #include <openssl/sha.h>
-#include <iomanip>
 #include <rte_log.h>
 
 // 初始化OpenSSL库
@@ -21,10 +20,6 @@ public:
     ~Encrypt(){}
 
 public:
-    static std::string hex2bin(const std::string& hex);
-
-    static std::string bin2hex(const std::string& input);
-
     static std::string sha1(const std::string& input);
 
     // 显示sha1的值

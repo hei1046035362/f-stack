@@ -1,7 +1,8 @@
 #include <rte_log.h>
 #include <map>
+#include <iostream>
 #include "tgg_transport.h"
-#include "comm/Encrypt.hpp"
+#include "comm/common.hpp"
 #include "tgg_comm/tgg_bw_cache.h"
 #include "tgg_bwcomm.h"
 #include "tgg_comm/tgg_common.h"
@@ -34,7 +35,7 @@ void Send2Client(int cid, const std::string& data, int fd_opt)
         return;
     }
 
-    std::cout << "send data["<< cid <<"]:" << Encrypt::bin2hex(sendData) << std::endl;
+    std::cout << "send data["<< cid <<"]:" << bin2hex(sendData) << std::endl;
     if (enqueue_data_single_fd(core_id, sendData, fd, idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
         RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%d,opt:%d",
          __FILE__, __LINE__, cid, fd_opt);
@@ -106,7 +107,7 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
             return;
         }
 
-        std::cout << "send group data:" << Encrypt::bin2hex(sendData) << std::endl;
+        std::cout << "send group data:" << bin2hex(sendData) << std::endl;
         if (enqueue_data_batch_fd(coreidFds.first, sendData, mapFdidx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
             RTE_LOG(ERR, USER1, "[%s][%d] Batch Enqueue data Failed\n",
                __FILE__, __LINE__);
@@ -114,10 +115,17 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
     }
 }
 
-void Send2Server(int core_id, int fd, const std::string& data, int fd_opt)
+int Send2Server(int core_id, int fd, const std::string& data, int fd_opt)
 {
-    if (enqueue_data_trans(core_id, fd, data, fd_opt) < 0) {// 函数内部会循环尝试发送10次
-        RTE_LOG(ERR, USER1, "[%s][%d] Send data to server Failed\n",
+    if(tgg_get_bwfdx_count() <= 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] Send data to server Failed: no bw found.\n",
                __FILE__, __LINE__);
+        return NO_BW_AVALIABLE;
     }
+    if (enqueue_data_trans(core_id, fd, data, fd_opt) < 0) {// 函数内部会循环尝试发送10次
+        RTE_LOG(ERR, USER1, "[%s][%d] Send data to server Failed.\n",
+               __FILE__, __LINE__);
+        return SEND_FAILED;
+    }
+    return SEND_SUCCESS;
 }
