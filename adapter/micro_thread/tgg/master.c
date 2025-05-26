@@ -274,10 +274,10 @@ static void tgg_recv(void *arg)
 	// memset(cli->uid, 0, sizeof(cli->uid));
 	// status = FD_STATUS_CLOSING;
 	// tgg_set_cli_status(g_core_id, cli_fd, status);
-	// 为确保fd正确关闭,对应的内存正确释放,就必须要入队列一个关闭的操作
-	// if (ret)  // 不是对端主动关闭的情况，服务端要主动发送关闭消息
-	tgg_recv_enqueue(cli_fd, NULL, 0, FD_CLOSE);// 是不是对端主动发送的，都要通知，
-
+	if (tgg_get_cli_idx(g_core_id, cli_fd) != TGG_FD_CLOSING) { // 不是对端主动关闭的情况，服务端要主动发送关闭消息
+		// 为确保fd正确关闭,对应的内存正确释放,就必须要入队列一个关闭的操作
+		tgg_recv_enqueue(cli_fd, NULL, 0, FD_CLOSE);// 是不是对端主动发送的，都要通知，
+	}
 	RTE_LOG(INFO, USER1, "[%s][%d] wait client[%d] close...\n", __FILE__, __LINE__, cli_fd);
 	// 等待连接在缓存中的数据被消费完才能关闭
 	int index = 1000;// TODO 防止因process宕机丢包导致无法停止的问题，10s这个时间待商榷
@@ -307,7 +307,7 @@ static void tgg_do_send(tgg_write_data* wdata)
 	    	printf("fd:%d idx:%d send data:%s\n", cli_fd, idx, bin2hex(std::string((char*)wdata->data, wdata->data_len)).c_str());
 		}
 		// 只有未关闭的连接才需要走以下逻辑，已经关闭的连接，不再发送数据
-		if(idx >= 0) {
+		if(idx > 0) {
 			// 新的连接旧的数据就不要发送了，直接清理空间
 			if (idx != fd_id_list->idx) {// 后台推送给前端时，可能会出现这种情况
 				RTE_LOG(ERR, USER1, "[%s][%d] Idx[%d:%d] Changed, Closing Connection[%d].\n",
@@ -333,10 +333,15 @@ static void tgg_do_send(tgg_write_data* wdata)
 
 			if ( wdata->fd_opt & FD_CLOSE) {
 				RTE_LOG(ERR, USER1, "[%s][%d] Closing Connection[%d].\n", __FILE__, __LINE__, cli_fd);
-				// mt_close(cli_fd);// 在这里结束会报错，四次挥手不完整：epoll schedule failed, errno: 62
+				tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSING);// 先设置标记，防止队列没人消费，影响其他连接
+				mt_sleep(1000);// ws的关闭帧发送完以后等待客户端先关闭，如果1s后没有关闭，我们要主动结束
+								// 到了这里后面的数据其实都应该要丢弃了，所以后续数据已经不重要了
+				mt_close(cli_fd);// TODO:待优化，在这里结束可能会报错，四次挥手不完整：epoll schedule failed, errno: 62
 								 // 但正常结束流程里close，需要等待30s，不可配置，freebsd内部控制
-				tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSING);
 			}
+		} else {
+			RTE_LOG(ERR, USER1, "[%s][%d] send data droped, cause connection[fd:%d] not published[idx:%d].\n",
+			 __FILE__, __LINE__, cli_fd, idx);
 		}
 
 send_client_end:

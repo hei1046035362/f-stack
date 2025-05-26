@@ -109,6 +109,8 @@ int CmdWorkerConnect::ExecCmd()
             printf("[%s][%d]add bw fdx failed\n", __FILE__, __LINE__);
             return -1;
         }
+        printf("[%s][%d] added bw[prc:%d,fd:%d] success, total bw count:%d.\n", 
+            __FILE__, __LINE__, prc_id, fd, tgg_get_bwfdx_count());
 
 
         /// 1、考虑负载均衡  
