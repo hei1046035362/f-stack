@@ -22,7 +22,6 @@
 const char* g_gateway_ip_str = "192.168.40.129";
 ushort g_gateway_port = 80;
 uint32_t g_gate_ip = 0;
-int g_bwwkkey_len = 64; // ip最多为8个F，woker_key待定
 
 // static const char* s_init_flag = "/run/lock/tgg_init";
 
@@ -374,7 +373,7 @@ void tgg_master_init()
 	g_cidgid_hash = init_hash(s_cidgid_hash_name, g_fd_limit, sizeof(int));
 	g_idx_hash = init_hash(s_idx_hash_name, g_fd_limit, sizeof(int));
 	g_bwfdx_hash = init_hash(s_bwfdx_hash_name, g_fd_limit, sizeof(int));
-	g_bwwkkey_hash = init_hash(s_bwwkkey_hash_name, g_fd_limit, g_bwwkkey_len);
+	g_bwwkkey_hash = init_hash(s_bwwkkey_hash_name, g_fd_limit, TGG_BWWKKEY_LEN);
 	g_bwprc_zone = make_memzone(bwprc_zone_name, TggConfigure::getInstance()->get_bwsvr_count()*sizeof(pid_data));
 
 	RTE_LOG(INFO, USER1, "Init dpdk master for tgg done.\n");

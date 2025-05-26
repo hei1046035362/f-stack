@@ -12,6 +12,7 @@
 #define TGG_CID_LEN 24
 #define TGG_UID_LEN 24
 #define TGG_GID_LEN 24
+#define TGG_BWWKKEY_LEN 64 // 标识唯一的bw的字符串长度,格式 ip(16进制的int):worker_key
 
 #define TGG_IPPORT_LEN 12
 
