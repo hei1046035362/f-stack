@@ -241,7 +241,7 @@ void WsConsumer::OnSend(const std::string& msg, int fd_opt)
     if (enqueue_data_single_fd(this->core_id, msg, this->fd, _idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
         RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%d,uid:%s,opt:%d",
          __FILE__, __LINE__, _cid, _uid.c_str(), fd_opt);
-        enqueue_data_single_fd(this->core_id, "", this->fd, _idx, FD_CLOSE);
+        enqueue_data_single_fd(this->core_id, "", this->fd, _idx, FD_WRITE|FD_CLOSE);
     }
 }
 

@@ -13,6 +13,21 @@ struct HttpRequest {
     std::map<std::string, std::string> cookies;
 };
 
+enum WebSocketFrameType {
+    ERROR_FRAME = 0xFF,
+    INCOMPLETE_DATA = 0xFE,
+
+    CLOSING_FRAME = 0x8,
+
+    INCOMPLETE_FRAME = 0x81,
+
+    TEXT_FRAME = 0x1,
+    BINARY_FRAME = 0x2,
+
+    PING_FRAME = 0x9,
+    PONG_FRAME = 0xA
+};
+
 
 // TODO: 为了快速开发，目前websocket的缓存和握手状态都在st_cli_info中，后续需要重新封装一下
 //          方法要和数据隔离
@@ -27,21 +42,6 @@ protected:
     int fd;
     int handshake;
 
-protected:
-    enum WebSocketFrameType {
-        ERROR_FRAME = 0xFF,
-        INCOMPLETE_DATA = 0xFE,
-    
-        CLOSING_FRAME = 0x8,
-    
-        INCOMPLETE_FRAME = 0x81,
-    
-        TEXT_FRAME = 0x1,
-        BINARY_FRAME = 0x2,
-    
-        PING_FRAME = 0x9,
-        PONG_FRAME = 0xA
-    };
 private:
 
     // 新的连接处理

@@ -6,6 +6,7 @@
 #include "tgg_comm/tgg_bw_cache.h"
 #include "tgg_bwcomm.h"
 #include "tgg_comm/tgg_common.h"
+#include "comm/Websocket.hpp"
 
 void Send2Client(int cid, const std::string& data, int fd_opt)
 {
@@ -27,14 +28,18 @@ void Send2Client(int cid, const std::string& data, int fd_opt)
         return;
     }
     std::string sendData;
-    // 打包封装到
-    if (message_pack(2, 1, 0, 1, data, sendData) < 0)
-    {
-        RTE_LOG(ERR, USER1, "[%s][%d] message_pack data[%s] failed.\r\n", 
-            __FILE__, __LINE__, data.c_str());
-        return;
+    // // 打包封装到
+    // if (message_pack(2, 1, 0, 1, data, sendData) < 0)
+    // {
+    //     RTE_LOG(ERR, USER1, "[%s][%d] message_pack data[%s] failed.\r\n", 
+    //         __FILE__, __LINE__, data.c_str());
+    //     return;
+    // }
+    if(fd_opt & FD_CLOSE) {
+        sendData = Websocket::EncodeCloseFrame(data);
+    } else {
+        sendData = Websocket::EncodeWebsocketMessage(BINARY_FRAME, data);
     }
-
     std::cout << "send data["<< cid <<"]:" << bin2hex(sendData) << std::endl;
     if (enqueue_data_single_fd(core_id, sendData, fd, idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
         RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%d,opt:%d",
@@ -99,14 +104,18 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
             return;
         }
         std::string sendData;
-        // 打包封装
-        if (message_pack(2, 1, 0, 1, data, sendData) < 0)
-        {
-            RTE_LOG(ERR, USER1, "[%s][%d] message_pack data[%s] failed.\r\n", 
-                __FILE__, __LINE__, data.c_str());
-            return;
+        // // 打包封装
+        // if (message_pack(2, 1, 0, 1, data, sendData) < 0)
+        // {
+        //     RTE_LOG(ERR, USER1, "[%s][%d] message_pack data[%s] failed.\r\n", 
+        //         __FILE__, __LINE__, data.c_str());
+        //     return;
+        // }
+        if(fd_opt & FD_CLOSE) {
+            sendData = Websocket::EncodeCloseFrame(data);
+        } else {
+            sendData = Websocket::EncodeWebsocketMessage(BINARY_FRAME, data);
         }
-
         std::cout << "send group data:" << bin2hex(sendData) << std::endl;
         if (enqueue_data_batch_fd(coreidFds.first, sendData, mapFdidx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
             RTE_LOG(ERR, USER1, "[%s][%d] Batch Enqueue data Failed\n",

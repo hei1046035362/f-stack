@@ -393,7 +393,8 @@ void tgg_close_bw_session(int prc_id, int fd)
 		std::string workerkey = tgg_get_bwfdx_workerkey(prc_id, fd);
 		tgg_del_bwwkkey(workerkey.c_str());
 	}
-	printf("[%s][%d]close bw session prc:[%d] fd:[%d].\n", __FILE__, __LINE__, prc_id, fd);
+	printf("[%s][%d]close bw session prc:[%d] fd:[%d], left bw count:%d.\n", 
+		__FILE__, __LINE__, prc_id, fd, tgg_get_bwfdx_count());
 	tgg_clean_bwfdx(prc_id, fd);
 }
 
