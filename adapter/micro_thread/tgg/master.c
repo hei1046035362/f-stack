@@ -74,7 +74,7 @@ uint32_t get_local_addr(int sockfd)
      // printf("ip str:%s\n", ip_str);
      struct in_addr ip_addr;
      inet_pton(AF_INET, ip_str, &ip_addr);
-     uint32_t ip_decimal = big_endian() ? ntohl(ip_addr.s_addr) : ip_addr.s_addr;
+     uint32_t ip_decimal = ip_addr.s_addr;
      printf("IP address in decimal: %u\n", ip_decimal);
      return ip_decimal;
 }
