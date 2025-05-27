@@ -108,8 +108,11 @@ void tgg_new_bw_session(int prc_id, int fd, int cmd,
 void tgg_close_bw_session(int prc_id, int fd);
 
 // 业务侧接口
-// 新接入连接
-int tgg_bind_session(int core_id, int fd, const char* uid, int cid);
+
+// cid绑定uid
+int tgg_bind_session(const char* uid, int cid);
+// cid和uid解绑
+int tgg_unbind_session(int cid);
 // 连接断开
 int tgg_free_session(int core_id, int fd);
 // 加入组

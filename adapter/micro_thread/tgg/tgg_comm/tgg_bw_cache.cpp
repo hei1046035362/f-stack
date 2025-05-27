@@ -156,13 +156,13 @@ static int tgg_hash_del_key(const rte_hash* hash, const char* key, int key_len, 
     fp((void*)pdata);
 
     int ret = rte_hash_del_key_with_hash(hash, key, rte_hash_crc(key, key_len, 0));
-    if (ret > 0) {
-        // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
-        if (rte_hash_free_key_with_position(hash, ret) < 0) {
-            RTE_LOG(ERR, USER1, "[%s][%d]Del key[%s] pos failed:%d\n", __FILE__, __LINE__, key, ret);
-            return -EINVAL;
-        }
-    } else {
+    if (ret < 0) {
+    //     // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
+    //     if (rte_hash_free_key_with_position(hash, ret) < 0) {
+    //         RTE_LOG(ERR, USER1, "[%s][%d]Del key[%s] pos failed:%d\n", __FILE__, __LINE__, key, ret);
+    //         return -EINVAL;
+    //     }
+    // } else {
         RTE_LOG(ERR, USER1, "[%s][%d]Del key[%s] data failed:%d\n", __FILE__, __LINE__, key, ret);
         return -EINVAL;
     }
@@ -258,13 +258,13 @@ static int tgg_hash_del_intkey(const rte_hash* hash, int key, tgg_free_id_data f
     fp((void*)pdata);
 
     int ret = rte_hash_del_key_with_hash(hash, &key, rte_hash_crc(&key, sizeof(int), 0));
-    if (ret > 0) {
-        // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
-        if (rte_hash_free_key_with_position(hash, ret) < 0) {
-            RTE_LOG(ERR, USER1, "[%s][%d]Del key[%d] pos failed:%d\n", __FILE__, __LINE__, key, ret);
-            return -EINVAL;
-        }
-    } else {
+    if (ret < 0) {
+    //     // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
+    //     if (rte_hash_free_key_with_position(hash, ret) < 0) {
+    //         RTE_LOG(ERR, USER1, "[%s][%d]Del key[%d] pos failed:%d\n", __FILE__, __LINE__, key, ret);
+    //         return -EINVAL;
+    //     }
+    // } else {
         RTE_LOG(ERR, USER1, "[%s][%d]Del key[%d] data failed:%d\n", __FILE__, __LINE__, key, ret);
         return -EINVAL;
     }
@@ -696,13 +696,13 @@ int tgg_del_idx(int idx)
 {
     ReadLock lock(get_idxhsh_lock());
     int ret = rte_hash_del_key_with_hash(g_idx_hash, &idx, rte_hash_crc(&idx, sizeof(idx), 0));
-    if (ret > 0) {
-        // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
-        if (rte_hash_free_key_with_position(g_idx_hash, ret) < 0) {
-            RTE_LOG(ERR, USER1, "[%s][%d]Del idx[%d] pos failed:%d.\n", __FILE__, __LINE__, idx, ret);
-            return -EINVAL;
-        }
-    } else {
+    if (ret < 0) {
+    //     // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
+    //     if (rte_hash_free_key_with_position(g_idx_hash, ret) < 0) {
+    //         RTE_LOG(ERR, USER1, "[%s][%d]Del idx[%d] pos failed:%d.\n", __FILE__, __LINE__, idx, ret);
+    //         return -EINVAL;
+    //     }
+    // } else {
         RTE_LOG(ERR, USER1, "[%s][%d]Del idx[%d] data failed:%d.\n", __FILE__, __LINE__, idx, ret);
         return -EINVAL;
     }
@@ -729,7 +729,7 @@ int tgg_del_bwfdx(int bwfdx)
 {
     ReadLock lock(get_bwfdxhsh_lock());
     int ret = rte_hash_del_key_with_hash(g_bwfdx_hash, &bwfdx, rte_hash_crc(&bwfdx, sizeof(bwfdx), 0));
-    if (ret > 0) {
+    if (ret < 0) {
     //     // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
     //     if (rte_hash_free_key_with_position(g_bwfdx_hash, ret) < 0) {
     //         RTE_LOG(ERR, USER1, "[%s][%d]Del bwfdx[%d] pos failed:%d.\n", __FILE__, __LINE__, bwfdx, ret);
@@ -862,13 +862,13 @@ int tgg_del_bwwkkey(const char* bwwkkey)
     APROPRIAT_HASH_KEY(bwwkkey, TGG_BWWKKEY_LEN);
     ReadLock lock(get_bwwkkeyhsh_lock());
     int ret = rte_hash_del_key_with_hash(g_bwwkkey_hash, _key, rte_hash_crc(_key, TGG_BWWKKEY_LEN, 0));
-    if (ret > 0) {
-        // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
-        if (rte_hash_free_key_with_position(g_bwwkkey_hash, ret) < 0) {
-            RTE_LOG(ERR, USER1, "[%s][%d]Del bwwkkey[%s] pos failed:%d.\n", __FILE__, __LINE__, bwwkkey, ret);
-            return -EINVAL;
-        }
-    } else {
+    if (ret < 0) {
+    //     // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
+    //     if (rte_hash_free_key_with_position(g_bwwkkey_hash, ret) < 0) {
+    //         RTE_LOG(ERR, USER1, "[%s][%d]Del bwwkkey[%s] pos failed:%d.\n", __FILE__, __LINE__, bwwkkey, ret);
+    //         return -EINVAL;
+    //     }
+    // } else {
         RTE_LOG(ERR, USER1, "[%s][%d]Del bwwkkey[%s] data failed:%d.\n", __FILE__, __LINE__, bwwkkey, ret);
         return -EINVAL;
     }

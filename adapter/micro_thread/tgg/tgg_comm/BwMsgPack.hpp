@@ -51,11 +51,11 @@ public:
         // bwdata->local_ip = inet_addr(local_ip.c_str());
         // bwdata->client_ip = inet_addr(client_ip.c_str());
         if(big_endian()) {
-            bwdata->local_ip = htonl(bwdata->local_ip);
-            bwdata->client_ip = htonl(bwdata->client_ip);
+            // bwdata->local_ip = bwdata->local_ip;// ip拿到的时候就是网络字节序了，不需要再转
+            // bwdata->client_ip = bwdata->client_ip;
             bwdata->pack_len = htonl(bwdata->pack_len);
-            bwdata->local_port = htons(bwdata->local_port);
-            bwdata->client_port = htons(bwdata->client_port);
+            bwdata->local_port = htons(bwdata->local_port);// 本地端口是从文件中读取的，需要转换成网络字节序
+            // bwdata->client_port = htons(bwdata->client_port);// 客户端的port是通过fd获取的，本身就是网络字节序
             bwdata->connection_id = htonl(bwdata->connection_id);
             bwdata->gateway_port = htons(bwdata->gateway_port);
             bwdata->ext_len = htonl(bwdata->ext_len);
@@ -100,13 +100,13 @@ public:
         bwjdata["cmd"] = (int)bwdata->cmd;
         unsigned int local_ip = bwdata->local_ip;
         unsigned int client_ip = bwdata->client_ip;
-        bwjdata["local_ip"] = inet_ntoa(*reinterpret_cast<in_addr*>(&local_ip));
+        bwjdata["local_ip"] = inet_ntoa(*reinterpret_cast<in_addr*>(&local_ip));// inet_ntoa要求的是网络字节序，因此不需要ntohl转换
         bwjdata["client_ip"] = inet_ntoa(*reinterpret_cast<in_addr*>(&client_ip));
         if(big_endian()) {
-            bwjdata["local_port"] = htons(bwdata->local_port);
-            bwjdata["client_port"] = htons(bwdata->client_port);
-            bwjdata["connection_id"] = htonl(bwdata->connection_id);
-            bwjdata["gateway_port"] = htons(bwdata->gateway_port);
+            bwjdata["local_port"] = ntohs(bwdata->local_port);
+            bwjdata["client_port"] = ntohs(bwdata->client_port);
+            bwjdata["connection_id"] = ntohl(bwdata->connection_id);
+            bwjdata["gateway_port"] = ntohs(bwdata->gateway_port);
         } else {
             unsigned short local_port = bwdata->local_port;
             unsigned short client_port = bwdata->client_port;

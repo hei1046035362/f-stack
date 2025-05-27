@@ -49,11 +49,15 @@
 #endif
 
 using namespace std;
+#define MAX_PACKET_SIZE 12*1024  // bw发给gw的允许的数据包最大长度
 
 static stack<task_t*> g_readwrite;
 int g_listen_fd = -1;
 extern int g_prc_id;
 extern int g_run;
+uint32_t g_gw_local_ip = 0;
+unsigned short g_gw_local_port = 0;
+
 int set_non_block(int iSock)
 {
     int iFlags;
@@ -98,7 +102,6 @@ void *read_routine( void *arg )
     co_enable_hook_sys();
 
     task_t *co = (task_t*)arg;
-    char buf[ 1024 * 16 ];
     for(;;)
     {
         if( -1 == co->fd )
@@ -111,6 +114,9 @@ void *read_routine( void *arg )
         int fd = co->fd;
         co->fd = -1;
 
+        char recv_buffer[ MAX_PACKET_SIZE ];
+        // std::vector<char> recv_buffer;
+        unsigned int pos = 0;
         for(;;)
         {
             struct pollfd pf = { 0 };
@@ -118,18 +124,47 @@ void *read_routine( void *arg )
             pf.events = (POLLIN|POLLERR|POLLHUP);
             co_poll( co_get_epoll_ct(),&pf,1,1000);
 
-            int ret = read( fd,buf,sizeof(buf) );
+            char buf_read[ 4096 ];
+            int ret = read( fd,buf_read,sizeof(buf_read) );
             if(ret > 0) {
+                memcpy(recv_buffer + pos, buf_read, ret);
+                if(pos + ret < sizeof(tgg_bw_protocal)) {
+                    pos += ret;
+                    continue;
+                }
+                tgg_bw_protocal* header = reinterpret_cast<tgg_bw_protocal*>(recv_buffer);
+                unsigned int pack_len = htonl(header->pack_len);
+                // 验证数据包长度有效性[4](@ref)
+                if(pack_len < sizeof(tgg_bw_protocal) || 
+                   pack_len > MAX_PACKET_SIZE) {
+                    tgg_close_bw_session(g_prc_id, fd);
+                    close( fd );
+                    return 0;
+                }
+                // 够header 但不够一个完整的包，继续收包
+                if(pos + ret < pack_len) {
+                    pos += ret;
+                    continue;
+                }
                 tgg_bw_data bwdata = {
                     .fd = fd,
                     .coreid = g_prc_id,
                     .bwfdx = (fd << 8 ) | g_prc_id,
                     .fd_opt = FD_WRITE,
                     .idx = tgg_get_bwfdx_idx(g_prc_id, fd),
-                    .data_len = (unsigned int)ret,
-                    .data = buf
+                    .data_len = pack_len,
+                    .data = recv_buffer
                 };
                 tgg_process_bwrcv_data(&bwdata);
+                if(pos > pack_len) {
+                    // 把剩余数据移动到前面去,数据提供了长度，因此不需要置空操作
+                    memmove(recv_buffer, recv_buffer + pack_len, pos - pack_len);
+                    pos -= pack_len;
+                } else {// 等于的情况
+                    // 有长度和起始位置字段，不需要置空操作
+                    // memset(recv_buffer, 0, pos);
+                    pos = 0;
+                }
             }
             if( ret > 0 || ( -1 == ret && EAGAIN == errno ) )
             {
@@ -184,8 +219,8 @@ void *write_routine( void *arg )
         tgg_bw_protocal header = {
             .pack_len = (unsigned int)sizeof(tgg_bw_protocal) + bdata->data_len,
             .cmd = (unsigned char)map_msgtype[bdata->fd_opt],
-            .local_ip = (unsigned int)tgg_get_bwfdx_ip(prc_id, fd),
-            .local_port = (unsigned short)tgg_get_bwfdx_ip(prc_id, fd),
+            .local_ip = g_gw_local_ip,//(unsigned int)tgg_get_bwfdx_ip(prc_id, fd),
+            .local_port = g_gw_local_port,//(unsigned short)tgg_get_bwfdx_port(prc_id, fd),
             .client_ip = (unsigned int)tgg_get_cli_ip(bdata->coreid, bdata->fd),
             .client_port = (unsigned short)tgg_get_cli_port(bdata->coreid, bdata->fd),
             .connection_id = (unsigned int)tgg_get_cli_idx(bdata->coreid, bdata->fd),
@@ -198,6 +233,16 @@ void *write_routine( void *arg )
             sdata = std::string((char*)bdata->data, bdata->data_len);
         }
         BwPackageHandler::encode(result, &header, sdata);
+
+        // TODO:打印发送内容，稳定后需删除
+        uint32_t ip_int = tgg_get_bwfdx_ip(prc_id, fd);  // 整数形式的IP（网络字节序，对应192.168.1.1）
+        struct in_addr addr;
+        addr.s_addr = ip_int;  // 直接赋值网络字节序整数
+        char ip_str[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &addr, ip_str, sizeof(ip_str));
+        printf("[%s][%d]send to server[ip:%s,port:%u]:%s\n", __FILE__, __LINE__, 
+            ip_str, tgg_get_bwfdx_port(prc_id, fd), bin2hex(result).c_str());
+
         int ret = write(fd, result.c_str(), result.length());
         int loops = 3;// 如果失败最多重试3次，否则丢弃
         while(ret == -1 && EAGAIN == errno && loops--) {
@@ -278,6 +323,8 @@ static void SetAddr(const char *pszIP,const unsigned short shPort,struct sockadd
         nIP = inet_addr(pszIP);
     }
     addr.sin_addr.s_addr = nIP;
+    g_gw_local_ip = ntohl(nIP);
+    g_gw_local_port = shPort;
 
 }
 

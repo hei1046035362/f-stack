@@ -5,10 +5,16 @@
 #include "tgg_bw_cache.h"
 
 // 执行bind   cid bind uid的时候需要执行这个函数
-int tgg_bind_session(int core_id, int fd, const char* uid, int cid)
+int tgg_bind_session(const char* uid, int cid)
 {
+    int fdid = tgg_get_fdbycid(cid);
+    if(fdid < 0) {
+        RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%d] failed.\n", __FILE__, __LINE__, cid);
+        return -1;
+    }
+	int core_id = fdid & 0xf;
+	int fd = fdid >> 8;
 	int idx = tgg_get_cli_idx(core_id, fd);
-	int fdid = (fd << 8) & core_id;
 	if (idx < 0) {
 		RTE_LOG(ERR, USER1, "[%s][%d]session is closing, uid[%s] cid[%d].\n", __FILE__, __LINE__, uid, cid);
 		return -1;
@@ -28,25 +34,34 @@ int tgg_bind_session(int core_id, int fd, const char* uid, int cid)
 }
 
 // 执行unbind
-int tgg_unbind_session(int core_id, int fd, const char* uid, int cid)
+int tgg_unbind_session(int cid)
 {
+    int fdid = tgg_get_fdbycid(cid);
+    if(fdid < 0) {
+        RTE_LOG(INFO, USER1, "[%s][%d] get fdid by cid[%d] failed.\n", __FILE__, __LINE__, cid);
+        // TODO 有可能前面已经删除了，还需要观察
+        return 0;
+    }
+	int core_id = fdid & 0xf;
+	int fd = fdid >> 8;
 	int idx = tgg_get_cli_idx(core_id, fd);
-	int fdid = (fd << 8) & core_id;
 	if (idx < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d]session is closing, uid[%s] cid[%d].\n", __FILE__, __LINE__, uid, cid);
+		RTE_LOG(ERR, USER1, "[%s][%d]session is closing, cid[%d].\n", __FILE__, __LINE__, cid);
 		return -1;
 	}
-	if(strlen(uid) <= 0 || cid <= 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] uid[%s] and cid[%d] should not be empty.\n", __FILE__, __LINE__, uid, cid);
+    std::string suid = tgg_get_cli_uid(core_id, fd);
+	if(suid.length() <= 0) {
+		// fdid 的 uid已经为空了
+		RTE_LOG(ERR, USER1, "[%s][%d] uid for cid[%d] already reseted.\n", __FILE__, __LINE__, cid);
+	} else {
+		// 清理
+		tgg_set_cli_uid(core_id, fd, "");
+	}
+	// 从 hash<uid, list<fd>> 中删除
+	if (tgg_del_fd4uid(suid.c_str(), fdid) < 0) {
+		RTE_LOG(ERR, USER1, "[%s][%d] add uid[%s] fdid[%d] failed.\n", __FILE__, __LINE__, suid.c_str(), fd);
 		return -1;
 	}
-	// 添加到 hash<uid, list<fd>>
-	if (tgg_del_fd4uid(uid, fdid) < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] add uid[%s] fdid[%d] failed.\n", __FILE__, __LINE__, uid, fd);
-		return -1;
-	}
-	// 清理
-	tgg_set_cli_uid(core_id, fd, "");
 	return 0;
 
 }
