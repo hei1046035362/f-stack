@@ -109,7 +109,7 @@ int CmdWorkerConnect::ExecCmd()
             printf("[%s][%d]add bw fdx failed\n", __FILE__, __LINE__);
             return -1;
         }
-        printf("[%s][%d] added bw[prc:%d,fd:%d] success, total bw count:%d.\n", 
+        printf("[%s][%d] WorkerConnect: added bw[prc:%d,fd:%d] success, total bw count:%d.\n", 
             __FILE__, __LINE__, prc_id, fd, tgg_get_bwfdx_count());
 
 
@@ -147,6 +147,13 @@ int CmdGatewayClientConnect::ExecCmd()
     //     return -1;
     // }
     try {
+        uint32_t remote_ip; 
+        ushort remote_port;
+        if (get_remote_info(this->fd, remote_ip, remote_port) < 0) {// 获取远端ip port 失败
+            printf("[%s][%d] get remote info failed.\n", __FILE__, __LINE__);
+            close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
+            return -1;
+        }
         // printf("jdata:%s\n", jdata.dump(4).c_str());
         nlohmann::json worker_info = nlohmann::json::parse(std::string(jdata["body"]));
         if (worker_info["secret_key"].get<std::string>() != bwSeckey) {
@@ -156,7 +163,6 @@ int CmdGatewayClientConnect::ExecCmd()
             //tgg_close_bw_session(this->prc_id, this->fd);
             return -1;
         }
-
     } catch (const nlohmann::json::exception& e) {
     // 捕获其他任何未预料到的异常
         RTE_LOG(ERR, USER1, "[%s][%d] Exception catched:%s.\n", __FILE__, __LINE__, e.what());
@@ -164,6 +170,8 @@ int CmdGatewayClientConnect::ExecCmd()
         // free_bw_session(this->prc_id, this->fd);
         return -1;
     }
+    printf("[%s][%d] GatewayClientConnect: cmd executed body:%s.\n",
+     __FILE__, __LINE__, jdata["body"].dump().c_str());
     // CMD_GATEWAY_CLIENT_CONNECT 类型的连接没有workerkey
     tgg_new_bw_session(this->prc_id, this->fd, GatewayProtocal::CMD_GATEWAY_CLIENT_CONNECT, "");
     return 0;
@@ -174,12 +182,10 @@ int CmdSendToOne::ExecCmd()
     int cid = jdata["connection_id"];
     int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string body = hex2bin(jdata["body"].get<std::string>());
-    if(!raw) {
-        // TODO 调用encode方法，不清楚encode到底是做什么
-        // body = 
-    }
     // TODO 目前只支持ws发送
-    Send2Client(cid, body, FD_WRITE);
+    Send2Client(cid, body, FD_WRITE, !raw);
+    printf("[%s][%d] SendToOne: cmd executed cid[%d] data:%s.\n",
+     __FILE__, __LINE__, cid, jdata["body"].get<std::string>().c_str());
     return 0;
 }
 
@@ -187,9 +193,6 @@ int CmdSendToGroup::ExecCmd()
 {
     int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string body = hex2bin(jdata["body"].get<std::string>());
-    if(!raw) {
-        // TODO raw是什么意思？
-    }
     // 要排除的cid
     std::set<std::string> setExeptCid;
     nlohmann::json ext_data = nlohmann::json::parse(jdata["ext_data"].get<std::string>());
@@ -240,11 +243,17 @@ int CmdSendToGroup::ExecCmd()
             //std::cout << element << std::endl;
         }
         if(lstAllFds.size() > 0) {
-            BatchSend2ClientByfds(lstAllFds, body, FD_WRITE);
+            BatchSend2ClientByfds(lstAllFds, body, FD_WRITE, !raw);
+            printf("[%s][%d] SendToGroup: cmd executed uid[%s].\n",
+             __FILE__, __LINE__, ext_data["group"].dump().c_str());
         }
     } else {
+        printf("[%s][%d] SendToGroup: cmd executed, no Group found.\n",
+         __FILE__, __LINE__);
         return -1;
     }
+    printf("[%s][%d] SendToGroup: cmd executed \n",
+     __FILE__, __LINE__);
     return 0;
 }
 
@@ -252,17 +261,22 @@ int CmdKick::ExecCmd()
 {
     int cid = jdata["connection_id"];
     std::string body = jdata["body"].get<std::string>();
-    Send2Client(cid, body, FD_WRITE);
-    std::string data = "\x88\x02\x03\xe8";// 关闭websocket
-    Send2Client(cid, data, FD_WRITE);
+    int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
+    Send2Client(cid, body, FD_WRITE, !raw);
+    Send2Client(cid, "", FD_CLOSE, !raw);
+    printf("[%s][%d] Kick: cmd executed cid[%d].\n",
+     __FILE__, __LINE__, cid);
     return 0;
 }
 
 int CmdDestroy::ExecCmd()
 {
     int cid = jdata["connection_id"];
-    std::string data = "\x88\x02\x03\xe8";// 关闭websocket
-    Send2Client(cid, data, FD_WRITE | FD_CLOSE);
+    std::string data = "";// 关闭websocket
+    int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
+    Send2Client(cid, data, FD_WRITE | FD_CLOSE, !raw);
+    printf("[%s][%d] Destroy: cmd executed cid[%d].\n",
+     __FILE__, __LINE__, cid);
     return 0;
 }
 
@@ -271,8 +285,8 @@ int CmdSendToALL::ExecCmd()
 {
     int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string body = hex2bin(jdata["body"].get<std::string>());
-    if(!raw) {
-    }
+    // if(!raw) {
+    // }
 
     std::string ext_data = jdata["ext_data"];
     if(!ext_data.empty()) {
@@ -285,7 +299,7 @@ int CmdSendToALL::ExecCmd()
                 lstCids.push_back(element);
             }
             if(lstCids.size() > 0) {
-                BatchSend2ClientBycids(lstCids, body, FD_WRITE);
+                BatchSend2ClientBycids(lstCids, body, FD_WRITE, !raw);
             }
         } else {
             // 所有在线的客户端fd
@@ -294,9 +308,11 @@ int CmdSendToALL::ExecCmd()
                 return -1;
             }
             if(lstFds.size() > 0) {
-                BatchSend2ClientByfds(lstFds, body, FD_WRITE);
+                BatchSend2ClientByfds(lstFds, body, FD_WRITE, !raw);
             }
         }
+        printf("[%s][%d] SendToALL: cmd executed cids[%s] data:%s.\n",
+         __FILE__, __LINE__, ext_data.c_str(), body.c_str());
         return 0;
     }
 
@@ -447,6 +463,8 @@ int CmdSelect::ExecCmd()
         data = result.dump();
     }
     Send2BW(data);
+    printf("[%s][%d] Select: cmd executed Select[%s] data:%s.\n",
+     __FILE__, __LINE__, ext_data.c_str(), data.c_str());
     return 0;
 }
 
@@ -469,6 +487,8 @@ int CmdGetGroupIdList::ExecCmd()
         data = result.dump();
     }
     Send2BW(data);
+    printf("[%s][%d] GetGroupIdList: cmd executed data:%s.\n",
+     __FILE__, __LINE__, data.c_str());
     return 0;
 }
 
@@ -486,6 +506,8 @@ int CmdSetSession::ExecCmd()
         RTE_LOG(INFO, USER1, "[%s][%d] get clifdx by cid[%d] failed.\n", __FILE__, __LINE__, cid);
         return -1;
     }
+    printf("[%s][%d] SetSession: cmd executed cid[%d] data:%s.\n",
+     __FILE__, __LINE__, cid, ext_data.c_str());
     return tgg_set_cli_reserved(clifdx & 0xf, clifdx >> 8, ext_data.c_str());
 }
 
@@ -536,6 +558,7 @@ int CmdIsOnline::ExecCmd()
     } else {
         data = result.dump();
     }
+    printf("[%s][%d] IsOnline: send cid[%d] IsOnline result[%s] to server.\n", __FILE__, __LINE__, cid, data.c_str());
     Send2BW(data);
     return 0;
 }
@@ -552,33 +575,22 @@ int CmdBindUid::ExecCmd()
                  __FILE__, __LINE__, suid.c_str(), cid);
         return -1;
     }
-    int fdid = tgg_get_fdbycid(cid);
-    if(fdid < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] get fd by cid[%d] failed.\n", __FILE__, __LINE__, cid);
-        return -1;
-    }
-
-    return tgg_bind_session(fdid & 0xf, fdid >> 8, suid.c_str(), cid);
+    printf("[%s][%d] BindUid: cid[%d] bind to uid[%s]\n", __FILE__, __LINE__, cid, suid.c_str());
+    return tgg_bind_session(suid.c_str(), cid);
 
 }
 
 int CmdUnBindUid::ExecCmd()
 {
-    std::string suid = std::to_string(jdata["user_id"].get<std::uint64_t>());
     int cid = jdata["connection_id"];
-    if(suid.empty() || cid < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] bind uid failed, uid[%s] and cid[%d] shouldn't be empty.\n",
-                 __FILE__, __LINE__, suid.c_str(), cid);
+    if(cid < 0) {
+        RTE_LOG(INFO, USER1, "[%s][%d] unbind failed, invalid cid[%d].\n",
+                 __FILE__, __LINE__, cid);
         return -1;
     }
-    int fdid = tgg_get_fdbycid(cid);
-    if(fdid < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] get fdid by cid[%d] failed.\n", __FILE__, __LINE__, cid);
-        // TODO 有可能前面已经删除了，还需要观察
-        return 0;
-    }
-    RTE_LOG(INFO, USER1, "[%s][%d] free cid[%d].\n", __FILE__, __LINE__, cid);
-    return tgg_free_session(fdid & 0xf, fdid >> 8);
+    RTE_LOG(INFO, USER1, "[%s][%d] UnBindUid: unbind cid[%d].\n", __FILE__, __LINE__, cid);
+    return tgg_unbind_session(cid);
+    // return tgg_free_session(fdid & 0xf, fdid >> 8);
 }
 
 
@@ -586,20 +598,22 @@ int CmdSendToUid::ExecCmd()
 {
     bool raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string body = jdata["body"];
-    if (!raw) {
-        raw = true;
-    }
     std::list<int> lst_fds;
-    std::vector<std::string> uids = jdata["ext_data"].get<std::vector<std::string> >();
-    for(auto& it : uids) {
+    nlohmann::json juid = nlohmann::json::parse(jdata["ext_data"].get<std::string>());
+    std::vector<std::string> vec_uids = juid.get<std::vector<std::string> >();
+    for(auto& it : vec_uids) {
         std::list<int> lst_fd;
         if (tgg_get_fdsbyuid(it.c_str(), lst_fd) < 0) {
+            printf("[%s][%d] SendToUid: no fd found for uid[%s].\n", __FILE__, __LINE__, it.c_str());
             continue;
         }
         lst_fds.splice(lst_fds.end(), lst_fd);
     }
     if(lst_fds.size() > 0) {
-        BatchSend2ClientByfds(lst_fds, body, FD_WRITE);
+        BatchSend2ClientByfds(lst_fds, body, FD_WRITE, !raw);
+        printf("[%s][%d] SendToUid: cmd exec success.\n", __FILE__, __LINE__);
+    } else {
+        printf("[%s][%d] SendToUid: no fd found for all uids.\n", __FILE__, __LINE__);
     }
     return 0;
 }
@@ -620,6 +634,7 @@ int CmdJoinGroup::ExecCmd()
         return -1;
     }
     tgg_join_group(group.c_str(), cid);
+    printf("[%s][%d] JoinGroup: cmd executed cid[%d] gid[%s].\n", __FILE__, __LINE__, cid, group.c_str());
     return 0;
 }
 
@@ -639,6 +654,7 @@ int CmdLeaveGroup::ExecCmd()
         return -1;
     }
     tgg_exit_group(group.c_str(), cid);
+    printf("[%s][%d] LeaveGroup: cmd executed cid[%d] gid[%s].\n", __FILE__, __LINE__, cid, group.c_str());
     return 0;
 }
 
@@ -653,6 +669,7 @@ int CmdUnGroup::ExecCmd()
 
     tgg_del_gid_cidgid(group.c_str());// 这里顺序不能动，得先删除hash<cid,gid>中的部分，才能删除hash<gid,list<fdid>>
     tgg_del_gid(group.c_str());
+    printf("[%s][%d] UnGroup: cmd executed gid[%s].\n", __FILE__, __LINE__, group.c_str());
     return 0;
 }
 
@@ -698,6 +715,8 @@ int CmdGetClientSessionsByGroup::ExecCmd()
         data = result.dump();
     }
     Send2BW(data);
+    printf("[%s][%d] GetClientSessionsByGroup: cmd executed gid[%s] data:%s.\n",
+     __FILE__, __LINE__, group.c_str(), data.c_str());
     return 0;
 }
 
@@ -742,6 +761,8 @@ int CmdGetClientCountByGroup::ExecCmd()
         data = result.dump();
     }
     Send2BW(data);
+    printf("[%s][%d] GetClientCountByGroup: cmd executed gid[%s] data:%s.\n",
+     __FILE__, __LINE__, group.c_str(), data.c_str());
     return 0;
 
 }
@@ -786,6 +807,8 @@ int CmdGetClientIdByUid::ExecCmd()
         data = result.dump();
     }
     Send2BW(data);
+    printf("[%s][%d] GetClientIdByUid: cmd executed uid[%s] data:%s.\n",
+     __FILE__, __LINE__, suid.c_str(), data.c_str());
     return 0;
 }
 
@@ -820,6 +843,8 @@ int CmdBatchGetClientIdByUid::ExecCmd()
         data = result.dump();
     }
     Send2BW(data);
+    printf("[%s][%d] BatchGetClientIdByUid: cmd executed data:%s.\n",
+     __FILE__, __LINE__, data.c_str());
     return 0;
 }
 
