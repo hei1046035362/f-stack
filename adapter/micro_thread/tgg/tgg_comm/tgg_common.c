@@ -805,6 +805,9 @@ tgg_read_data* format_send_server_data(int core_id, int fd, const std::string& s
 	bwdata->fd_opt = fdopt;
 	bwdata->fd = fd;
 	bwdata->coreid = core_id;
+    bwdata->peer_ip = (unsigned int)tgg_get_cli_ip(core_id, fd);
+    bwdata->peer_port = (unsigned int)tgg_get_cli_port(core_id, fd);
+    bwdata->cid = (unsigned int)tgg_get_cli_cid(core_id, fd);
 	return bwdata;
 }
 

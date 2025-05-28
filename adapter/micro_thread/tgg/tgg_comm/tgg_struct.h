@@ -117,9 +117,12 @@ typedef struct st_read_data {
     int coreid;        // coreid or prcid
     int bwfdx;          // 
     int fd_opt;
-    int idx;
+    int idx;            // idx是全局唯一的，fd在不同的进程中可能相同
     unsigned int data_len;
     void* data;        // 携带的数据
+    unsigned int peer_ip; // 远端ip
+    unsigned short peer_port;
+    unsigned int cid;
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_read_data;
 
 // list<fd>

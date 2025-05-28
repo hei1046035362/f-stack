@@ -72,8 +72,8 @@ void WsConsumer::OnClose()
 {// 子类继承后要执行clean_buffer清理缓存
     // std::string data = "\x88\x02\x03\xe8\x00\x00";// 关闭websocket
     // OnSend(data, FD_WRITE|FD_CLOSE);
-    SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     Send2Server(this->core_id, this->fd, "", FD_CLOSE);
+    SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     // SendData("", FD_CLOSE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
 }
 
@@ -84,7 +84,7 @@ void WsConsumer::OnConnect()
     tgg_set_cli_cid(this->core_id, this->fd, cid);
     this->_cid = cid;
     if(Send2Server(this->core_id, this->fd, "", FD_NEW) == NO_BW_AVALIABLE) {
-        OnClose();        
+        SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     }
 }
 
@@ -201,7 +201,7 @@ void WsConsumer::OnHandShake(const std::string& response, HttpRequest& req)
         __FILE__, __LINE__, result.c_str());
     // 通知服务端websocket 握手完成
     if (Send2Server(this->core_id, this->fd, result, FD_HANDLESHAKE) == NO_BW_AVALIABLE) {
-        OnClose();
+        SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     };
 }
 
@@ -224,7 +224,7 @@ void WsConsumer::OnMessage(const std::string& msg)
         return;
     }
     if(Send2Server(this->core_id, this->fd, msg, FD_WRITE) == NO_BW_AVALIABLE) {
-        OnClose();
+        SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     };
 }
 

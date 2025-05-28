@@ -71,21 +71,22 @@ int tgg_free_session(int core_id, int fd)
 {
 	// 从hash表中清除连接
 	int idx = tgg_get_cli_idx(core_id, fd);
-	if(idx < 0) {
+	if(idx <= TGG_FD_CLOSED) {
 		RTE_LOG(WARNING, USER1, "session is already closed.\n");
 		return 0;
 	}
 	std::string uid = tgg_get_cli_uid(core_id, fd);
 	int cid = tgg_get_cli_cid(core_id, fd);
-	int fdid = (fd << 8) & core_id;
+	int fdid = (fd << 8) | core_id;
 	if(cid > 0) {
 		std::list<std::string> lstgid;
-		tgg_get_gidsbycid(cid, lstgid);
-		std::list<std::string>::iterator itgid = lstgid.begin();
-		while(itgid != lstgid.end()) {
-			// 清理hash<gid,list<fdx>>
-			tgg_del_fd4gid((*itgid).c_str(), fdid);
-			itgid++;
+		if (!tgg_get_gidsbycid(cid, lstgid)) {
+			std::list<std::string>::iterator itgid = lstgid.begin();
+			while(itgid != lstgid.end()) {
+				// 清理hash<gid,list<fdx>>
+				tgg_del_fd4gid((*itgid).c_str(), fdid);
+				itgid++;
+			}
 		}
 		// 清理hash<cid,fdx> 没有握手的cid到不了这里来但是也要删除，因此移到了外面去删除
 		// tgg_del_cid(cid);

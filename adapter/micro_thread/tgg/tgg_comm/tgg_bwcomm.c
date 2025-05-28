@@ -28,19 +28,20 @@
 // std::mutex g_set_bwidx_mtx;
 // std::atomic<int> s_atomic_idx(0);
 
-int get_connection_info(int fd, const char* ip, unsigned short* port)
+int get_connection_info(int fd, char* ip_str, unsigned int* ip, unsigned short* port)
 {
      // 获取IP地址信息
      struct sockaddr_in remote_addr;
      socklen_t addrlen = sizeof(remote_addr);
-     if (getpeername(fd, (struct sockaddr *)&remote_addr, &addrlen) == -1) {
-         perror("getpeername");
-         close(fd);
+     if (getsockname(fd, (struct sockaddr *)&remote_addr, &addrlen) == -1) {
+         perror("getsockname");
+         // close(fd);
          return -1;
      }
-     inet_ntop(AF_INET, &(remote_addr.sin_addr), (char*)ip, INET_ADDRSTRLEN);
-     *port = big_endian() ? ntohs(remote_addr.sin_port) : remote_addr.sin_port;
-     RTE_LOG(INFO, USER1, "[%s][%d] Cmd from [%s]:[%d]\n", __FILE__, __LINE__, ip, *port);
+     inet_ntop(AF_INET, &(remote_addr.sin_addr), ip_str, INET_ADDRSTRLEN);
+     *port = remote_addr.sin_port;// 网络字节序
+     *ip = remote_addr.sin_addr.s_addr;// 网络字节序
+     RTE_LOG(INFO, USER1, "[%s][%d] Cmd from [%s]:[%d]\n", __FILE__, __LINE__, ip_str, *port);
      return 0;
 }
 
