@@ -337,8 +337,9 @@ void CmdSelect::FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::j
             itFd++;
             continue;
         }
-        if(!result.contains(std::to_string(cid))) {
-            result[cid] = nlohmann::json::array();
+        std::string scid = std::to_string(cid);
+        if(!result.contains(scid)) {
+            result[scid] = nlohmann::json::object();
         }
         std::string uid = tgg_get_cli_uid(coreid, fd);
         if(uid.empty()) {
@@ -350,8 +351,8 @@ void CmdSelect::FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::j
         if(mask & FIELD_GID) {
             std::set<std::string> set_gids;
             if (!tgg_get_gidsbyuid(uid.c_str(), set_gids)) {
-                if (!result[cid].contains("groups")) {
-                    result[cid]["groups"] = nlohmann::json::array();
+                if (!result[scid].contains("groups")) {
+                    result[scid]["groups"] = nlohmann::json::array();
                 } else {
                     // 已经填充过了就不要再次执行了
                     RTE_LOG(INFO, USER1, "[%s][%d] cid[%d] groups already exist.\n", 
@@ -359,14 +360,15 @@ void CmdSelect::FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::j
                 }
                 std::set<std::string>::iterator itGid = set_gids.begin();
                 while(itGid != set_gids.end()) {
-                    result[cid]["groups"].push_back(*itGid);
+                    result[scid]["groups"].push_back(*itGid);
                     itGid++;
                 }
             }
         }
         if(mask & FIELD_UID) {
-            if (!result[cid].contains("uid")) {
-                result[cid]["uid"] = uid;
+            if (!result[scid].contains("uid")) {
+                result[scid]["uid"] = nlohmann::json::object();
+                result[scid]["uid"] = uid;
             } else {
                 // 已经填充过了就不要再次执行了
                 RTE_LOG(INFO, USER1, "[%s][%d] cid[%d] groups already exist.\n", 
@@ -380,7 +382,7 @@ void CmdSelect::FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::j
 int CmdSelect::ExecCmd()
 {
     std::string ext_data = jdata["ext_data"];
-    nlohmann::json result = nlohmann::json::array();
+    nlohmann::json result = nlohmann::json::object();
     if(ext_data.empty()) {
         std::string data;
         if(!jdata["flag"].get<std::uint64_t>()) {
@@ -405,7 +407,7 @@ int CmdSelect::ExecCmd()
             }
         }
         nlohmann::json where = jext_data["where"];
-        result = nlohmann::json::array();
+        result = nlohmann::json::object();
         //std::map<int, std::map<std::string, std::string>> client_info_array;
         if (!where.is_null()) {
             for (auto& it : where.items()) {
@@ -662,7 +664,7 @@ int CmdUnGroup::ExecCmd()
 {
     std::string group = jdata["ext_data"];
     if(group.empty()) {
-        RTE_LOG(INFO, USER1, "[%s][%d] set session failed, group[%s] shouldn't be empty.\n",
+        RTE_LOG(INFO, USER1, "[%s][%d] ungroup failed, group[%s] shouldn't be empty.\n",
                  __FILE__, __LINE__, group.c_str());
         return -1;
     }
@@ -678,7 +680,7 @@ int CmdGetClientSessionsByGroup::ExecCmd()
     nlohmann::json result = nlohmann::json::array();
     std::string group = jdata["ext_data"];
     if(group.empty()) {
-        RTE_LOG(INFO, USER1, "[%s][%d] set session failed, group[%s] shouldn't be empty.\n",
+        RTE_LOG(INFO, USER1, "[%s][%d] get session by group failed, group[%s] shouldn't be empty.\n",
                  __FILE__, __LINE__, group.c_str());
         std::string data;
         if(!jdata["flag"].get<std::uint64_t>()) {
@@ -726,7 +728,7 @@ int CmdGetClientCountByGroup::ExecCmd()
     nlohmann::json result = 0;
     std::string group = jdata["ext_data"];
     if(group.empty()) {
-        RTE_LOG(INFO, USER1, "[%s][%d] set session failed, group[%s] shouldn't be empty.\n",
+        RTE_LOG(INFO, USER1, "[%s][%d] get session count by group failed, group[%s] shouldn't be empty.\n",
                  __FILE__, __LINE__, group.c_str());
         std::string data;
         if(!jdata["flag"].get<std::uint64_t>()) {
@@ -773,7 +775,7 @@ int CmdGetClientIdByUid::ExecCmd()
     std::string data;
     std::string suid = jdata["ext_data"];
     if(suid.empty()) {
-        RTE_LOG(INFO, USER1, "[%s][%d] set session failed, uid[%s] shouldn't be empty.\n",
+        RTE_LOG(INFO, USER1, "[%s][%d] get session by uid failed, uid[%s] shouldn't be empty.\n",
                  __FILE__, __LINE__, suid.c_str());
         std::string data;
         if(!jdata["flag"].get<std::uint64_t>()) {
@@ -785,7 +787,7 @@ int CmdGetClientIdByUid::ExecCmd()
         return -1;
     }
     std::list<int> lst_sfd;
-    if (tgg_get_fdsbyuid(suid.c_str(), lst_sfd) < 0) {
+    if (tgg_get_fdsbyuid(suid.c_str(), lst_sfd) == 0) {
         std::list<int>::iterator itFd = lst_sfd.begin();
         while (itFd != lst_sfd.end()) {
           int cid = tgg_get_cli_cid(*itFd & 0xf, *itFd >> 8);
@@ -799,6 +801,9 @@ int CmdGetClientIdByUid::ExecCmd()
             result.push_back(connection_id);
             itFd++;
         }
+    } else {
+        RTE_LOG(INFO, USER1, "[%s][%d] no session found for uid[%s].\n",
+                 __FILE__, __LINE__, suid.c_str());
     }
 
     if(!jdata["flag"].get<std::uint64_t>()) {
@@ -904,33 +909,27 @@ static int json_parse_body(unsigned char flag, nlohmann::json& jdata)//const std
 }
 
 // 接收数据帧的校验
-static bool bwdata_frame_check(tgg_bw_data* bdata, std::vector<tgg_bw_protocal*>& vec_bwdata)
+static bool bwdata_frame_check(tgg_bw_data* bdata, tgg_bw_protocal* bwdata)
 {
-    unsigned int left_len = bdata->data_len;
-    while (left_len > 0) {
-        // 包长度校验
-        tgg_bw_protocal* bwdata = (tgg_bw_protocal*)((char*)(bdata->data) + (bdata->data_len - left_len));
-        unsigned int pack_len = big_endian() ? htonl(bwdata->pack_len) : bwdata->pack_len;
-        unsigned int ext_len = big_endian() ? htonl(bwdata->ext_len) : bwdata->ext_len;
-        if(pack_len > left_len) {
-            RTE_LOG(ERR, USER1, "[%s][%d] data fram length[%d] check failed, read buf_size[%d], left len[%d].\n", 
-                __FILE__, __LINE__, pack_len, bdata->data_len, left_len);
-            return false;
-        }
-        // cmd 范围校验
-        if(bwdata->cmd > CMD_MAX_INDEX || bwdata->cmd <= 0) {
-            RTE_LOG(ERR, USER1, "[%s][%d] cmd check failed, invalid cmd[%d].\n", 
-                __FILE__, __LINE__, bwdata->cmd);
-            return false;
-        }
-        // 扩展长度校验
-        if(ext_len > pack_len - sizeof(tgg_bw_protocal)) {
-            RTE_LOG(ERR, USER1, "[%s][%d] ext_len[%d] check failed, pack_len[%d].\n", 
-                __FILE__, __LINE__, ext_len, pack_len);
-            return false;
-        }
-        vec_bwdata.push_back(bwdata);
-        left_len -= pack_len;
+    // 包长度校验
+    unsigned int pack_len = big_endian() ? htonl(bwdata->pack_len) : bwdata->pack_len;
+    unsigned int ext_len = big_endian() ? htonl(bwdata->ext_len) : bwdata->ext_len;
+    if(pack_len != bdata->data_len) {
+        RTE_LOG(ERR, USER1, "[%s][%d] data fram length[%d] check failed, read buf_size[%d].\n", 
+            __FILE__, __LINE__, pack_len, bdata->data_len);
+        return false;
+    }
+    // cmd 范围校验
+    if(bwdata->cmd > CMD_MAX_INDEX || bwdata->cmd <= 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] cmd check failed, invalid cmd[%d].\n", 
+            __FILE__, __LINE__, bwdata->cmd);
+        return false;
+    }
+    // 扩展长度校验
+    if(ext_len > pack_len - sizeof(tgg_bw_protocal)) {
+        RTE_LOG(ERR, USER1, "[%s][%d] ext_len[%d] check failed, pack_len[%d].\n", 
+            __FILE__, __LINE__, ext_len, pack_len);
+        return false;
     }
     return true;
 }
@@ -939,143 +938,137 @@ void exec_cmd_processor(int prc_id, int fd, void* data)
 {
     //std::string json_str = R"({"name": "Jane Smith", "age": 25, "is_student": true})";
     tgg_bw_data* bdata = (tgg_bw_data*)data;
-    std::vector<tgg_bw_protocal*> vec_bwdata;
-    if(!bwdata_frame_check(bdata, vec_bwdata)) {
+    tgg_bw_protocal* bwdata = (tgg_bw_protocal*)bdata->data;
+    if(!bwdata_frame_check(bdata, bwdata)) {
         return;
     }
-    std::vector<tgg_bw_protocal*>::iterator it = vec_bwdata.begin();
-    while(it != vec_bwdata.end()) {
-        CmdBaseProcessor* pro = NULL;
-        nlohmann::json jdata;
-        // 解析帧并生成json对象
-        tgg_bw_protocal* bwdata = *it;
-        BwPackageHandler::decode(bwdata, jdata);
+    CmdBaseProcessor* pro = NULL;
+    nlohmann::json jdata;
+    // 解析帧并生成json对象
+    BwPackageHandler::decode(bwdata, jdata);
 
-        printf("jdata:%s\n", jdata.dump(4).c_str());
+    printf("jdata:%s\n", jdata.dump(4).c_str());
 
         // 首次连接判断
-        int cmd = jdata["cmd"].get<std::int32_t>();
-        int authorized = tgg_get_bwfdx_authorized(prc_id, fd);
-        if (!authorized && cmd != CMD_WORKER_CONNECT && 
-            cmd != CMD_GATEWAY_CLIENT_CONNECT) {
-            tgg_close_bw_session(prc_id, fd);
-            close(fd);
-            RTE_LOG(ERR, USER1, "[%s][%d] command[%d] error or not authorized[%d].\n", 
-                __FILE__, __LINE__, cmd, authorized);
-            return ;
-        }
+    int cmd = jdata["cmd"].get<std::int32_t>();
+    int authorized = tgg_get_bwfdx_authorized(prc_id, fd);
+    if (!authorized && cmd != CMD_WORKER_CONNECT && cmd != CMD_GATEWAY_CLIENT_CONNECT) {
+        tgg_close_bw_session(prc_id, fd);
+        close(fd);
+        RTE_LOG(ERR, USER1, "[%s][%d] command[%d] error or not authorized[%d].\n", 
+            __FILE__, __LINE__, cmd, authorized);
+        return ;
+    }
 
-        // TODO 这里的逻辑还不确定到底是什么意思，上行数据，待调试
-        json_parse_body(bwdata->flag, jdata); //{jdata["data"].get<std::string>(), pack_data) < 0) {
-        switch(cmd) {
-            case CMD_WORKER_CONNECT:
+    // TODO 这里的逻辑还不确定到底是什么意思，上行数据，待调试
+    json_parse_body(bwdata->flag, jdata);
+
+    switch(cmd) {
+        case CMD_WORKER_CONNECT:
             pro = new CmdWorkerConnect(prc_id, fd, data, jdata);
             break;
-            case CMD_GATEWAY_CLIENT_CONNECT:
+        case CMD_GATEWAY_CLIENT_CONNECT:
             pro = new CmdGatewayClientConnect(prc_id, fd, data, jdata);
             break;
-        // GatewayClient连接Gateway
-            // return new CmdGatewayClientConnect(prc_id, fd, data, jdata);
         // 向某客户端发送数据
-            case CMD_SEND_TO_ONE:
+        case CMD_SEND_TO_ONE:
             pro = new CmdSendToOne(prc_id, fd, data, jdata);
             break;
         // 踢出用户
-            case CMD_KICK:
+        case CMD_KICK:
             pro = new CmdKick(prc_id, fd, data, jdata);
             break;
         // 立即销毁用户连接
-            case CMD_DESTROY:
+        case CMD_DESTROY:
             pro = new CmdDestroy(prc_id, fd, data, jdata);
             break;
         // 广播
-            case CMD_SEND_TO_ALL:
+        case CMD_SEND_TO_ALL:
             // 暂时不需要
             pro = new CmdSendToALL(prc_id, fd, data, jdata);
             break;
-            case CMD_SELECT:
+        case CMD_SELECT:
             pro = new CmdSelect(prc_id, fd, data, jdata);
             break;
         // 获取在线群组列表
-            case CMD_GET_GROUP_ID_LIST:
+        case CMD_GET_GROUP_ID_LIST:
             pro = new CmdGetGroupIdList(prc_id, fd, data, jdata);// 暂时不需要
             break;
         // 重新赋值 session
-            case CMD_SET_SESSION:
+        case CMD_SET_SESSION:
             pro = new CmdSetSession(prc_id, fd, data, jdata);
             break;
         // session合并
-            case CMD_UPDATE_SESSION:
+        case CMD_UPDATE_SESSION:
             pro = new CmdUpdateSession(prc_id, fd, data, jdata);
             break;
-            case CMD_GET_SESSION_BY_CLIENT_ID:
+        case CMD_GET_SESSION_BY_CLIENT_ID:
             pro = new CmdGetSessionByCid(prc_id, fd, data, jdata);// 暂时不需要
             break;
         // 获得客户端sessions
-            case CMD_GET_ALL_CLIENT_SESSIONS:
+        case CMD_GET_ALL_CLIENT_SESSIONS:
             pro = new CmdGetAllClientSession(prc_id, fd, data, jdata);// 暂时不需要
             break;
         // 判断某个 client_id 是否在线
-            case CMD_IS_ONLINE:
+        case CMD_IS_ONLINE:
             pro = new CmdIsOnline(prc_id, fd, data, jdata);
             break;
         // 将 client_id 与 uid 绑定
-            case CMD_BIND_UID:
+        case CMD_BIND_UID:
             pro = new CmdBindUid(prc_id, fd, data, jdata);
             break;
         // client_id 与 uid 解绑
-            case CMD_UNBIND_UID:
+        case CMD_UNBIND_UID:
             pro = new CmdUnBindUid(prc_id, fd, data, jdata);// 暂时不需要
             break;
         // 发送数据给 uid
-            case CMD_SEND_TO_UID:
+        case CMD_SEND_TO_UID:
             pro = new CmdSendToUid(prc_id, fd, data, jdata);
             break;
         // 将 $client_id 加入用户组
-            case CMD_JOIN_GROUP:
+        case CMD_JOIN_GROUP:
             pro = new CmdJoinGroup(prc_id, fd, data, jdata);
             break;
         // 将 $client_id 从某个用户组中移除
-            case CMD_LEAVE_GROUP:
+        case CMD_LEAVE_GROUP:
             pro = new CmdLeaveGroup(prc_id, fd, data, jdata);
             break;
         // 解散分组
-            case CMD_UNGROUP:
+        case CMD_UNGROUP:
             pro = new CmdUnGroup(prc_id, fd, data, jdata);
             break;
         // 向某个用户组发送消息
-            case CMD_SEND_TO_GROUP:
+        case CMD_SEND_TO_GROUP:
             pro = new CmdSendToGroup(prc_id, fd, data, jdata);
             break;
         // 获取某用户组成员信息
-            case CMD_GET_CLIENT_SESSIONS_BY_GROUP:
+        case CMD_GET_CLIENT_SESSIONS_BY_GROUP:
             pro = new CmdGetClientSessionsByGroup(prc_id, fd, data, jdata);
             break;
         // 获取用户组成员数
-            case CMD_GET_CLIENT_COUNT_BY_GROUP:
+        case CMD_GET_CLIENT_COUNT_BY_GROUP:
             pro = new CmdGetClientCountByGroup(prc_id, fd, data, jdata);
             break;
         // 获取与某个 uid 绑定的所有 client_id
-            case CMD_GET_CLIENT_ID_BY_UID:
+        case CMD_GET_CLIENT_ID_BY_UID:
             pro = new CmdGetClientIdByUid(prc_id, fd, data, jdata);
             break;
         // 批量获取与 uid 绑定的所有 client_id
-            case CMD_BATCH_GET_CLIENT_ID_BY_UID:
+        case CMD_BATCH_GET_CLIENT_ID_BY_UID:
             pro = new CmdBatchGetClientIdByUid(prc_id, fd, data, jdata);
             break;
         // 批量获取群组ID内客户端个数
-            case CMD_BATCH_GET_CLIENT_COUNT_BY_GROUP:
+        case CMD_BATCH_GET_CLIENT_COUNT_BY_GROUP:
             pro = new CmdBatchGetClientCountByGroup(prc_id, fd, data, jdata);// 暂时不需要
             break;
-            default :
+        default :
             RTE_LOG(ERR, USER1, "[%s][%d] Gateway inner pack err, Unknown cmd=%d.\n", __FILE__, __LINE__, cmd);
             break;
-        }
-        if(pro) {
-            pro->ExecCmd();
-            delete pro;
-            pro = NULL;
-        }
-        it++;
+    }
+    if(pro) {
+        pro->ExecCmd();
+        delete pro;
+        pro = NULL;
     }
 }
+

@@ -25,6 +25,7 @@
 #include "tgg_conf.h"
 #include "tgg_bw_cache.h"
 #include "BwMsgPack.hpp"
+#include "tgg_bwcomm.h"
 #include <rte_log.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -113,7 +114,15 @@ void *read_routine( void *arg )
 
         int fd = co->fd;
         co->fd = -1;
-
+        uint32_t ip;
+        ushort port;
+        char ip_str[INET_ADDRSTRLEN] = {0};
+        if (get_connection_info(fd, ip_str, &ip, &port) < 0) {
+            RTE_LOG(ERR, USER1, "[%s][%d] get peer connection[%d] info failed.\n",
+             __FILE__, __LINE__, fd);
+            close(fd);
+            return 0;
+        }
         char recv_buffer[ MAX_PACKET_SIZE ];
         // std::vector<char> recv_buffer;
         unsigned int pos = 0;
@@ -130,36 +139,52 @@ void *read_routine( void *arg )
                 memcpy(recv_buffer + pos, buf_read, ret);
                 if(pos + ret < sizeof(tgg_bw_protocal)) {
                     pos += ret;
-                    continue;
+                    continue;// 分包
                 }
                 tgg_bw_protocal* header = reinterpret_cast<tgg_bw_protocal*>(recv_buffer);
                 unsigned int pack_len = htonl(header->pack_len);
                 // 验证数据包长度有效性[4](@ref)
                 if(pack_len < sizeof(tgg_bw_protocal) || 
                    pack_len > MAX_PACKET_SIZE) {
+                    RTE_LOG(ERR, USER1, "[%s][%d] invalid packet len, bw[ip:%s,port%d] is closing.\n",
+                     __FILE__, __LINE__, ip_str, ntohs(port));
                     tgg_close_bw_session(g_prc_id, fd);
                     close( fd );
+                    RTE_LOG(ERR, USER1, "[%s][%d] bw[ip:%s,port%d] closed.\n",
+                     __FILE__, __LINE__, ip_str, ntohs(port));
                     return 0;
                 }
                 // 够header 但不够一个完整的包，继续收包
                 if(pos + ret < pack_len) {
                     pos += ret;
-                    continue;
+                    continue;// 分包
                 }
-                tgg_bw_data bwdata = {
-                    .fd = fd,
-                    .coreid = g_prc_id,
-                    .bwfdx = (fd << 8 ) | g_prc_id,
-                    .fd_opt = FD_WRITE,
-                    .idx = tgg_get_bwfdx_idx(g_prc_id, fd),
-                    .data_len = pack_len,
-                    .data = recv_buffer
-                };
-                tgg_process_bwrcv_data(&bwdata);
-                if(pos > pack_len) {
+                unsigned int left_len = pos + ret;
+                unsigned int parsed_pos = 0;// 当前缓冲区存放的完整的包的个数
+                do {
+                    tgg_bw_data bwdata = {
+                        .fd = fd,
+                        .coreid = g_prc_id,
+                        .bwfdx = (fd << 8 ) | g_prc_id,
+                        .fd_opt = FD_WRITE,
+                        .idx = tgg_get_bwfdx_idx(g_prc_id, fd),
+                        .data_len = pack_len,
+                        .data = recv_buffer + parsed_pos,
+                        .peer_ip = ip,// 下行的ip 端口 暂时没有用到
+                        .peer_port = port,
+                        .cid = 0// 下行没有cid
+                    };
+                    tgg_process_bwrcv_data(&bwdata);
+                    left_len -= pack_len;
+                    parsed_pos += pack_len;
+                    header = reinterpret_cast<tgg_bw_protocal*>(recv_buffer + parsed_pos);
+                    pack_len = htonl(header->pack_len);
+                } while (left_len >= pack_len && left_len > 0);// 处理粘包
+
+                if(left_len > 0) {
                     // 把剩余数据移动到前面去,数据提供了长度，因此不需要置空操作
-                    memmove(recv_buffer, recv_buffer + pack_len, pos - pack_len);
-                    pos -= pack_len;
+                    memmove(recv_buffer, recv_buffer + parsed_pos, left_len);
+                    pos = left_len;
                 } else {// 等于的情况
                     // 有长度和起始位置字段，不需要置空操作
                     // memset(recv_buffer, 0, pos);
@@ -170,8 +195,12 @@ void *read_routine( void *arg )
             {
                 continue;
             }
+            RTE_LOG(ERR, USER1, "[%s][%d] bw[ip:%s,port%d] is closing, ret:%d.\n",
+             __FILE__, __LINE__, ip_str, ntohs(port), ret);
             tgg_close_bw_session(g_prc_id, fd);
             close( fd );
+            RTE_LOG(ERR, USER1, "[%s][%d] bw[ip:%s,port%d] closed.\n",
+             __FILE__, __LINE__, ip_str, ntohs(port));
             break;
         }
 
@@ -195,7 +224,7 @@ void *write_routine( void *arg )
             poll(NULL, 0, 10);// sleep 10ms
             continue;
         }
-        int bwfdx = tgg_get_cli_bwfdx(bdata->coreid, bdata->fd);
+        int bwfdx = bdata->bwfdx;//tgg_get_cli_bwfdx(bdata->coreid, bdata->fd);
         int prc_id = bwfdx & 0xf;
         int fd = bwfdx >> 8;
         // cli对应的bwfd已经改变或者 bwfdx已关闭，丢弃
@@ -207,7 +236,7 @@ void *write_routine( void *arg )
         // 所以暂时放在这里，放在这里也没有问题，因为没有跟bw发送过connect消息的连接，后续也用不上
         if (bdata->fd_opt & FD_NEW) {
             int fdid = (bdata->fd << 8) | bdata->coreid;
-            int cid = ((bdata->coreid << 24) | tgg_get_cli_idx(bdata->coreid, bdata->fd));
+            int cid = bdata->cid;
             // 添加到 hash<cid, fd>
             if (tgg_add_cid(cid, fdid) < 0) {
                 RTE_LOG(ERR, USER1, "[%s][%d] add cid[%d] fdid[%d] failed.\n", __FILE__, __LINE__, cid, fdid);
@@ -219,11 +248,11 @@ void *write_routine( void *arg )
         tgg_bw_protocal header = {
             .pack_len = (unsigned int)sizeof(tgg_bw_protocal) + bdata->data_len,
             .cmd = (unsigned char)map_msgtype[bdata->fd_opt],
-            .local_ip = g_gw_local_ip,//(unsigned int)tgg_get_bwfdx_ip(prc_id, fd),
+            .local_ip = g_gw_local_ip,// gw的内网通信ip (unsigned int)tgg_get_bwfdx_ip(prc_id, fd),
             .local_port = g_gw_local_port,//(unsigned short)tgg_get_bwfdx_port(prc_id, fd),
-            .client_ip = (unsigned int)tgg_get_cli_ip(bdata->coreid, bdata->fd),
-            .client_port = (unsigned short)tgg_get_cli_port(bdata->coreid, bdata->fd),
-            .connection_id = (unsigned int)tgg_get_cli_idx(bdata->coreid, bdata->fd),
+            .client_ip = bdata->peer_ip,// 客户端的ip
+            .client_port = bdata->peer_port,
+            .connection_id = bdata->cid,
             .flag = 1,// TODO 需要确定数据来源，怎么填
             .gateway_port = TggConfigure::getInstance()->get_gateway_port(),
             .ext_len = 0// TODO 暂时不知道上行数据是否能用上
@@ -323,8 +352,8 @@ static void SetAddr(const char *pszIP,const unsigned short shPort,struct sockadd
         nIP = inet_addr(pszIP);
     }
     addr.sin_addr.s_addr = nIP;
-    g_gw_local_ip = ntohl(nIP);
-    g_gw_local_port = shPort;
+    g_gw_local_ip = nIP;//网络字节序
+    g_gw_local_port = shPort;// 网络字节序
 
 }
 
