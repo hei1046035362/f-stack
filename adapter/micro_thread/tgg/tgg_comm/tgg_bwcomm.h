@@ -4,7 +4,7 @@
 #include <string>
 #include "tgg_comm/tgg_struct.h"
 
-int get_connection_info(int fd, const char* ip, unsigned short* port);
+int get_connection_info(int fd, char* ip_str, unsigned int* ip, unsigned short* port);
 
 tgg_bw_info* lookup_bwinfo(int fd);
 
