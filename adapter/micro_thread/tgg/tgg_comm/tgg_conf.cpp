@@ -206,6 +206,21 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     this->bw_heart_beat = get_int_value(&pTgg_Ini, "bwserver", "port");
     if (this->bw_heart_beat <= 0) this->bw_heart_beat = 5;
 
+    // 网关对内ip
+    this->register_addr = pTgg_Ini.getValue("register", "ip");
+    if(!is_ipv4(this->register_addr)) {
+        RTE_LOG(ERR, USER1, "[%s][%d] parse config register ip:[%s] failed.", __FILE__, __LINE__, this->register_addr.c_str());
+        return -1;
+    }
+    // 网关对内端口
+    ret = get_int_value(&pTgg_Ini, "register", "port");
+    if (ret <= 0) return -1;
+    this->register_port = (unsigned short)ret;
+    if(this->register_port > 65535) {
+        RTE_LOG(ERR, USER1, "[%s][%d] invalid register port:[%d].", __FILE__, __LINE__, ret);
+        return -1;
+    }
+
     return 0;
 }
 

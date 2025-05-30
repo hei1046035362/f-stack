@@ -33,6 +33,9 @@ private:
     std::string bw_addr;        // 网关对内ip   服务端
     unsigned short bw_port;    // 网关对内使用的端口  服务端
     int bw_heart_beat;
+    std::string register_addr;        // 注册中心的地址
+    unsigned short register_port;    // 注册中心的端口
+
 public:
     int get_lcore_mask() { return lcore_mask;}
     int get_ccore_mask() { return ccore_mask;}
@@ -47,6 +50,8 @@ public:
     const std::string& get_bwsvr_bw_addr() {return bw_addr;}
     unsigned short get_bwsvr_bw_port() {return bw_port;}
     int get_bwsvr_heart_beat() {return bw_heart_beat;}
+    const std::string& get_register_addr() {return register_addr;}
+    unsigned short get_register_port() {return register_port;}
 };
 
 int tgg_init_config(int& argc, char* argv[]);
