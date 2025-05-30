@@ -507,6 +507,18 @@ void tgg_bwprc_uninit(int bwcount)
 	rte_eal_cleanup();
 }
 
+// register
+void tgg_register_init()
+{
+	tgg_secondary_init();
+	g_bwprc_zone = find_memzone(bwprc_zone_name);// 监控bwserver进程组
+}
+
+void tgg_register_uninit()
+{
+	rte_eal_cleanup();
+}
+
 
 void prc_exit(int exit_code, const char* fmt, ...)
 {
