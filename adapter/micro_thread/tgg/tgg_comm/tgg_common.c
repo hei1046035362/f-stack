@@ -427,6 +427,7 @@ int tgg_get_valid_bwprc(int bwcount, uint64_t now)
 		// 如果超过两倍心跳的时间都没有更新，就视为前一个进程已退出
 		if (prc->heart_beat == 0 || prc->heart_beat + 2*BW_PRC_HEART_BEAT < now) {
 			prc->heart_beat = now;
+			prc->pid = getpid();
 			return i;
 		}
 	}
@@ -439,6 +440,26 @@ void tgg_update_bwprc(int prc_id, uint64_t now)
 	SpinLock lock(get_bwprc_lock());
 	pid_data* prc = (pid_data*)g_bwprc_zone->addr + prc_id;
 	prc->heart_beat = now;
+}
+
+// 获取指定下标的进程id
+int tgg_get_bwprc_pid(int prc_id)
+{
+	SpinLock lock(get_bwprc_lock());
+	pid_data* prc = (pid_data*)g_bwprc_zone->addr + prc_id;
+	return prc->pid;
+}
+
+// 检查指定进程是否超时
+int tgg_checkif_bwprc_timeout(int prc_id, uint64_t now)
+{
+	SpinLock lock(get_bwprc_lock());
+	pid_data* prc = (pid_data*)(g_bwprc_zone->addr) + prc_id;
+	// 如果超过两倍心跳的时间都没有更新，就视为前一个进程已退出
+	if (now - prc->heart_beat > 2*BW_PRC_HEART_BEAT) {
+		return 1;// 超时
+	}
+	return 0;// 没超时
 }
 
 // 进程退出前主动清理，下一个进程就能快速启动

@@ -86,6 +86,12 @@ BWSERVER_OBJ = bwprc.o dpdk_init.o cmd/CmdProcessor.o tgg_comm/tgg_bw_cache.o\
 				comm/Serialize.o tgg_comm/tgg_conf.o tgg_comm/tgg_bwserver.o \
 				comm/RWIni.o tgg_comm/tgg_transport.o comm/common.o comm/Websocket.o
 
+REGISTER_OBJ = register.o dpdk_init.o tgg_comm/tgg_bw_cache.o\
+				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
+				tgg_comm/tgg_lock.o \
+				tgg_comm/tgg_conf.o tgg_comm/tgg_register.o \
+				comm/RWIni.o comm/common.o
+
 gwrcv: $(MASTER_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
 	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl $(FF_LIBS) -L$(FF_PATH)/adapter/micro_thread -lmt $(CRESET)
@@ -98,5 +104,8 @@ gwbwprc: $(BWSERVER_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
 	@$(CC) -O -gdwarf-2 -o $@ $^  -ldl -lz -lcolib -lssl $(FF_LIBS) $(CRESET)
 
+gwregister: $(REGISTER_OBJ)
+	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
+	@$(CC) -O -gdwarf-2 -o $@ $^  -ldl -lz -lcolib -lssl $(FF_LIBS) $(CRESET)
 
-all: gwrcv gwcliprc gwbwprc
+all: gwrcv gwcliprc gwbwprc gwregister
