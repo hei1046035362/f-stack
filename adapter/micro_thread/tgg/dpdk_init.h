@@ -13,6 +13,9 @@ void tgg_cliprc_uninit();
 void tgg_bwprc_init(int bwcount);
 void tgg_bwprc_uninit(int bwcount);
 
+void tgg_register_init();
+void tgg_register_uninit();
+
 void init_flag_for_process();
 void prc_exit(int exit_code, const char* fmt, ...);
 

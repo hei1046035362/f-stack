@@ -244,6 +244,11 @@ void *write_routine( void *arg )
                 continue;
             }
         }
+        struct pollfd pf = {0};
+        pf.fd = fd;
+        pf.events = (POLLIN|POLLERR|POLLHUP);
+        co_poll(co_get_epoll_ct(), &pf, 1, 1000);
+
         std::string result;
         tgg_bw_protocal header = {
             .pack_len = (unsigned int)sizeof(tgg_bw_protocal) + bdata->data_len,
