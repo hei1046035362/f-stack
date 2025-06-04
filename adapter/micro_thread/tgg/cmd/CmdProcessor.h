@@ -128,7 +128,7 @@ public:
 
 	CmdGetSessionByCid(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdGetSessionByCid() {}
-    int ExecCmd() {return 0;}
+    int ExecCmd();
 };
 
 class CmdGetAllClientSession : public CmdBaseProcessor {

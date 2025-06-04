@@ -11,7 +11,7 @@
 #include "tgg_struct.h"
 #include "tgg_comm/tgg_conf.h"
 #include "comm/common.hpp"
-#include <rte_log.h>
+#include "comm/log.hpp"
 
 int WsConsumer::ConsumerData(void* data)
 {
@@ -61,8 +61,7 @@ bool WsConsumer::ConnectionValid(int core_id, int fd, void* data)
     // }
     if (_idx != ((tgg_read_data*)data)->idx) {
         // 说明当前的数据已经是上一个连接的数据了
-        RTE_LOG(ERR, USER1, "[%s][%d] client idx[%d] not match to data idx[%d].\n",
-           __FILE__, __LINE__, _idx, ((tgg_read_data*)data)->idx);
+        LOG_ERROR("client idx[%d] not match to data idx[%d].", _idx, ((tgg_read_data*)data)->idx);
         return false;
     }
     return true;
@@ -103,10 +102,10 @@ static bool tgg_request_valid_check(const HttpRequest &req, std::string& token, 
     Encrypt encryptor = GetEncryptor();
     token = encryptor.Aes128Decrypt(ittoken->second);
     if (token.empty()) {
-        RTE_LOG(ERR, USER1, "[%s][%d] token[%s] decrypted error.\n", __FILE__, __LINE__, ittoken->second.c_str());
+        LOG_ERROR("token[%s] decrypted error.", ittoken->second.c_str());
         return false;
     }
-    RTE_LOG(ERR, USER1, "[%s][%d] OnHandShake ok, token:%s.\n", __FILE__, __LINE__, token.c_str());
+    LOG_INFO("OnHandShake ok, token:%s.\n", token.c_str());
     properties = itproperties->second;
     return true;
 }
@@ -155,8 +154,7 @@ bool WsConsumer::_CheckToken(const std::string& token)
     uint64_t uid = jtoken["user_id"].get<std::uint64_t>();
     std::string userid = std::to_string(uid);
     if(uid == 0 || userid.length() >= TGG_UID_LEN) {
-        RTE_LOG(ERR, USER1, "[%s][%d] invalid uid[%s] failed.\r\n", 
-            __FILE__, __LINE__, userid.c_str());
+        LOG_ERROR("invalid uid[%s] failed.", userid.c_str());
         return false;
     }
     // TODO  直接拿token里面的uid还是等bw发送bind消息再赋值？销毁连接时会去查询
@@ -169,14 +167,12 @@ void WsConsumer::OnHandShake(const std::string& response, HttpRequest& req)
 {
     std::string token, properties;
     if(!tgg_request_valid_check(req, token, properties)) {
-        RTE_LOG(ERR, USER1, "[%s][%d] tgg ws request[%s] check failed.\r\n", 
-            __FILE__, __LINE__, req.uri.c_str());
+        LOG_ERROR("tgg ws request[%s] check failed.", req.uri.c_str());
         _CleanAndClose();
         return;
     }
     if(!_CheckToken(token)) {
-        RTE_LOG(ERR, USER1, "[%s][%d] check token[%s] failed.\r\n", 
-            __FILE__, __LINE__, token.c_str());
+        LOG_ERROR("check token[%s] failed.", token.c_str());
         _CleanAndClose();
         return;
     }
@@ -197,8 +193,7 @@ void WsConsumer::OnHandShake(const std::string& response, HttpRequest& req)
     // SendONnoAuth(sendData, FD_WRITE);
     OnSend(response, FD_WRITE);// 响应客户端的http请求
     std::string result = data.dump();
-    RTE_LOG(ERR, USER1, "[%s][%d] OnHandShake:%s.\r\n", 
-        __FILE__, __LINE__, result.c_str());
+    LOG_INFO("OnHandShake:%s.", result.c_str());
     // 通知服务端websocket 握手完成
     if (Send2Server(this->core_id, this->fd, result, FD_HANDLESHAKE) == NO_BW_AVALIABLE) {
         SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
@@ -219,8 +214,7 @@ void WsConsumer::OnMessage(const std::string& msg)
 {
     int cli_status = tgg_get_cli_authorized(this->core_id, this->fd);
     if(cli_status != AUTH_TYPE_HANDLESHAKED) {
-        RTE_LOG(ERR, USER1, "[%s][%d] cli[%d] status[%d] is not handleshaked, msg[%s] droped.\n", 
-            __FILE__, __LINE__, this->_cid, cli_status, msg.c_str());
+        LOG_ERROR("cli[%d] status[%d] is not handleshaked, msg[%s] droped.", this->_cid, cli_status, msg.c_str());
         return;
     }
     if(Send2Server(this->core_id, this->fd, msg, FD_WRITE) == NO_BW_AVALIABLE) {
@@ -232,15 +226,13 @@ void WsConsumer::OnSend(const std::string& msg, int fd_opt)
 {
     // 连接已关闭或尚未建立
     if(tgg_get_cli_idx(this->core_id, this->fd) < 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Send data Failed, connection invalid: cid:%d,uid:%s,opt:%d",
-            __FILE__, __LINE__, _cid, _uid.c_str(), fd_opt);        
+        LOG_ERROR("Send data Failed, connection invalid: cid:%d,uid:%s,opt:%d.", _cid, _uid.c_str(), fd_opt);        
         return;
     }
 
-    std::cout << "OnSend fd[" << this->fd << "]idx[" << _idx << "]:" << bin2hex(msg) << std::endl;
+    LOG_DEBUG("OnSend to client fd[%d] idx[%d]: %s", this->fd, _idx, bin2hex(msg).c_str());
     if (enqueue_data_single_fd(this->core_id, msg, this->fd, _idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
-        RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%d,uid:%s,opt:%d",
-         __FILE__, __LINE__, _cid, _uid.c_str(), fd_opt);
+        LOG_ERROR("Enqueue data Failed: cid:%d,uid:%s,opt:%d.", _cid, _uid.c_str(), fd_opt);
         enqueue_data_single_fd(this->core_id, "", this->fd, _idx, FD_WRITE|FD_CLOSE);
     }
 }

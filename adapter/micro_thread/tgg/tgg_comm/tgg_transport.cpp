@@ -1,4 +1,4 @@
-#include <rte_log.h>
+#include "comm/log.hpp"
 #include <map>
 #include <iostream>
 #include "tgg_transport.h"
@@ -12,19 +12,18 @@ void Send2Client(int cid, const std::string& data, int fd_opt, int encode)
 {
     int fdidx = tgg_get_fdbycid(cid);
     if(fdidx < 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] client[%d] not exist.", __FILE__, __LINE__, cid);
+        LOG_ERROR("client[%d] not exist.", cid);
         return;
     }
     int fd = fdidx >> 8;
     int core_id = fdidx & 0xf;
     int idx = tgg_get_cli_idx(core_id, fd);
     if(idx < 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] client[%d] already closed.", __FILE__, __LINE__, cid);
+        LOG_ERROR("client[%d] already closed.", cid);
         return;
     }
     if(tgg_get_cli_authorized(core_id, fd) != AUTH_TYPE_HANDLESHAKED) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Send data to client[%d] should check Token at first.",
-            __FILE__, __LINE__, cid);
+        LOG_ERROR("Send data to client[%d] should check Token at first.", cid);
         return;
     }
     std::string packData;
@@ -32,8 +31,7 @@ void Send2Client(int cid, const std::string& data, int fd_opt, int encode)
     // 打包封装到
     if (encode && message_pack(2, 1, 0, 1, data, packData) < 0)
     {
-        RTE_LOG(ERR, USER1, "[%s][%d] message_pack data[%s] failed.\r\n", 
-            __FILE__, __LINE__, data.c_str());
+        LOG_ERROR("message_pack data[%s] failed.", data.c_str());
         return;
     }
     if(fd_opt & FD_CLOSE) {
@@ -41,10 +39,9 @@ void Send2Client(int cid, const std::string& data, int fd_opt, int encode)
     } else {
         sendData = Websocket::EncodeWebsocketMessage(BINARY_FRAME, encode ? packData : data);
     }
-    std::cout << "send data["<< cid <<"]:" << bin2hex(sendData) << std::endl;
+    LOG_DEBUG("send data cid[%d]:%s", cid, sendData.c_str());
     if (enqueue_data_single_fd(core_id, sendData, fd, idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
-        RTE_LOG(ERR, USER1, "[%s][%d] Enqueue data Failed: cid:%d,opt:%d",
-         __FILE__, __LINE__, cid, fd_opt);
+        LOG_ERROR("Enqueue data Failed: cid:%d,opt:%d", cid, fd_opt);
     }
 }
 
@@ -55,7 +52,7 @@ void BatchSend2ClientBycids(std::list<int> cids, const std::string& data, int fd
     while(itCid != cids.end()) {
         int fdidx = tgg_get_fdbycid(*itCid);
         if(fdidx < 0) {
-            RTE_LOG(INFO, USER1, "[%s][%d] client[%d] not exist.", __FILE__, __LINE__, *itCid);
+            LOG_ERROR("client[%d] not exist.", *itCid);
             continue;
         }
         lstFds.push_back(fdidx);
@@ -67,8 +64,7 @@ void BatchSend2ClientBycids(std::list<int> cids, const std::string& data, int fd
 void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_opt, int encode)
 {
     if(fds.size() <= 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] fd list can't be empty.\r\n", 
-            __FILE__, __LINE__);
+        LOG_ERROR("fd list can't be empty.");
         return;
     }
     // 不同的core_id，分到不同的组，发送的时候需要根据core_id发送到不同的队列
@@ -85,14 +81,13 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
             int idx = tgg_get_cli_idx(coreidFds.first, *itFd);
             if(idx < 0) {
                 int cid = tgg_get_cli_cid(coreidFds.first, *itFd);
-                RTE_LOG(INFO, USER1, "[%s][%d] client[%d] already closed.\n", __FILE__, __LINE__, cid);
+                LOG_ERROR("client[%d] already closed.", cid);
                 itFd++;
                 continue;
             }
             if(tgg_get_cli_authorized(coreidFds.first, *itFd) != AUTH_TYPE_HANDLESHAKED) {
                 int cid = tgg_get_cli_cid(coreidFds.first, *itFd);
-                RTE_LOG(INFO, USER1, "[%s][%d] Send data to client[%d] should check Token at first.\n",
-                    __FILE__, __LINE__, cid);
+                LOG_ERROR("Send data to client[%d] should check Token at first.", cid);
                 itFd++;
                 continue;
             }
@@ -100,8 +95,7 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
             itFd++;
         }
         if(mapFdidx.size() <= 0) {
-            RTE_LOG(ERR, USER1, "[%s][%d] no live fd found for.\r\n", 
-                __FILE__, __LINE__);
+            LOG_ERROR("no live fd found for.");
             return;
         }
         std::string packData;
@@ -109,8 +103,7 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
         // 打包封装到
         if (encode && message_pack(2, 1, 0, 1, data, packData) < 0)
         {
-            RTE_LOG(ERR, USER1, "[%s][%d] message_pack data[%s] failed.\r\n", 
-                __FILE__, __LINE__, data.c_str());
+            LOG_ERROR("message_pack data[%s] failed.", data.c_str());
             return;
         }
         if(fd_opt & FD_CLOSE) {
@@ -118,10 +111,9 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
         } else {
             sendData = Websocket::EncodeWebsocketMessage(BINARY_FRAME, encode ? packData : data);
         }
-        std::cout << "send group data:" << bin2hex(sendData) << std::endl;
+        LOG_DEBUG("send group data:%s.", bin2hex(sendData).c_str());
         if (enqueue_data_batch_fd(coreidFds.first, sendData, mapFdidx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
-            RTE_LOG(ERR, USER1, "[%s][%d] Batch Enqueue data Failed\n",
-               __FILE__, __LINE__);
+            LOG_ERROR("Batch Enqueue data Failed.");
         }
     }
 }
@@ -129,15 +121,13 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
 int Send2Server(int core_id, int fd, const std::string& data, int fd_opt)
 {
     if(tgg_get_bwfdx_count() <= 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Send data to server Failed: no bw found.\n",
-               __FILE__, __LINE__);
+        LOG_ERROR("Send data to server Failed: no bw found.");
         return NO_BW_AVALIABLE;
     }
     if (enqueue_data_trans(core_id, fd, data, fd_opt) < 0) {// 函数内部会循环尝试发送10次
-        RTE_LOG(ERR, USER1, "[%s][%d] Send data to server Failed.\n",
-               __FILE__, __LINE__);
+        LOG_ERROR("Send data to server Failed.");
         return SEND_FAILED;
     }
-    printf("[%s][%d]send to server:%s\n", __FILE__, __LINE__, bin2hex(data).c_str());
+    LOG_DEBUG("send to server:%s.", bin2hex(data).c_str());
     return SEND_SUCCESS;
 }

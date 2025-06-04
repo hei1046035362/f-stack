@@ -9,6 +9,7 @@
 #include "common.hpp"
 #include "tgg_comm/tgg_common.h"
 #include "Websocket.hpp"
+#include "log.hpp"
 
 static const size_t WS_MAX_RECV_FRAME_SZ = 10485760;
 
@@ -281,8 +282,8 @@ Websocket::_GetWsFrame(unsigned char *in_buffer, size_t buf_len,
                 /* Implementation limitation, we support up to 10 MiB
                  * length, as a DoS prevention measure.
                  */
-                printf("%s: frame length %lu exceeds %lu.\n",
-                    __FILE__, tmp64, (uint64_t)WS_MAX_RECV_FRAME_SZ);
+                LOG_ERROR("frame length %lu exceeds %lu.\n",
+                    tmp64, (uint64_t)WS_MAX_RECV_FRAME_SZ);
                 /* Calling code needs these values; do the best we can here.
                  * Caller will close the connection anyway.
                  */
@@ -357,7 +358,7 @@ int Websocket::ReadData(void* data, int len)
                 // 数据不完整，先缓存起来，等待下一个包，一个websocket包分在两个分片中  buflen<packetlen
                 // 也就是还没有缓存一个完整的websocket包，不用解析，等待下一个包进来拼接在一起
             if (cache_ws_buffer(this->core_id, this->fd, input, len, 0, 0)) {
-                RTE_LOG(ERR, USER1, "[%s][%d] Cache buffer failed.", __FILE__, __LINE__);
+                LOG_ERROR("Cache buffer failed.");
                 // 缓存失败的话，一个包缓存补上，前面的包就不完整，全部丢弃
                 return -1;
             }
@@ -366,7 +367,7 @@ int Websocket::ReadData(void* data, int len)
         header_sz = payload - input;
 
         if (cache_ws_buffer(this->core_id, this->fd, input, len, header_sz) < 0) {
-            RTE_LOG(ERR, USER1, "[%s][%d] Cache buffer failed.", __FILE__, __LINE__);
+            LOG_ERROR("Cache buffer failed.");
             return -1;
         }
         std::string buffer = get_whole_buffer(this->core_id, this->fd);
@@ -384,7 +385,7 @@ int Websocket::ReadData(void* data, int len)
                 OnClose();
                 break;
             case ERROR_FRAME:
-                RTE_LOG(ERR, USER1, "[%s][%d] error frame.", __FILE__, __LINE__);
+                LOG_ERROR("error frame.");
                 OnClose();
                 break;
             case PING_FRAME:
@@ -399,7 +400,7 @@ int Websocket::ReadData(void* data, int len)
                 OnPong(buffer);
                 break;
             default:
-                RTE_LOG(ERR, USER1, "[%s][%d] : unexpected frame type %d\n", __FILE__, __LINE__, type);
+                LOG_ERROR("unexpected frame type %d.", type);
                 break;
         }
         return 1;
@@ -420,6 +421,6 @@ void Websocket::SendData(const std::string& data, int fd_opt) {
     if(handshake) {
         SendONnoAuth(data, fd_opt);
     } else {
-        RTE_LOG(ERR, USER1, "[%s][%d] : Session should be authorized before send data.\n", __FILE__, __LINE__);
+        LOG_ERROR("Session should be authorized before send data.");
     }
 }
