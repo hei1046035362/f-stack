@@ -10,6 +10,7 @@
 #include "comm/Encrypt.hpp"
 #include "comm/common.hpp"
 #include "tgg_comm/tgg_conf.h"
+#include "comm/log.hpp"
 
 int g_run = 1;
 static const char* s_dump_file = "/var/corefiles/tgg_gw_bwprc_core";
@@ -29,7 +30,7 @@ void signal_handler(int signum)
 			g_run = 0;
 		}
 	}
-    printf("signal num:%d\n", signum);
+    LOG_WARNING("signal num:%d.", signum);
 }
 
 static uint64_t s_last_update_time = 0;
@@ -139,9 +140,15 @@ int main(int argc, char *argv[])
 {
 	init_core(s_dump_file);
 	if (tgg_init_config(argc, argv) < 0) {
-		printf("init config error.");
+		printf("init config error.\n");
 		return -1;
 	}
+    if (AsyncLogger::getInstance().init(TggConfigure::getInstance()->get_log_path(), 
+        TggConfigure::getInstance()->get_bwserver_log_level()) < 0) {
+        printf("init log error.\n");
+        return -1;
+    }
+    LOG_INFO("-----------bwprc start----------");
 	tgg_process_init();
     prc_dpdk_eal_init(argc, argv);
 
@@ -149,12 +156,12 @@ int main(int argc, char *argv[])
     unsigned int port = TggConfigure::getInstance()->get_bwsvr_bw_port();
     const std::string& ip = TggConfigure::getInstance()->get_bwsvr_bw_addr();
 	g_listen_fd = create_tcp_socket( port, ip.c_str(), true );
-    listen( g_listen_fd,1024 );
+    listen(g_listen_fd, 1024);
     if(g_listen_fd == -1){
-        printf("Port %d is in use\n", port);
+        LOG_ERROR("Port %d is in use.", port);
         return -1;
     }
-    printf("listen %d %s:%d,total server count:%d\n",g_listen_fd, ip.c_str(), port, TggConfigure::getInstance()->get_bwsvr_count());
+    LOG_INFO("listen %d %s:%d,total server count:%d.",g_listen_fd, ip.c_str(), port, TggConfigure::getInstance()->get_bwsvr_count());
 
     set_non_block( g_listen_fd );
 
@@ -162,14 +169,15 @@ int main(int argc, char *argv[])
     g_prc_id = tgg_get_valid_bwprc(TggConfigure::getInstance()->get_bwsvr_count(), get_system_ms());
     if(g_prc_id < 0) {
         close(g_listen_fd);
-        printf("\n-----------main end: no valid bwprc-id avalible----------\n");
+        LOG_ERROR("-----------main end: no valid bwprc-id avalible----------");
         return -1;
     }
-    printf("--------gwprc start[pid:%d][prc_id:%d]---------\n", getpid(), g_prc_id);
+    LOG_INFO("--------bwprc started [pid:%d][prc_id:%d]---------", getpid(), g_prc_id);
     main_bw_proc(g_prc_id);
 
 	// TODO 进程退出时要回收资源
 	tgg_process_uninit();
-	printf("\n-----------main end----------\n");
+	LOG_INFO("-----------main end----------");
+    AsyncLogger::getInstance().shutdown();
 	return 0;
 }

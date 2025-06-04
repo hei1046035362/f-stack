@@ -6,7 +6,6 @@
 #include <openssl/evp.h>
 #include <openssl/ssl.h>
 #include <openssl/sha.h>
-#include <rte_log.h>
 
 // 初始化OpenSSL库
 void initOpenSSL();

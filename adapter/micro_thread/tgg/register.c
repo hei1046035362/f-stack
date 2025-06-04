@@ -12,6 +12,7 @@
 #include "dpdk_init.h"
 #include "comm/common.hpp"
 #include "tgg_comm/tgg_conf.h"
+#include "comm/log.hpp"
 
 int g_run = 1;
 static const char* s_dump_file = "/var/corefiles/tgg_gw_register_core";
@@ -67,24 +68,24 @@ static void custom_fork(const char* exec_name)
     }
     pid_t pid = fork();
     if (pid < 0) {
-        perror("fork failed.\n");
+        LOG_ERROR("fork failed.");
     }
 
     if (pid == 0) {  // 子进程
         // 1. 验证路径安全
         if (access(exe_path, X_OK) != 0) {
             perror("目标程序不可执行");
-            printf("[%s][%d] access filepath failed [%s]\n", __FILE__, __LINE__, exe_path);
+            LOG_ERROR("access filepath failed [%s].", exe_path);
             exit(EXIT_FAILURE);
         }
         
         struct stat st;
         if (stat(exe_path, &st) == -1 || !S_ISREG(st.st_mode)) {
             fprintf(stderr, "错误：无效文件\n");
-            printf("[%s][%d] stat filepath failed [%s]\n", __FILE__, __LINE__, exe_path);
+            LOG_ERROR("stat filepath failed [%s]", exe_path);
             exit(EXIT_FAILURE);
         }
-        printf("[%s][%d] launch up a new process for [%s]\n", __FILE__, __LINE__, exe_path);
+        LOG_INFO("launch up a new process for [%s]", exe_path);
         // 2. 构造参数数组
         char **args = (char**)malloc((2) * sizeof(char*));
         args[0] = exe_path;
@@ -92,7 +93,7 @@ static void custom_fork(const char* exec_name)
         execv(exe_path, args);
 
         // 若execv返回，说明执行失败
-        perror("execv失败");
+        LOG_ERROR("execv failed.");
         free(args);
         exit(EXIT_FAILURE);
     }
@@ -118,12 +119,12 @@ void check_bwprc()
             if(pid > 0) {
                 if (kill(pid, SIGINT) == -1) {// 不能kill -9，可能会导致其他进程死锁
                     if (errno == ESRCH) {
-                        printf("process[%d] not exist anymore.\n", pid);
+                        LOG_ERROR("process[%d] not exist anymore.", pid);
                     } else if (errno == EPERM) {
-                        printf("Permission denied process[%d].\n", pid);
+                        LOG_ERROR("Permission denied process[%d].", pid);
                         continue;
                     } else {
-                        printf("kill process[%d] faild error:%d.\n", pid, errno);
+                        LOG_ERROR("kill process[%d] faild error:%d.", pid, errno);
                         continue;
                     }
                 }
@@ -220,14 +221,26 @@ static void prc_dpdk_eal_init(int argc, char **argv)
     tgg_register_init();
 }
 
+void daemon()
+{
+    pid_t pid = fork();
+    if (pid < 0) exit(EXIT_FAILURE);  // 创建失败
+    if (pid > 0) exit(EXIT_SUCCESS); // 父进程退出
+}
 
 int main(int argc, char *argv[])
 {
 	init_core(s_dump_file);
 	if (tgg_init_config(argc, argv) < 0) {
-		printf("init config error.");
+		printf("init config error.\n");
 		return -1;
 	}
+    if (AsyncLogger::getInstance().init(TggConfigure::getInstance()->get_log_path(), 
+        TggConfigure::getInstance()->get_register_log_level()) < 0) {
+        printf("init log error.\n");
+        return -1;
+    }
+    LOG_INFO("-----------register start----------");
 	tgg_process_init();
     prc_dpdk_eal_init(argc, argv);
 
@@ -235,13 +248,12 @@ int main(int argc, char *argv[])
     const std::string& ip = TggConfigure::getInstance()->get_register_addr();
     g_register_fd = connect_tcp_socket( port, ip.c_str());
     while (g_register_fd < 0 && g_run) {// 没连上就每隔5s重连一次
-        printf("[%s][%d] connect to register[%s:%d] failed, check if server is alive.\n", 
-            __FILE__, __LINE__, ip.c_str(), port);
+        LOG_INFO("connect to register[%s:%d] failed, check if server is alive.", ip.c_str(), port);
         poll(NULL, 0, 5000);// sleep 5s
         g_register_fd = connect_tcp_socket( port, ip.c_str());
     }
 
-    printf("connect to register %s:%d.\n", ip.c_str(), port);
+    LOG_INFO("connect to register %s:%d.\n", ip.c_str(), port);
 
     if(g_run) {
         main_register_proc();
@@ -250,6 +262,7 @@ int main(int argc, char *argv[])
 
 	// TODO 进程退出时要回收资源
 	tgg_process_uninit();
-	printf("\n-----------main end----------\n");
+	LOG_INFO("-----------main end----------");
+    AsyncLogger::getInstance().shutdown();
 	return 0;
 }

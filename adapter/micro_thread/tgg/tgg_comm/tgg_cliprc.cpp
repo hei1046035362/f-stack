@@ -1,5 +1,5 @@
 #include "tgg_cliprc.h"
-#include <rte_log.h>
+#include "comm/log.hpp"
 #include <rte_malloc.h>
 #include <rte_mempool.h>
 #include "tgg_comm/tgg_common.h"
@@ -33,7 +33,7 @@ void tgg_process_read(int lcore_idx)
         memset(rdata, 0, sizeof(tgg_read_data));
         rte_mempool_put(g_mempool_read, (void*)rdata);
     }
-    RTE_LOG(INFO, USER1, "[%s][%d] cliprc thread exit, handle lcore_idx:%d\n", __FILE__, __LINE__, lcore_idx);
+    LOG_INFO("cliprc thread exit, handle lcore_idx:%d", lcore_idx);
 }
 
 
@@ -51,22 +51,23 @@ static void* deal_trans(void*)
             usleep(10);
             continue;
         }
+#if 0
+        int idx = tgg_get_cli_idx(bdata->coreid, bdata->fd);
         if(bdata->data_len > 3 && !strncmp((char*)bdata->data, "GET", 3)) {// GET请求消息
-            printf("fd:%d idx:%d trans data:%s\n", bdata->fd, 
-                tgg_get_cli_idx(bdata->coreid, bdata->fd), (char*)(bdata->data));
+            LOG_DEBUG("fd:%d idx:%d trans data:%s.", bdata->fd, 
+                idx, (char*)(bdata->data));
         } else {// 其他消息
             if(bdata->data_len == 0) {
-                printf("fd:%d idx:%d trans without data\n", bdata->fd, 
-                    tgg_get_cli_idx(bdata->coreid, bdata->fd));
+                LOG_DEBUG("fd:%d idx:%d trans without data.", bdata->fd, idx);
             } else {
                 std::string hex = bin2hex(std::string((char*)(bdata->data), bdata->data_len));
-                if(!strncmp(hex.c_str(), "fffe", 4)) {
+                // if(!strncmp(hex.c_str(), "fffe", 4)) {
                     
-                }
-                printf("fd:%d idx:%d trans data:%s\n", bdata->fd, 
-                    tgg_get_cli_idx(bdata->coreid, bdata->fd), hex.c_str());
+                // }
+                LOG_DEBUG("fd:%d idx:%d trans data:%s.", bdata->fd, idx, hex.c_str());
             }
         }
+#endif
         int bwfdx = tgg_get_cli_bwfdx(bdata->coreid, bdata->fd);
         if(bwfdx && tgg_get_bwfdx_status((bwfdx & 0xf), bwfdx >> 8)) {
             // 已经绑定服务端，正常透传
@@ -81,8 +82,7 @@ static void* deal_trans(void*)
                 // bwfdx = tgg_get_bwfdx_bypos(pos);
                 bwfdx = tgg_get_load_balance();
                 if(bwfdx == -1) {
-                    RTE_LOG(ERR, USER1, "[%s][%d] get load balance failed.\n", 
-                        __FILE__, __LINE__);
+                    LOG_ERROR("get load balance failed.");
                     usleep(10);
                     continue;
                 }
@@ -91,12 +91,11 @@ static void* deal_trans(void*)
                 }
             }
             if(index < MAX_CALC_LOAD_BALANCE_TRY - 1) {
-                RTE_LOG(ERR, USER1, "[%s][%d] get bwfdx for fd[%d] idx[%d] failed, tried times:%d.\n", 
-                    __FILE__, __LINE__, bdata->fd, bdata->idx, MAX_CALC_LOAD_BALANCE_TRY-index);
+                LOG_ERROR("get bwfdx for fd[%d] idx[%d] failed, tried times:%d.", 
+                    bdata->fd, bdata->idx, MAX_CALC_LOAD_BALANCE_TRY-index);
             }
             if (bwfdx <= 0) {// 入队列失败之后，清理数据，否则上行队列会满，而无法接收新数据
-                RTE_LOG(ERR, USER1, "[%s][%d] get bwfdx failed.\n", 
-                    __FILE__, __LINE__);
+                LOG_ERROR("get bwfdx failed.");
                 clean_bw_data(bdata);
             } else {
                 // 客户端连接绑定到服务端连接
@@ -106,20 +105,19 @@ static void* deal_trans(void*)
                 bdata->bwfdx = bwfdx;
                 if (tgg_enqueue_bwsnd( (bwfdx & 0xf), bdata) < 0) {
                     // TODO 判断进程是否还在，不在了的话要做些什么操作
-                    RTE_LOG(ERR, USER1, "[%s][%d] enque bwsnd failed, bwfdx:%d.\n", 
-                        __FILE__, __LINE__, bwfdx);
+                    LOG_ERROR("enque bwsnd failed, bwfdx:%d.", bwfdx);
                     clean_bw_data(bdata);
                 }
             }
         }
     }
-    printf("Trans thread ended.\n");
+    LOG_INFO("Trans thread ended.");
     return 0;
 }
 
 int init_bwtrans()
 {
-    printf("Trans thread started.\n");
+    LOG_INFO("Trans thread started.");
     return pthread_create(&s_bwtrans_thread, NULL, &deal_trans, NULL);
 }
 
@@ -127,6 +125,6 @@ void uninit_bwtrans()
 {
     void* retval = NULL;
     if (pthread_join(s_bwtrans_thread, &retval) < 0) {
-        perror("join thread failed.");
+        LOG_ERROR("join thread failed.");
     }
 }
