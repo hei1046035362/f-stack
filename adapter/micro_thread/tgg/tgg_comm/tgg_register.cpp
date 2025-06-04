@@ -25,7 +25,7 @@
 #include "tgg_bw_cache.h"
 #include "tgg_bwcomm.h"
 #include "comm/common.hpp"
-#include <rte_log.h>
+#include "comm/log.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -106,19 +106,19 @@ int connect_tcp_socket(const unsigned short shPort, const char *pszIP)
         ret = getsockopt(fd, SOL_SOCKET, SO_ERROR,(void *)&error,  &socklen);
         if ( ret == -1 ) 
         {       
-            printf("[%s][%d]getsockopt ERROR ret %d %d:%s\n", __FILE__, __LINE__, ret, errno, strerror(errno));
+            LOG_ERROR("getsockopt ERROR ret %d %d:%s", ret, errno, strerror(errno));
             close(fd);
             return -1;
         }       
         if ( error ) 
         {       
             errno = error;
-            printf("[%s][%d]connect ERROR ret %d %d:%s\n", __FILE__, __LINE__, error, errno, strerror(errno));
+            LOG_ERROR("connect ERROR ret %d %d:%s", error, errno, strerror(errno));
             close(fd);
             return -1;
         }
     } else if(ret < 0) {
-        printf("[%s][%d]connect ERROR ret %d %d:%s\n", __FILE__, __LINE__, ret, errno, strerror(errno));
+        LOG_ERROR("connect ERROR ret %d %d:%s", ret, errno, strerror(errno));
         return -1;
     }
     return fd;
@@ -132,20 +132,19 @@ void *register_read_routine( void *arg )
         struct pollfd pf = {0};
         pf.fd = rdata->fd;
         pf.events = POLLIN;
-        co_poll(co_get_epoll_ct(), &pf, 1, 1000);
+        co_poll(co_get_epoll_ct(), &pf, 1, 200);
 
         char buf_read[ 4096 ];
         int ret = read( rdata->fd,buf_read,sizeof(buf_read) );
         if(ret > 0) {
-            printf("[%s][%d] recieve data:%s, len[%d].\n", __FILE__, __LINE__, buf_read, ret);
+            LOG_DEBUG("recieve data:%s, len[%d].", buf_read, ret);
         }
         if( ret > 0 || ( -1 == ret && EAGAIN == errno ) )
         {
             continue;
         }
         close( rdata->fd );
-        RTE_LOG(ERR, USER1, "[%s][%d] bw[ip:%s,port%d] closed.\n",
-         __FILE__, __LINE__, rdata->ip, rdata->port);
+        LOG_INFO("bw[ip:%s,port:%d] closed.", rdata->ip, rdata->port);
         break;
     }
     g_register_fd = -1;
@@ -172,19 +171,13 @@ void *register_write_routine( void *arg )
     std::string ping_data = "{\"event\":\"ping\"}";
     uint64_t last_update_time = get_system_ms();
     while(g_run) {
-        struct pollfd pf = {0};
-        pf.fd = wdata->fd;
-        pf.events = POLLIN;
-        co_poll(co_get_epoll_ct(), &pf, 1, 1000);
-
         uint64_t now = get_system_ms();
         if(now - last_update_time > wdata->ping_interval) {
             // printf("update heart beat for [PID:%d][prc_id:%d]\n", getpid(), g_prc_id);
             last_update_time = now;
             int ret = write(wdata->fd, ping_data.c_str(), ping_data.length());
             if(-1 == ret) {
-                RTE_LOG(ERR, USER1, "[%s][%d] send to register failed, ip[%s] port[%d].",
-                 __FILE__, __LINE__, wdata->ip, wdata->port);
+                LOG_ERROR("send to register failed, ip[%s] port[%d].", wdata->ip, wdata->port);
                 break;
             }
         } else {

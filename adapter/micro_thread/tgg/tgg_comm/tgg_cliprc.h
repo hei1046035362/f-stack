@@ -5,7 +5,7 @@
 #include <iostream>
 #include <vector>
 #include <thread>
-
+#include "comm/log.hpp"
 class ThreadArray {
 public:
     // 构造函数，传入要创建的线程数量
@@ -22,12 +22,12 @@ public:
             CPU_SET(ccoreIdx[i], &cpuset);     // 添加核心
             // 设置线程亲和性
             if (pthread_setaffinity_np(thd.native_handle(), sizeof(cpu_set_t), &cpuset) != 0) {
-                std::cerr << "bound ccore[" << i << ":"  << ccoreIdx[i] << "] failed" << std::endl;
+                LOG_ERROR("bound thread:%d to cpu:%d failed", i, ccoreIdx[i]);
             }
-            printf("Start Thread[%d]:Bound cpu[%d]\n", i, ccoreIdx[i]);
+            LOG_INFO("Start Thread[%d]:Bound cpu[%d]", i, ccoreIdx[i]);
             threads.push_back(std::move(thd));
         }
-        printf("All Working threads[%ld] started.\n", lcoreIdx.size());
+        LOG_INFO("All Working threads[%ld] started.", lcoreIdx.size());
     }
 
     // 等待所有线程执行完毕的函数

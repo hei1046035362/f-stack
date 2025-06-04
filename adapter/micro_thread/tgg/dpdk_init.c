@@ -18,6 +18,7 @@
 #include "tgg_comm/tgg_lock.h"
 #include "tgg_comm/tgg_common.h"
 #include "tgg_comm/tgg_conf.h"
+#include "comm/log.hpp"
 
 const char* g_gateway_ip_str = "192.168.40.129";
 ushort g_gateway_port = 80;
@@ -149,8 +150,7 @@ find_memzone(const char *name)
 	snprintf(mz_name, RTE_MEMZONE_NAMESIZE, "%s_%u", name, socket_id);
 	memzone = (struct rte_memzone *)rte_memzone_lookup(mz_name);
 	if (!memzone) {
-		RTE_LOG(ERR, USER1, "[%s]:[%d]memzone[%s] not found.\n", 
-			 __FILE__, __LINE__, mz_name);
+		LOG_ERROR("memzone[%s] not found.", mz_name);
 		return NULL;
 	}
 	return memzone;
@@ -169,21 +169,20 @@ make_memzone(const char *name, size_t size)
 		memset(memzone->addr, 0, memzone->len);
 		rte_memzone_free(memzone);
 		memzone = NULL;
-		RTE_LOG(ERR, USER1, "[%s][%d]memzone[%s] found, but len[%lu] not match[%lu]\n", 
-			__FILE__, __LINE__, mz_name, memzone->len, size);
+		LOG_ERROR("memzone[%s] found, but len[%lu] not match[%lu].", mz_name, memzone->len, size);
 	}
 	if (memzone == NULL) {
 		memzone = (struct rte_memzone *)rte_memzone_reserve_aligned(mz_name, size, socket_id,
 				RTE_MEMZONE_2MB, RTE_CACHE_LINE_SIZE);
 		if (memzone == NULL){
+			LOG_ERROR("Can't allocate memory zone %s, error:%s.", mz_name, rte_strerror(rte_errno));
 			rte_exit(EXIT_FAILURE,
 				"[%s][%d] Can't allocate memory zone %s, error:%s.\n", __FILE__, __LINE__,
 				mz_name, rte_strerror(rte_errno));
 		}
 	}
 	memset(memzone->addr, 0, size);
-	RTE_LOG(INFO, USER1, "New zone allocated: %s.\n",
-		mz_name);
+	LOG_INFO("New zone allocated: %s.",	mz_name);
 	return memzone;
 }
 
@@ -220,13 +219,13 @@ make_mempool(const char *name, size_t units, size_t unit_size)
 			0, NULL, NULL, NULL, NULL,
 			rte_socket_id(), 0);
 		if (mempool == NULL) {
+			LOG_ERROR("Can't allocate memory pool %s.", mp_name);
 			rte_exit(EXIT_FAILURE,
 				"Can't allocate memory pool %s:%s:%d\n",
 				mp_name, __FILE__, __LINE__);
 		}
 	}
-	RTE_LOG(INFO, USER1, "New mempool allocated: %s.\n",
-		mp_name);
+	LOG_INFO("New mempool allocated: %s.", mp_name);
 	return mempool;
 }
 
@@ -261,13 +260,13 @@ make_ring(const char *name, size_t units)
 			rte_socket_id(),
 			0);
 		if (ring == NULL){
+			LOG_ERROR("Can't allocate ring %s.", ring_name);
 			rte_exit(EXIT_FAILURE,
 				"Can't allocate ring %s:%s:%d\n",
 				ring_name, __FILE__, __LINE__);
 		}
 	}
-	RTE_LOG(INFO, USER1, "New ring allocated: %s\n",
-		ring_name);
+	LOG_INFO("New ring allocated: %s.", ring_name);
 	return ring;
 }
 
@@ -302,18 +301,18 @@ struct rte_hash* init_hash(const char* hash_name, uint32_t ent_cnt, uint32_t key
 
 	_hash = rte_hash_create(&hash_params);
 	if (!_hash) {
+		LOG_ERROR("Failed to create hash table[%s]", hash_name);
 		rte_exit(EXIT_FAILURE,
 			"Failed to create hash table[%s]:%s:%d\n",
 			hash_name, __FILE__, __LINE__);
 	}
-	RTE_LOG(ERR, USER1, "New hash created: %s\n",
-		hash_name);
+	LOG_INFO("New hash created: %s", hash_name);
 	return _hash;
 }
 
 void tgg_master_init()
 {
-	RTE_LOG(INFO, USER1, "Init dpdk master for tgg...\n");
+	LOG_INFO("Init dpdk master for tgg...");
 	// 100W个FD  32M的空间
 	g_lock_zone = make_memzone(s_lock_zone_name, sizeof(tgg_lock));
 	init_locks();
@@ -376,7 +375,7 @@ void tgg_master_init()
 	g_bwwkkey_hash = init_hash(s_bwwkkey_hash_name, g_fd_limit, TGG_BWWKKEY_LEN);
 	g_bwprc_zone = make_memzone(bwprc_zone_name, TggConfigure::getInstance()->get_bwsvr_count()*sizeof(pid_data));
 
-	RTE_LOG(INFO, USER1, "Init dpdk master for tgg done.\n");
+	LOG_INFO("Init dpdk master for tgg done.");
 }
 
 void tgg_master_uninit()
@@ -462,7 +461,7 @@ void init_multi_for_secondary()
 
 void tgg_secondary_init()
 {
-	RTE_LOG(ERR, USER1, "Init dpdk secodary for tgg...\n");
+	LOG_INFO("Init dpdk secodary for tgg...");
 	// 100W个FD  32M的空间
 	init_multi_for_secondary();
 	g_lock_zone = find_memzone(s_lock_zone_name);

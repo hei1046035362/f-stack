@@ -16,6 +16,7 @@
 #include "tgg_comm/tgg_conf.h"
 #include <vector>
 #include "tgg_comm/tgg_cliprc.h"
+#include "comm/log.hpp"
 // 绝对路径
 const char* f_stack_ini = "/data/code/f-stack/config.ini";
 
@@ -27,7 +28,7 @@ void signal_handler(int signum)
 	if(signum == SIGINT || signum == SIGTERM) {
 		if(g_run) {
 			g_run = 0;
-			RTE_LOG(WARNING, USER1, "catched signal:%d\n", signum);
+			LOG_WARNING("catched signal:%d", signum);
 		}
 	}
 }
@@ -41,11 +42,11 @@ void tgg_gw_process(void* data)
 void tgg_sig_init()
 {
 	if (signal(SIGINT, signal_handler) == SIG_ERR) {
-        perror("Error setting signal handler");
+        LOG_ERROR("Error setting signal handler");
         prc_exit(-1, "Error setting signal handler");
     }
 	if (signal(SIGTERM, signal_handler) == SIG_ERR) {
-        perror("Error setting signal handler");
+        LOG_ERROR("Error setting signal handler");
         prc_exit(-1, "Error setting signal handler");
     }
 
@@ -96,11 +97,17 @@ int main(int argc, char *argv[])
 {
 	init_core(s_dump_file);
 	if (tgg_init_config(argc, argv) < 0) {
-		printf("init config error.");
+		printf("init config error.\n");
 		return -1;
 	}
+    if (AsyncLogger::getInstance().init(TggConfigure::getInstance()->get_log_path(), 
+        TggConfigure::getInstance()->get_gateway_log_level()) < 0) {
+        printf("init log error.\n");
+        return -1;
+    }
 	prc_dpdk_eal_init(argc, argv);
 	// mt_init_frame(argc, argv);
+    LOG_INFO("-----------cliprc start-----------");
 	tgg_process_init();
 	// 启动透传线程
 	init_bwtrans();
@@ -112,6 +119,7 @@ int main(int argc, char *argv[])
 	// uninit_bwserver();
 	// TODO 进程退出时要回收资源
 	tgg_process_uninit();
-	printf("\n-----------main end----------\n");
+	LOG_INFO("-----------main end----------");
+    AsyncLogger::getInstance().shutdown();
 	return 0;
 }
