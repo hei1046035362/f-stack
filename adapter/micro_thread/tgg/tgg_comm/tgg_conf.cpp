@@ -4,6 +4,7 @@
 #include <rte_log.h>
 #include <unistd.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #ifndef MAX_LCORE_COUNT
 #define MAX_LCORE_COUNT 32
@@ -19,6 +20,19 @@ struct option tgg_long_options[] = {
     { "tgg-conf", 1, NULL, 'g'},
     { 0, 0, 0, 0}
 };
+
+static int validate_path(const char *path) {
+    // 基础格式检查
+    if (!strchr(path, '/')) return 0; 
+
+    // 存在性检查
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        if (errno == ENOENT) return 0; // 路径不存在
+        if (errno == EACCES) return -1; // 无权限访问
+    }
+    return 1; // 有效路径
+}
 
 // std::string sco_count = pTgg_Ini.getValue("bwserver", "co_count");
 
@@ -220,6 +234,30 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
         RTE_LOG(ERR, USER1, "[%s][%d] invalid register port:[%d].", __FILE__, __LINE__, ret);
         return -1;
     }
+
+    std::string secret_key;        // 网关和bw消息加密的秘钥
+    std::string log_path;        // 日志路径
+    std::string gateway_log_level;         // gwrcv和cliprc的日志级别
+    std::string register_log_level;        // register日志级别
+    std::string bwserver_log_level;        // bwrcv服务日志级别
+
+    // 网关和bw消息加密的秘钥
+    this->secret_key = pTgg_Ini.getValue("bwserver", "secret_key");
+
+    // 日志路径
+    this->log_path = pTgg_Ini.getValue("gateway", "log_path");
+    if(validate_path(this->log_path.c_str()) <= 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] parse config log_path:[%s] failed.", __FILE__, __LINE__, this->log_path.c_str());
+        return -1;
+    }
+    // 日志级别的校验在日志初始化的时候校验，这里就不校验了
+    // gwrcv和cliprc的日志级别
+    this->gateway_log_level = pTgg_Ini.getValue("gateway", "log_level");
+    // register日志级别
+    this->register_log_level = pTgg_Ini.getValue("register", "log_level");
+    // bwrcv服务日志级别
+    this->bwserver_log_level = pTgg_Ini.getValue("bwserver", "log_level");
+
 
     return 0;
 }

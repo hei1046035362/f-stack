@@ -35,6 +35,11 @@ private:
     int bw_heart_beat;
     std::string register_addr;        // 注册中心的地址
     unsigned short register_port;    // 注册中心的端口
+    std::string secret_key;        // 网关和bw消息加密的秘钥
+    std::string log_path;        // 日志级别
+    std::string gateway_log_level;         // gwrcv和cliprc的日志级别
+    std::string register_log_level;        // register日志级别
+    std::string bwserver_log_level;        // bwrcv服务日志级别
 
 public:
     int get_lcore_mask() { return lcore_mask;}
@@ -52,6 +57,11 @@ public:
     int get_bwsvr_heart_beat() {return bw_heart_beat;}
     const std::string& get_register_addr() {return register_addr;}
     unsigned short get_register_port() {return register_port;}
+    const std::string& get_secret_key() {return secret_key;}
+    const std::string& get_log_path() {return log_path;}
+    const std::string& get_gateway_log_level() {return gateway_log_level;}
+    const std::string& get_register_log_level() {return register_log_level;}
+    const std::string& get_bwserver_log_level() {return bwserver_log_level;}
 };
 
 int tgg_init_config(int& argc, char* argv[]);

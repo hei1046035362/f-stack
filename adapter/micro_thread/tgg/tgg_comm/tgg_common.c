@@ -11,6 +11,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <iostream>
+#include "comm/log.hpp"
 
 extern int g_fd_limit;
 extern struct rte_memzone* g_fd_zones[MAX_LCORE_COUNT];
@@ -67,14 +68,14 @@ int get_valid_idx()
 		}
 		if(looptimes <= 0) {
 			//rte_exit(-1, "nonIdx ");
-			RTE_LOG(ERR, USER1, "[%s][%d] None idx available.", __FILE__, __LINE__);
+			LOG_ERROR("None idx available.");
 			return -1;
 		}
 		if(tgg_check_idx_exist(current_id_atomic) < 0) {
 			break;
 		}
 	}
-	RTE_LOG(ERR, USER1, "[%s][%d] valid idx %d.", __FILE__, __LINE__, current_id_atomic);
+	LOG_INFO("valid idx %d.", current_id_atomic);
 	return current_id_atomic;
 }
 
@@ -98,9 +99,11 @@ int tgg_init_cli(int core_id, int fd, char* ip_str, uint32_t ip, ushort port)
 	memset(cli->reserved, 0, sizeof(cli->reserved));
 	cli->idx = get_valid_idx();
 	if(cli->idx < 0) {
+		LOG_ERROR("init client failed, invalid idx:%d core id:%d fd:%d.", cli->idx, core_id, fd);
 		return -1;
 	}
 	if (tgg_add_idx(cli->idx) < 0) {
+		LOG_ERROR("init client failed, add idx:%d failed, core id:%d fd:%d.", cli->idx, core_id, fd);
 		return -1;
 	}
 	cli->authorized = 0;
@@ -393,8 +396,8 @@ void tgg_close_bw_session(int prc_id, int fd)
 		std::string workerkey = tgg_get_bwfdx_workerkey(prc_id, fd);
 		tgg_del_bwwkkey(workerkey.c_str());
 	}
-	printf("[%s][%d]close bw session prc:[%d] fd:[%d], left bw count:%d.\n", 
-		__FILE__, __LINE__, prc_id, fd, tgg_get_bwfdx_count());
+	LOG_INFO("close bw session prc:[%d] fd:[%d], left bw count:%d.", 
+		prc_id, fd, tgg_get_bwfdx_count());
 	tgg_clean_bwfdx(prc_id, fd);
 }
 
@@ -504,8 +507,7 @@ int cache_ws_buffer(int core_id, int fd, void* data, int len, int pos, int iscom
 
     }
     if (wsdata->total_len >= MAX_WSDATA_LEN) {
-    	RTE_LOG(ERR, USER1, "[%s][%d] Cache buffer len[%d] beyond MAX_WSDATA_LEN.",
-    		__FILE__, __LINE__, wsdata->total_len);
+    	LOG_ERROR("Cache buffer len[%d] beyond MAX_WSDATA_LEN.", wsdata->total_len);
     	rte_free(buffer);
     	return -1;
     }
@@ -710,8 +712,7 @@ tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& m
 	int ret = rte_mempool_get(g_mempool_write, (void**)&wdata);
         // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
 	if (ret < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] get mem from write pool failed,code:%d.", 
-			__FILE__, __LINE__, ret);
+		LOG_ERROR("get mem from write pool failed,code:%d.", ret);
 		return NULL;
 	}
 	tgg_fd_id_list* tail = NULL;
@@ -755,8 +756,7 @@ tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& m
 	return wdata;
 
 add_data_failed:
-	RTE_LOG(ERR, USER1, "[%s][%d] dpdk_rte_malloc mem failed.", 
-		__FILE__, __LINE__);
+	LOG_ERROR("dpdk_rte_malloc mem failed.");
 	iter_del_fdlist((void*)(wdata->lst_fd));
 	memset(wdata, 0, sizeof(tgg_write_data));
 	rte_mempool_put(g_mempool_write, wdata);
@@ -767,14 +767,12 @@ int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, in
 {
 	if(mapfdidx.size() <= 0) {
 		// fd列表为空
-		RTE_LOG(ERR, USER1, "[%s][%d] mapfdidx is empty.", 
-			__FILE__, __LINE__);
+		LOG_ERROR("mapfdidx is empty.");
 		return 0;
 	}
 	tgg_write_data* wdata = format_send_data(data, mapfdidx, fdopt);
 	if (!wdata) {
-		RTE_LOG(ERR, USER1, "[%s][%d] Format send data failed.", 
-			__FILE__, __LINE__);
+		LOG_ERROR("Format send data failed.");
 		return -1;
 	}
 	int count = 10;
@@ -782,17 +780,15 @@ int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, in
 		usleep(10);
 	}
 	static int loop_times_sndcli = 0;
-	// 前期调试要看是否经常出现重试
+	// TODO 前期调试要看是否经常出现重试
 	if (count < 9) {
 		++loop_times_sndcli;
 		if(loop_times_sndcli % 100 == 0) {
-			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.",
-				__FILE__, __LINE__, loop_times_sndcli);
+			LOG_ERROR("loop times:%d.", loop_times_sndcli);
 		}
 	}
 	if (count <= 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] Enqueue write data failed.", 
-			__FILE__, __LINE__);
+		LOG_ERROR("Enqueue write data failed.");
 		return -1;
 	}
 	return 0;
@@ -812,8 +808,7 @@ tgg_read_data* format_send_server_data(int core_id, int fd, const std::string& s
 	int ret = rte_mempool_get(g_mempool_bwrcv, (void**)&bwdata);
         // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
 	if (ret < 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] get mem from bwrcv pool failed,code:%d.", 
-			__FILE__, __LINE__, ret);
+		LOG_ERROR("get mem from bwrcv pool failed,code:%d.", ret);
 		return NULL;
 	}
 	if(sdata.length() > 0) {
@@ -836,8 +831,7 @@ int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
 {
 	tgg_bw_data* bwdata = format_send_server_data(core_id, fd, data, fdopt);
 	if (!bwdata) {
-		RTE_LOG(ERR, USER1, "[%s][%d] Format bw server data failed.", 
-			__FILE__, __LINE__);
+		LOG_ERROR("Format bw server data failed.");
 		return -1;
 	}
 	int maxtry = 10;// 入队列可能会失败最多尝试10次
@@ -845,17 +839,15 @@ int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
 		usleep(10);
 	}
 	static int loop_times_sndserver = 0;
-	// 前期调试要看是否经常出现重试
+	// TODO 前期调试要看是否经常出现重试
 	if (maxtry < 9) {
 		++loop_times_sndserver;
 		if(loop_times_sndserver % 100 == 0) {
-			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.", 
-				__FILE__, __LINE__, loop_times_sndserver);
+			LOG_ERROR("loop times:%d.", loop_times_sndserver);
 		}
 	}
 	if (maxtry <= 0) {
-		RTE_LOG(ERR, USER1, "[%s][%d] Enqueue bw server data failed.", 
-			__FILE__, __LINE__);
+		LOG_ERROR("Enqueue bw server data failed.");
 		return -1;
 	}
 	return 0;
@@ -865,8 +857,7 @@ int enqueue_data_send_server(int core_id, int fd, const std::string& data, int f
 {
 	tgg_bw_data* bwdata = format_send_server_data(core_id, fd, data, fdopt);
 	if (!bwdata) {
-		RTE_LOG(ERR, USER1, "[%s][%d] Format bw server data failed.", 
-			__FILE__, __LINE__);
+		LOG_ERROR("Format bw server data failed.");
 		return -1;
 	}
 	int maxtry = 10;// 入队列可能会失败最多尝试10次
@@ -875,12 +866,11 @@ int enqueue_data_send_server(int core_id, int fd, const std::string& data, int f
 		usleep(10);
 	}
 	static int loop_times_sndserver = 0;
-	// 前期调试要看是否经常出现重试
+	// TODO 前期调试要看是否经常出现重试
 	if (maxtry < 9) {
 		++loop_times_sndserver;
 		if(loop_times_sndserver % 100 == 0) {
-			RTE_LOG(ERR, USER1, "[%s][%d] loop times:%d.",
-				__FILE__, __LINE__, loop_times_sndserver);
+			LOG_ERROR("loop times:%d.", loop_times_sndserver);
 		}
 	}
 	if (maxtry <= 0) {
@@ -906,7 +896,7 @@ void* dpdk_rte_malloc(int size)
 {
 	void* pdata = rte_malloc("tgg_malloc", size, 0);
 	if (!pdata)	{
-		RTE_LOG(ERR, USER1, "[%s][%d]malloc data failed.\n", __FILE__, __LINE__);
+		LOG_ERROR("malloc data failed.\n");
 	}
 	// TODO 这里需要把pdata管理起来，因dpdk的secondary进程出core而未释放时会导致大页内存泄漏
 	// 		可以用链表管理起来，然后注册rte_service给master进程去管理，也可以放到定时任务管理

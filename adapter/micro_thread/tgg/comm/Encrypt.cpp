@@ -1,5 +1,7 @@
 #include "Encrypt.hpp"
 #include "common.hpp"
+#include "log.hpp"
+
 // 初始化OpenSSL库
 void initOpenSSL() {
     SSL_library_init();
@@ -41,8 +43,7 @@ std::string Encrypt::Base64Encode(const std::string& input)
         reinterpret_cast<const unsigned char *>(input.data()),
         input.size());
     if (result < 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] base64 encode failed,code:%d.", 
-            __FILE__, __LINE__, result);
+        LOG_WARNING("base64 encode failed,code:%d.", result);
         return "";
     }
     // 去掉末尾的\0，base64操作之后会留下一些\0，length会包含这些\0，导致length不准确
@@ -60,8 +61,7 @@ std::string Encrypt::Base64Decode(const std::string& input)
         reinterpret_cast<const unsigned char *>(input.data()),
         input.length());
     if (result < 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] base64 decode failed,code:%d.", 
-            __FILE__, __LINE__, result);
+        LOG_WARNING("base64 decode failed,code:%d.", result);
         return "";
     }
     return decryptedData;
@@ -133,13 +133,11 @@ std::string Encrypt::Aes128Decrypt(const std::string& crypted)
 
 bool Encrypt::Prepared() {
     if (key.empty() || key.length()!= 16) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Illigal authorized key:%s.", 
-            __FILE__, __LINE__, key.c_str());
+        LOG_ERROR("Illigal authorized key:%s.", key.c_str());
         return false;
     }
     if (!iv.empty() && iv.length()!= 16) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Illigal authorized iv:%s.", 
-            __FILE__, __LINE__, iv.c_str());
+        LOG_ERROR("Illigal authorized iv:%s.", iv.c_str());
         return false;
     }
     return true;

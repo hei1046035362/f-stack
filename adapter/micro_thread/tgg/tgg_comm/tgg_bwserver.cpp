@@ -26,7 +26,7 @@
 #include "tgg_bw_cache.h"
 #include "BwMsgPack.hpp"
 #include "tgg_bwcomm.h"
-#include <rte_log.h>
+#include "comm/log.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -118,8 +118,7 @@ void *read_routine( void *arg )
         ushort port;
         char ip_str[INET_ADDRSTRLEN] = {0};
         if (get_connection_info(fd, ip_str, &ip, &port) < 0) {
-            RTE_LOG(ERR, USER1, "[%s][%d] get peer connection[%d] info failed.\n",
-             __FILE__, __LINE__, fd);
+            LOG_ERROR("get peer connection[%d] info failed.", fd);
             close(fd);
             return 0;
         }
@@ -131,7 +130,7 @@ void *read_routine( void *arg )
             struct pollfd pf = { 0 };
             pf.fd = fd;
             pf.events = (POLLIN|POLLERR|POLLHUP);
-            co_poll( co_get_epoll_ct(),&pf,1,1000);
+            co_poll( co_get_epoll_ct(),&pf,1,200);
 
             char buf_read[ 4096 ];
             int ret = read( fd,buf_read,sizeof(buf_read) );
@@ -146,12 +145,10 @@ void *read_routine( void *arg )
                 // 验证数据包长度有效性[4](@ref)
                 if(pack_len < sizeof(tgg_bw_protocal) || 
                    pack_len > MAX_PACKET_SIZE) {
-                    RTE_LOG(ERR, USER1, "[%s][%d] invalid packet len, bw[ip:%s,port%d] is closing.\n",
-                     __FILE__, __LINE__, ip_str, ntohs(port));
+                    LOG_ERROR("invalid packet len, bw[ip:%s,port%d] is closing.", ip_str, ntohs(port));
                     tgg_close_bw_session(g_prc_id, fd);
                     close( fd );
-                    RTE_LOG(ERR, USER1, "[%s][%d] bw[ip:%s,port%d] closed.\n",
-                     __FILE__, __LINE__, ip_str, ntohs(port));
+                    LOG_ERROR("bw[ip:%s,port%d] closed.", ip_str, ntohs(port));
                     return 0;
                 }
                 // 够header 但不够一个完整的包，继续收包
@@ -195,12 +192,10 @@ void *read_routine( void *arg )
             {
                 continue;
             }
-            RTE_LOG(ERR, USER1, "[%s][%d] bw[ip:%s,port%d] is closing, ret:%d.\n",
-             __FILE__, __LINE__, ip_str, ntohs(port), ret);
+            LOG_ERROR("bw[ip:%s,port%d] is closing, ret:%d.", ip_str, ntohs(port), ret);
             tgg_close_bw_session(g_prc_id, fd);
             close( fd );
-            RTE_LOG(ERR, USER1, "[%s][%d] bw[ip:%s,port%d] closed.\n",
-             __FILE__, __LINE__, ip_str, ntohs(port));
+            LOG_ERROR("bw[ip:%s,port%d] closed.", ip_str, ntohs(port));
             break;
         }
 
@@ -239,15 +234,12 @@ void *write_routine( void *arg )
             int cid = bdata->cid;
             // 添加到 hash<cid, fd>
             if (tgg_add_cid(cid, fdid) < 0) {
-                RTE_LOG(ERR, USER1, "[%s][%d] add cid[%d] fdid[%d] failed.\n", __FILE__, __LINE__, cid, fdid);
+                LOG_ERROR("add cid[%d] fdid[%d] failed.", cid, fdid);
                 clean_bw_data(bdata);
                 continue;
             }
+            LOG_INFO("add cid[%d] for fdid[%d] success.", cid, fdid);
         }
-        struct pollfd pf = {0};
-        pf.fd = fd;
-        pf.events = (POLLIN|POLLERR|POLLHUP);
-        co_poll(co_get_epoll_ct(), &pf, 1, 1000);
 
         std::string result;
         tgg_bw_protocal header = {
@@ -274,7 +266,7 @@ void *write_routine( void *arg )
         addr.s_addr = ip_int;  // 直接赋值网络字节序整数
         char ip_str[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &addr, ip_str, sizeof(ip_str));
-        printf("[%s][%d]send to server[ip:%s,port:%u]:%s\n", __FILE__, __LINE__, 
+        LOG_DEBUG("send to server[ip:%s,port:%u]:%s.", 
             ip_str, tgg_get_bwfdx_port(prc_id, fd), bin2hex(result).c_str());
 
         int ret = write(fd, result.c_str(), result.length());
@@ -284,8 +276,8 @@ void *write_routine( void *arg )
             poll(NULL, 0, 10);// sleep 10ms
         }
         if(-1 == ret) {
-            RTE_LOG(ERR, USER1, "[%s][%d] trans to server failed, client_ip[%d] client_port[%d].",
-             __FILE__, __LINE__, header.client_ip, header.client_port);
+            LOG_ERROR("trans to server failed, client_ip[%d] client_port[%d].",
+             header.client_ip, header.client_port);
         }
         clean_bw_data(bdata);
     }
@@ -297,14 +289,13 @@ int co_accept(int fd, struct sockaddr *addr, socklen_t *len );
 void *accept_routine( void * )
 {
     co_enable_hook_sys();
-    printf("accept_routine\n");
-    fflush(stdout);
+    LOG_INFO("accept_routine");
     while(g_run)
     {
         //printf("pid %ld g_readwrite.size %ld\n",getpid(),g_readwrite.size());
         if( g_readwrite.empty() )
         {
-            printf("empty\n"); //sleep
+            LOG_DEBUG("empty"); //sleep
             struct pollfd pf = { 0 };
             pf.fd = -1;
             poll( &pf,1,1000);

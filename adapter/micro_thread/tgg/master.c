@@ -12,6 +12,7 @@
 #include <tgg_comm/tgg_bw_cache.h>
 #include "tgg_comm/tgg_conf.h"
 #include "comm/common.hpp"
+#include "comm/log.hpp"
 
 static const char* s_dump_file = "/var/corefiles/tgg_gw_master_core";
 
@@ -46,11 +47,11 @@ void signal_handler(int signum)
 void tgg_sig_init()
 {
 	if (signal(SIGINT, signal_handler) == SIG_ERR) {
-        perror("Error setting signal handler");
+        LOG_ERROR("Error setting signal handler");
         prc_exit(-1, "Error setting signal handler");
     }
 	if (signal(SIGTERM, signal_handler) == SIG_ERR) {
-        perror("Error setting signal handler");
+        LOG_ERROR("Error setting signal handler");
         prc_exit(-1, "Error setting signal handler");
     }
 
@@ -65,7 +66,7 @@ uint32_t get_local_addr(int sockfd)
      struct sockaddr_in local_addr;
      socklen_t addrlen = sizeof(local_addr);
      if (ff_getsockname(sockfd, (struct linux_sockaddr *)&local_addr, &addrlen) == -1) {
-         perror("getsockname");
+         LOG_ERROR("getsockname");
          close(sockfd);
          return 0;
      }
@@ -75,7 +76,7 @@ uint32_t get_local_addr(int sockfd)
      struct in_addr ip_addr;
      inet_pton(AF_INET, ip_str, &ip_addr);
      uint32_t ip_decimal = ip_addr.s_addr;
-     printf("IP address in decimal: %u\n", ip_decimal);
+     LOG_INFO("IP address in decimal: %u\n", ip_decimal);
      return ip_decimal;
 }
 
@@ -85,7 +86,7 @@ static int get_remote_info(int sockfd, uint32_t& ip, ushort& port, char* ip_str)
      struct sockaddr_in local_addr;
      socklen_t addrlen = sizeof(local_addr);
      if (ff_getpeername(sockfd, (struct linux_sockaddr *)&local_addr, &addrlen) < 0) {
-         perror("getsockname");
+         LOG_ERROR("getsockname");
          close(sockfd);
          return -1;
      }
@@ -96,7 +97,7 @@ static int get_remote_info(int sockfd, uint32_t& ip, ushort& port, char* ip_str)
      inet_pton(AF_INET, ip_str, &ip_addr);
      ip = ip_addr.s_addr;
      port = local_addr.sin_port;
-     printf("IP address in decimal: %u\n", ip);
+     LOG_INFO("IP address in decimal: %u\n", ip);
      return 0;
 }
 
@@ -112,11 +113,11 @@ static int create_tcp_sock()
 	int fd;
 	fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (fd < 0) {
-		fprintf(stderr, "create tcp socket failed, error: %m\n");
+		LOG_ERROR("create tcp socket failed, error: %s.", strerror(errno));
 		return -1;
 	}
 	if (set_fd_nonblock(fd) == -1) {
-		fprintf(stderr, "set tcp socket nonblock failed\n");
+		LOG_ERROR("set tcp socket nonblock failed");
 		return -1;
 	}
 
@@ -127,16 +128,15 @@ static int tgg_recv_enqueue(int clt_fd, const char* buf, int len, enum FD_OPT op
 {
 	// 1、申请交互数据结构的内存空间，并填充数据
 	tgg_read_data* rdata = NULL;
-	int idx = 0; // 前期调试性能需要，后期可根据需求屏蔽
+	int looptimes = 0; // 前期调试性能需要，后期可根据需求屏蔽
 	while (rte_mempool_get(g_mempool_read, (void**)&rdata) < 0) {
 		// TODO  分配内存失败后的处理，  暂时采用休眠的方式等待消费端消费完释放空间，这里应该就能成功了
-		idx++;
+		looptimes++;
 		usleep(10);
 	}
-	if (idx) {
-		RTE_LOG(WARNING, USER1, "[%s][%d] Get data from mempool[%s] failed times:%d", 
-			__FILE__, __LINE__, g_mempool_read->name, idx);
-		idx = 0;
+	if (looptimes) {
+		LOG_WARNING("Get data from mempool[%s] failed times:%d", g_mempool_read->name, looptimes);
+		looptimes = 0;
 	}
 	g_tgg_stats.en_read_stats.malloc_st++;
 	rdata->fd = clt_fd;
@@ -148,7 +148,7 @@ static int tgg_recv_enqueue(int clt_fd, const char* buf, int len, enum FD_OPT op
 		rdata->data = dpdk_rte_malloc(rdata->data_len);
 		if (!rdata->data) {
 			// TODO 记录失败次数
-			RTE_LOG(WARNING, USER1, "[%s][%d] malloc data failed.\n", __FILE__, __LINE__);
+			LOG_WARNING("malloc data failed.");
 			// 分配内存失败，获取的入队列结构体要放回内存池
 			rte_mempool_put(g_mempool_read, rdata);
 			return -1;
@@ -160,12 +160,11 @@ static int tgg_recv_enqueue(int clt_fd, const char* buf, int len, enum FD_OPT op
 	// 2、入队列
 	while (rte_ring_full(g_ring_cliprcs[g_core_id])) {
 		// TODO  队列满的情况，  暂时采用休眠的方式等待消费端消费完释放空间，这里应该就能成功了
-		idx++;
+		looptimes++;
 		usleep(10);
 	}
-	if (idx) {
-		RTE_LOG(WARNING, USER1, "[%s][%d] enqueue data to ring[%s] failed times:%d", 
-			__FILE__, __LINE__, g_ring_cliprcs[g_core_id]->name, idx);
+	if (looptimes) {
+		LOG_WARNING("enqueue data to ring[%s] failed times:%d", g_ring_cliprcs[g_core_id]->name, looptimes);
 	}
 
 	if (tgg_enqueue_cliprc(g_core_id, rdata) < 0) {
@@ -174,6 +173,7 @@ static int tgg_recv_enqueue(int clt_fd, const char* buf, int len, enum FD_OPT op
 		rte_free(rdata->data);
 		memset(rdata, 0, sizeof(tgg_read_data));
 		rte_mempool_put(g_mempool_read, rdata);
+		LOG_ERROR("enqueue data to ring[%s] failed", g_ring_cliprcs[g_core_id]->name);
 	} else {
 		g_tgg_stats.en_read_stats.enqueue++;
 	}
@@ -187,13 +187,11 @@ static void clean_client_data(int cli_fd, int cid, int idx)
         // TODO 构造消息让gwbwrcv去解绑还是就在这里解绑？  
         // 当前选择关闭时直接解绑，防止消息丢失导致连接未解绑
         if (tgg_free_session(g_core_id, cli_fd) < 0) {
-            RTE_LOG(ERR, USER1, "[%s][%d] free session failed, cid[%d].\r\n", 
-                __FILE__, __LINE__, cid);
+            LOG_ERROR("free session failed, cid[%d].", cid);
         }
     }
     if (tgg_del_cid(cid) < 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] delete cid[%d] failed.\r\n", 
-            __FILE__, __LINE__, cid);
+        LOG_ERROR("delete cid[%d] failed.", cid);
     }
 	tgg_del_idx(idx);
 	tgg_close_cli(g_core_id, cli_fd);
@@ -208,10 +206,12 @@ static void tgg_recv(void *arg)
 	ushort port;
 	char ip_str[INET_ADDRSTRLEN] = {0};
 	if (get_remote_info(cli_fd, ip, port, ip_str) < 0) {
+		LOG_ERROR("get client remote info failed.");
 		close(cli_fd);
 		return;
 	}
 	if(tgg_init_cli(g_core_id, cli_fd, ip_str, ip, port) < 0) {
+		LOG_ERROR("init client info failed.");
 		close(cli_fd);
 		tgg_close_cli(g_core_id, cli_fd);
 		return;
@@ -221,6 +221,7 @@ static void tgg_recv(void *arg)
 	// int status = tgg_get_cli_status(g_core_id, cli_fd);
 	// 通知后台有新的连接
 	if (tgg_recv_enqueue(cli_fd, "", 0, FD_NEW) < 0) {
+		LOG_ERROR("send new connection[%d] to cliprc failed, core id:%d idx:%d.", cli_fd, g_core_id, idx);
 		close(cli_fd);
 		tgg_close_cli(g_core_id, cli_fd);
 		return;
@@ -230,30 +231,30 @@ static void tgg_recv(void *arg)
 		// 1、接收数据  mt_recv在没有数据包的情况下会阻塞，让出cpu给其他的action执行
 		ret = mt_recv(cli_fd, (void *)buf, 64 * 1024, 0, s_fd_timeout);
 		if(ret == -1 && errno == ETIME) {
-			printf("client heart beat timeout.\n");
+			LOG_ERROR("client heart beat timeout.");
 			break;
 		}
 		if(ret == -4) {
 			// 主动断开连接
-			RTE_LOG(ERR, USER1, "[%s][%d] closing connection affected.\n", __FILE__, __LINE__);
+			LOG_ERROR("closing connection affected.");
 			break;
 		}
 		g_tgg_stats.recv++;
 		if (ret < 0) {
 			// 接收出现错误
-			printf("recv from client error:%d.\n", ret);
+			LOG_ERROR("recv from client error:%d.", ret);
 			break;
 		}
 		if (!ret) {
 			// 对端主动关闭了
-			printf("recv close from client.\n");
+			LOG_INFO("recv close from client.");
 			break;
 		}
 		// 调试打印
 		if(!strncmp(buf, "GET", 3)) {// GET请求消息
-			printf("fd:%d idx:%d recv data:%s\n", cli_fd, tgg_get_cli_idx(g_core_id, cli_fd), (char*)buf);
+			LOG_DEBUG("fd:%d idx:%d recv data:%s.", cli_fd, tgg_get_cli_idx(g_core_id, cli_fd), (char*)buf);
 		} else {// 其他消息
-	    	printf("fd:%d idx:%d revc data:%s\n", cli_fd, tgg_get_cli_idx(g_core_id, cli_fd), bin2hex(std::string((char*)buf, ret)).c_str());
+	    	LOG_DEBUG("fd:%d idx:%d revc data:%s.", cli_fd, tgg_get_cli_idx(g_core_id, cli_fd), bin2hex(std::string((char*)buf, ret)).c_str());
 		}
 		// enum FD_OPT opt;
 		// if (!status) {
@@ -267,8 +268,10 @@ static void tgg_recv(void *arg)
 		// }
 
 		// 入队列失败，内存不够了，直接退出循环关闭连接
-		if (tgg_recv_enqueue(cli_fd, buf, ret, FD_READ) < 0)
+		if (tgg_recv_enqueue(cli_fd, buf, ret, FD_READ) < 0) {
+			LOG_ERROR("enqueue data to cliprc failed.");
 			break;
+		}
 	}
 	// 对端主动关闭了
 	// memset(cli->uid, 0, sizeof(cli->uid));
@@ -278,7 +281,7 @@ static void tgg_recv(void *arg)
 		// 为确保fd正确关闭,对应的内存正确释放,就必须要入队列一个关闭的操作
 		tgg_recv_enqueue(cli_fd, NULL, 0, FD_CLOSE);// 是不是对端主动发送的，都要通知，
 	}
-	RTE_LOG(INFO, USER1, "[%s][%d] wait client[%d] close...\n", __FILE__, __LINE__, cli_fd);
+	LOG_DEBUG("wait client[%d] close...", cli_fd);
 	// 等待连接在缓存中的数据被消费完才能关闭
 	int index = 1000;// TODO 防止因process宕机丢包导致无法停止的问题，10s这个时间待商榷
 	while(tgg_get_cli_idx(g_core_id, cli_fd) != TGG_FD_CLOSING && index > 0) {
@@ -287,12 +290,11 @@ static void tgg_recv(void *arg)
 	}
 	int cid = tgg_get_cli_cid(g_core_id, cli_fd);
 	if(index <= 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] recv close fram from gwprc timeout, cid[%d].\r\n", 
-            __FILE__, __LINE__, cid);		
+        LOG_WARNING("recv close fram from gwprc timeout, cid[%d].", cid);		
 	}
 	close(cli_fd);// 这里不能使用mt_close,mt_close只设置标记，不会发送fin包，fd依然还存在
 	clean_client_data(cli_fd, cid, idx);
-	RTE_LOG(INFO, USER1, "[%s][%d] client[%d] closed.\n", __FILE__, __LINE__, cli_fd);
+	LOG_DEBUG("client[%d] closed.", cli_fd);
 }
 
 static void tgg_do_send(tgg_write_data* wdata)
@@ -302,18 +304,15 @@ static void tgg_do_send(tgg_write_data* wdata)
 		int cli_fd = fd_id_list->fdid;// 数据传递时fdid存的是fd
 		int idx = tgg_get_cli_idx(g_core_id, cli_fd);
 		if(!strncmp((char*)wdata->data, "HTTP", 4)) {// GET请求消息
-			printf("fd:%d idx:%d send data:%s\n", cli_fd, idx, (char*)wdata->data);
+			LOG_DEBUG("fd:%d idx:%d send to clien:%s.", cli_fd, idx, (char*)wdata->data);
 		} else {// 其他消息
-	    	printf("fd:%d idx:%d send data:%s\n", cli_fd, idx, bin2hex(std::string((char*)wdata->data, wdata->data_len)).c_str());
+	    	LOG_DEBUG("fd:%d idx:%d send to clien:%s.", cli_fd, idx, bin2hex(std::string((char*)wdata->data, wdata->data_len)).c_str());
 		}
 		// 只有未关闭的连接才需要走以下逻辑，已经关闭的连接，不再发送数据
 		if(idx > 0) {
 			// 新的连接旧的数据就不要发送了，直接清理空间
 			if (idx != fd_id_list->idx) {// 后台推送给前端时，可能会出现这种情况
-				RTE_LOG(ERR, USER1, "[%s][%d] Idx[%d:%d] Changed, Closing Connection[%d].\n",
-				 __FILE__, __LINE__, idx, fd_id_list->idx, cli_fd);
-				// tgg_del_idx(fd_id_list->idx);
-				// tgg_set_cli_idx(cli_fd, TGG_FD_CLOSING);
+				LOG_ERROR("Idx[%d:%d] Changed, Closing Connection[%d].", idx, fd_id_list->idx, cli_fd);
 				goto send_client_end;
 			}
 
@@ -322,17 +321,16 @@ static void tgg_do_send(tgg_write_data* wdata)
 				int ret = mt_send(cli_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
 				if (ret == -4) {
 					// 主动断开连接
-					RTE_LOG(ERR, USER1, "[%s][%d] closing connection affected.\n", __FILE__, __LINE__);
+					LOG_INFO("closing connection affected.");
 				} else if (ret < 0) {
-					RTE_LOG(ERR, USER1, "[%s][%d] send data to client fd[%d] idx[%d] error, ret[%d]\n", 
-						__FILE__, __LINE__, cli_fd, wdata->idx, ret);
+					LOG_ERROR("send data to client fd[%d] idx[%d] error, ret[%d]", cli_fd, wdata->idx, ret);
 				} else {
 					g_tgg_stats.en_read_stats.enqueue++;
 				}
 			}
 
 			if ( wdata->fd_opt & FD_CLOSE) {
-				RTE_LOG(ERR, USER1, "[%s][%d] Closing Connection[%d].\n", __FILE__, __LINE__, cli_fd);
+				LOG_INFO("Closing Connection[%d].", cli_fd);
 				tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSING);// 先设置标记，防止队列没人消费，影响其他连接
 				mt_sleep(1000);// ws的关闭帧发送完以后等待客户端先关闭，如果1s后没有关闭，我们要主动结束
 								// 到了这里后面的数据其实都应该要丢弃了，所以后续数据已经不重要了
@@ -340,8 +338,7 @@ static void tgg_do_send(tgg_write_data* wdata)
 								 // 但正常结束流程里close，需要等待30s，不可配置，freebsd内部控制
 			}
 		} else {
-			RTE_LOG(ERR, USER1, "[%s][%d] send data droped, cause connection[fd:%d] not published[idx:%d].\n",
-			 __FILE__, __LINE__, cli_fd, idx);
+			LOG_ERROR("send data droped, cause connection[fd:%d] not published[idx:%d].", cli_fd, idx);
 		}
 
 send_client_end:
@@ -389,22 +386,22 @@ static int tgg_gw_master()
 
 	int fd = create_tcp_sock();
 	if (fd < 0) {
-		fprintf(stderr, "create listen socket failed\n");
+		LOG_ERROR("create listen socket failed");
 		return -1;
 	}
 
 	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
 		close(fd);
-		fprintf(stderr, "bind failed [%m]\n");
+		LOG_ERROR("bind failed [%s]", strerror(errno));
 		return -1;
 	}
 
 	if (listen(fd, 1024) < 0) {
 		close(fd);
-		fprintf(stderr, "listen failed [%m]\n");
+		LOG_ERROR("listen failed [%s]", strerror(errno));
 		return -1;
 	}
-	RTE_LOG(INFO, USER1, "start service for port:%d.\n", TggConfigure::getInstance()->get_gateway_port());
+	LOG_INFO("start service for port:%d.", TggConfigure::getInstance()->get_gateway_port());
     int clt_fd = 0;
 	int *p;
 	while (g_run_status) {
@@ -417,24 +414,23 @@ static int tgg_gw_master()
 			continue;
 		}
 		if (clt_fd >= g_fd_limit - 1)	{
-			RTE_LOG(INFO, USER1, "given fd[%d] is invalid,[0,%d]",
-				fd, g_fd_limit - 1);
+			LOG_WARNING("given fd[%d] is invalid,[0,%d]", fd, g_fd_limit - 1);
 			mt_sleep(10);
 			continue;
 		}
 		// 如果fd还在使用中，拒绝连接
 		if (tgg_get_cli_idx(g_core_id, clt_fd) != TGG_FD_CLOSED) {
-			fprintf(stderr, "socket fd[%d] still in use.\n", clt_fd);
+			LOG_ERROR("socket fd[%d] still in use.", clt_fd);
 			close(clt_fd);
 			continue;
 		}
 		// TODO 获取ip的方式待商榷
 		// uint32_t ip_int = get_local_addr(clt_fd);
 		if (set_fd_nonblock(clt_fd) == -1) {
-			fprintf(stderr, "set clt_fd nonblock failed [%m]\n");
+			LOG_ERROR("set clt_fd nonblock failed [%s]", strerror(errno));
 			break;
 		}
-		RTE_LOG(INFO, USER1, "accept a new connection.\n");
+		LOG_INFO("accept a new connection.");
 		// 启动一个接收线程
 		p = new int(clt_fd);
 		mt_start_thread((void *)tgg_recv, (void *)p);
@@ -447,26 +443,34 @@ int main(int argc, char *argv[])
 {
 	init_core(s_dump_file);
 	if (tgg_init_config(argc, argv) < 0) {
-		printf("init config error.");
+		printf("init config error.\n");
 		return -1;
 	}
+    if (AsyncLogger::getInstance().init(TggConfigure::getInstance()->get_log_path(), 
+        TggConfigure::getInstance()->get_gateway_log_level()) < 0) {
+        printf("init log error.\n");
+        return -1;
+    }
 
 	mt_init_frame(argc, argv);
 	g_core_id = rte_lcore_id();
 	if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
+		LOG_INFO("-------master core[%d] start-------", g_core_id);
 		tgg_master_init();
 	} else {
+		LOG_INFO("-------secondary core[%d] start-------", g_core_id);
 		tgg_secondary_init();
 	}
 	tgg_sig_init();// 信号处理初始化
 	tgg_gw_master();
 	if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
-		printf("-------master core[%d] exit-------\n", g_core_id);
+		LOG_INFO("-------master core[%d] exit-------", g_core_id);
 		tgg_master_uninit();
 	} else {
-		printf("-------secondary core[%d] exit-------\n", g_core_id);
+		LOG_INFO("-------secondary core[%d] exit-------", g_core_id);
 	}
 	mt_uninit_frame();
     rte_eal_cleanup();
+    AsyncLogger::getInstance().shutdown();
 	return 0;
 }
