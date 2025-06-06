@@ -21,7 +21,7 @@
 const char* f_stack_ini = "/data/code/f-stack/config.ini";
 
 int g_run = 1;
-static const char* s_dump_file = "/var/corefiles/tgg_gw_cliprc_core";
+static const char* s_dump_file = "/var/corefiles/";//tgg_gw_cliprc_core
 
 void signal_handler(int signum)
 {

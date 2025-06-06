@@ -81,17 +81,36 @@ struct rte_ring* g_ring_bwsnds[MAX_LCORE_COUNT] = {NULL};// BW下行
 const char* s_pool_read_name = "tgg_pool_read_name";// 客户端上行 和 上行prc共用
 const char* s_pool_write_name = "tgg_pool_write_name";// 客户端下行
 const char* s_pool_bwrcv_name = "tgg_pool_bwrcv_name";// 客户端上行透传 和 bw上行共用
-// 内存池大小
-static uint32_t s_mempool_size = 10000;
+
+// 网络数据实际使用缓存
+const char* s_pool_read_data_name = "tgg_pool_read_data_name";// 客户端上行 和 上行prc共用
+const char* s_pool_write_data_name = "tgg_pool_write_data_name";// 客户端下行
+const char* s_pool_bwrcv_data_name = "tgg_pool_bwrcv_data_name";// 客户端上行透传 和 bw上行共用
+const char* s_pool_large_data_name = "tgg_pool_large_data_name";// 客户端上行透传 和 bw上行共用
+const char* s_pool_clifdlist_data_name = "tgg_pool_clifdlist_data_name";// 下行发送fd列表的队列
+
+// 内存池大小 TODO 大小待调试
+static uint32_t s_mempool_size = 1024*64;// 尽量设置成2^n
 // 每个内存池单个内存块儿的大小
 static uint32_t s_mempool_read_cache = sizeof(struct st_read_data);// 单个缓存的大小待定
 static uint32_t s_mempool_write_cache = sizeof(struct st_write_data);// 单个缓存的大小待定
 static uint32_t s_mempool_bwrcv_cache = sizeof(tgg_bw_data);// 单个缓存的大小待定
-// 内存池对下你给
+// 内存池
+// 队列存储的数据结构
 struct rte_mempool* g_mempool_read = NULL;
 struct rte_mempool* g_mempool_write = NULL;
 struct rte_mempool* g_mempool_bwrcv = NULL;
 
+struct rte_mempool* g_mempool_read_data = NULL;
+struct rte_mempool* g_mempool_write_data = NULL;
+struct rte_mempool* g_mempool_bwrcv_data = NULL;
+
+static uint32_t s_clifdlist_mempool_size = 1024*1024;
+struct rte_mempool* g_mempool_clifdlist_data = NULL;
+
+static uint32_t s_large_mempool_size = 1024*4;// 尽量设置成2^n
+// 超过正常大小的数据，大包的情况，需要申请稍大的空间   单个缓存大小为8192，有些网络框架中最大mtu会设置到8192
+struct rte_mempool* g_mempool_large_data = NULL;
 
 /// 调用rte_malloc使用的名称
 const char* g_rte_malloc_type = "tgg_dpdk_malloc";
@@ -375,6 +394,12 @@ void tgg_master_init()
 	g_bwwkkey_hash = init_hash(s_bwwkkey_hash_name, g_fd_limit, TGG_BWWKKEY_LEN);
 	g_bwprc_zone = make_memzone(bwprc_zone_name, TggConfigure::getInstance()->get_bwsvr_count()*sizeof(pid_data));
 
+	g_mempool_read_data = make_mempool(s_pool_read_data_name, s_mempool_size, COMMON_PACKET_LEN);
+	g_mempool_write_data = make_mempool(s_pool_write_data_name, s_mempool_size, COMMON_PACKET_LEN);
+	g_mempool_bwrcv_data = make_mempool(s_pool_bwrcv_data_name, s_mempool_size, COMMON_PACKET_LEN);
+	g_mempool_large_data = make_mempool(s_pool_large_data_name, s_large_mempool_size, MAX_PACKET_LEN);
+	g_mempool_clifdlist_data = make_mempool(s_pool_clifdlist_data_name, s_clifdlist_mempool_size, sizeof(tgg_fd_id_list));
+
 	LOG_INFO("Init dpdk master for tgg done.");
 }
 
@@ -403,8 +428,27 @@ void tgg_master_uninit()
 	}
 	rte_memzone_free(g_lock_zone);
 	g_lock_zone = NULL;
+
 	rte_mempool_free(g_mempool_read);
 	g_mempool_read = NULL;
+	rte_mempool_free(g_mempool_write);
+	g_mempool_write = NULL;
+	rte_mempool_free(g_mempool_bwrcv);
+	g_mempool_bwrcv = NULL;
+
+	rte_mempool_free(g_mempool_read_data);
+	g_mempool_read_data = NULL;
+	rte_mempool_free(g_mempool_write_data);
+	g_mempool_write_data = NULL;
+	rte_mempool_free(g_mempool_bwrcv_data);
+	g_mempool_bwrcv_data = NULL;
+
+	rte_mempool_free(g_mempool_clifdlist_data);
+	g_mempool_clifdlist_data = NULL;
+
+	rte_mempool_free(g_mempool_large_data);
+	g_mempool_large_data = NULL;
+
 	rte_ring_free(g_ring_read);
 	g_ring_read = NULL;
 	rte_ring_free(g_ring_trans);
@@ -470,6 +514,11 @@ void tgg_secondary_init()
 	g_mempool_read = find_mempool(s_pool_read_name);
 	g_mempool_write = find_mempool(s_pool_write_name);
 	g_mempool_bwrcv = find_mempool(s_pool_bwrcv_name);
+	g_mempool_read_data = find_mempool(s_pool_read_data_name);
+	g_mempool_write_data = find_mempool(s_pool_write_data_name);
+	g_mempool_bwrcv_data = find_mempool(s_pool_bwrcv_data_name);
+	g_mempool_large_data = find_mempool(s_pool_large_data_name);
+	g_mempool_clifdlist_data = find_mempool(s_pool_clifdlist_data_name);
 	g_gid_hash = get_hash_byname(s_gid_hash_name);
 	g_uid_hash = get_hash_byname(s_uid_hash_name);
 	g_cid_hash = get_hash_byname(s_cid_hash_name);
