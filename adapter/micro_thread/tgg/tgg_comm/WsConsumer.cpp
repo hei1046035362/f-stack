@@ -247,8 +247,9 @@ void WsConsumer::_CleanAndClose()
 void WsConsumer::_CleanData()
 {
     CleanBuffer();
-    if(this->data) {// 防止可能还没有给this->data赋值，连接就已经关闭了
-        clean_read_data((tgg_read_data*)(this->data));
-    }
+    // 原始数据由外部释放
+    // if(this->data) {// 防止可能还没有给this->data赋值，连接就已经关闭了
+    //     clean_read_data((tgg_read_data*)(this->data));
+    // }
 }
 

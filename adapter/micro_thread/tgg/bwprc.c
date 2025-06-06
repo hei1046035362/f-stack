@@ -13,7 +13,7 @@
 #include "comm/log.hpp"
 
 int g_run = 1;
-static const char* s_dump_file = "/var/corefiles/tgg_gw_bwprc_core";
+static const char* s_dump_file = "/var/corefiles/";//tgg_gw_bwprc_core
 
 // 目前使用输入参数-i 指定进程编号，
 // TODO 优化方向：在master中开辟一块共享内存，bwprc进程启动时去内存中查找可用的数组下标id，

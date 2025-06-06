@@ -185,9 +185,9 @@ int CmdSendToOne::ExecCmd()
     int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string body = hex2bin(jdata["body"].get<std::string>());
     // TODO 目前只支持ws发送
-    Send2Client(cid, body, FD_WRITE, !raw);
     LOG_DEBUG("SendToOne: cmd executed cid[%d] data:%s.",
      cid, jdata["body"].get<std::string>().c_str());
+    Send2Client(cid, body, FD_WRITE, !raw);
     return 0;
 }
 
@@ -246,7 +246,7 @@ int CmdSendToGroup::ExecCmd()
         }
         if(lstAllFds.size() > 0) {
             BatchSend2ClientByfds(lstAllFds, body, FD_WRITE, !raw);
-            LOG_DEBUG("SendToGroup: cmd executed uid[%s].", ext_data["group"].dump().c_str());
+            LOG_DEBUG("SendToGroup: cmd executed gid[%s].", ext_data["group"].dump().c_str());
         }
     } else {
         LOG_WARNING("SendToGroup: cmd executed, no Group found.");
@@ -898,7 +898,7 @@ static int json_parse_body(unsigned char flag, nlohmann::json& jdata)//const std
     nlohmann::json obj;
     std::string body = jdata["body"].get<std::string>();
     if(body.empty()) {
-        LOG_DEBUG("[%s][%d]body is empty.");
+        LOG_DEBUG("body is empty.");
         return 0;
     }
     if(body.length() > 4 && body.substr(0, 4) == "fffe") {

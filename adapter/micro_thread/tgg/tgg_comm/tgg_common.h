@@ -80,13 +80,18 @@ void tgg_clean_bwprc(int prc_id);
 
 
 // 给ws操作缓存的函数  
-int cache_ws_buffer(int core_id, int fd, void* data, int len, int pos = 0, int iscomplete = 1);
+// int cache_ws_buffer(int core_id, int fd, void* data, int len, int pos = 0, int iscomplete = 1);
 std::string get_one_frame_buffer(int core_id, int fd, void* data, int len);
 std::string get_whole_buffer(int core_id, int fd);
 void clean_ws_buffer(int core_id, int fd);
+void release_ws_buffer(int core_id, int fd);
 
-
-
+// move_pos 是否要移动读指针
+int ringbuf_read(int core_id, int fd, std::string& dest, int len, int move_pos);
+int ringbuf_write(int core_id, int fd, const char* data, int len);
+int ringbuf_size(int core_id, int fd);
+int ringbuf_space(int core_id, int fd);
+const char* ringbuf_memmem(tgg_ws_data* rb, const char* needle, int needle_len);
 
 int tgg_enqueue_read(tgg_read_data* data);
 int tgg_dequeue_read(tgg_read_data** data);
@@ -108,6 +113,10 @@ int tgg_dequeue_bwsnd(int queue_id, tgg_bw_data** data);
 void init_core(const char* dumpfile);
 
 void* dpdk_rte_malloc(int size);
+
+
+int high_freq_malloc(struct rte_mempool* pool, void** data, int size);
+void high_freq_free(struct rte_mempool* pool, void* data, int size);
 
 // bw侧接口
 void tgg_new_bw_session(int prc_id, int fd, int cmd, 
@@ -134,6 +143,7 @@ int get_valid_idx();
 void clean_bw_data(tgg_bw_data* bdata);
 void clean_read_data(tgg_read_data* rdata);
 void clean_write_data(tgg_write_data* wdata);
+void clean_fdidlist(tgg_fd_id_list* fdiddata);
 
 
 // 发送给客户端
@@ -142,7 +152,7 @@ int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, in
 int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx, int fdopt);
 
 // 发送给服务端
-tgg_read_data* format_send_server_data(int core_id, int fd, const std::string& sdata, int fdopt);
+tgg_bw_data* format_send_server_data(int core_id, int fd, const std::string& sdata, int fdopt);
 int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt);
 int enqueue_data_send_server(int core_id, int fd, const std::string& data, int fdopt);
 
