@@ -28,10 +28,7 @@ void tgg_process_read(int lcore_idx)
         WsConsumer cons;
         cons.ConsumerData(rdata);
 
-        memset(rdata->data, 0, rdata->data_len);
-        rte_free(rdata->data);
-        memset(rdata, 0, sizeof(tgg_read_data));
-        rte_mempool_put(g_mempool_read, (void*)rdata);
+        clean_read_data(rdata);
     }
     LOG_INFO("cliprc thread exit, handle lcore_idx:%d", lcore_idx);
 }

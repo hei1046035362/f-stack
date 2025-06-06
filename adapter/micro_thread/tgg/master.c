@@ -14,7 +14,7 @@
 #include "comm/common.hpp"
 #include "comm/log.hpp"
 
-static const char* s_dump_file = "/var/corefiles/tgg_gw_master_core";
+static const char* s_dump_file = "/var/corefiles/";//tgg_gw_master_core
 
 // 1、心跳检测间隔，没收到数据就会结束fd，
 // 2、freebsd底层销毁并回收fd的时间是30s，这个时间最好是大于30
@@ -23,6 +23,8 @@ extern const char* g_rte_malloc_type;
 extern struct rte_mempool* g_mempool_read;
 extern struct rte_mempool* g_mempool_write;
 extern struct rte_ring* g_ring_cliprcs[MAX_LCORE_COUNT];// 客户端上行
+extern struct rte_mempool* g_mempool_read_data;
+extern struct rte_mempool* g_mempool_write_data;
 // extern struct rte_ring* g_ring_read;
 extern ushort g_gateway_port;
 extern tgg_stats g_tgg_stats;
@@ -144,9 +146,10 @@ static int tgg_recv_enqueue(int clt_fd, const char* buf, int len, enum FD_OPT op
 	rdata->idx = tgg_get_cli_idx(rdata->coreid, clt_fd);
 	rdata->fd_opt = opt;
 	rdata->data_len = len;
+	rdata->data = NULL;
 	if (rdata->data_len > 0) {
-		rdata->data = dpdk_rte_malloc(rdata->data_len);
-		if (!rdata->data) {
+		int ret = high_freq_malloc(g_mempool_read_data, &rdata->data, rdata->data_len);
+		if (ret < 0 || !rdata->data) {
 			// TODO 记录失败次数
 			LOG_WARNING("malloc data failed.");
 			// 分配内存失败，获取的入队列结构体要放回内存池
@@ -169,8 +172,10 @@ static int tgg_recv_enqueue(int clt_fd, const char* buf, int len, enum FD_OPT op
 
 	if (tgg_enqueue_cliprc(g_core_id, rdata) < 0) {
 		// TODO 统计失败计数，是否要重入队列？
-		memset(rdata->data, 0, rdata->data_len);
-		rte_free(rdata->data);
+		if(rdata->data_len > 0) {
+			memset(rdata->data, 0, rdata->data_len);
+			high_freq_free(g_mempool_read_data, rdata->data, rdata->data_len);
+		}
 		memset(rdata, 0, sizeof(tgg_read_data));
 		rte_mempool_put(g_mempool_read, rdata);
 		LOG_ERROR("enqueue data to ring[%s] failed", g_ring_cliprcs[g_core_id]->name);
@@ -195,6 +200,7 @@ static void clean_client_data(int cli_fd, int cid, int idx)
     }
 	tgg_del_idx(idx);
 	tgg_close_cli(g_core_id, cli_fd);
+	release_ws_buffer(g_core_id, cli_fd);
 }
 
 static void tgg_recv(void *arg)
@@ -342,14 +348,17 @@ static void tgg_do_send(tgg_write_data* wdata)
 		}
 
 send_client_end:
-		wdata->lst_fd = wdata->lst_fd->next;
-		memset(fd_id_list, 0, sizeof(tgg_fd_list));
-		rte_free(fd_id_list);
-		fd_id_list = wdata->lst_fd;
+		// wdata->lst_fd = wdata->lst_fd->next;
+		// memset(fd_id_list, 0, sizeof(tgg_fd_list));
+		// rte_free(fd_id_list);
+		fd_id_list = fd_id_list->next;
 	}
 	// 所有fd都发送完了之后，需要清理并回收内存
-	memset(wdata->data, 0, wdata->data_len);
-	rte_free(wdata->data);
+	clean_fdidlist(wdata->lst_fd);
+	if(wdata->data) {
+		memset(wdata->data, 0, wdata->data_len);
+		high_freq_free(g_mempool_write_data, wdata->data, wdata->data_len);
+	}
 	memset(wdata, 0, sizeof(tgg_write_data));
 	rte_mempool_put(g_mempool_write, wdata);	
 }

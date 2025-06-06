@@ -28,6 +28,11 @@ extern struct rte_ring* g_ring_bwsnds[MAX_LCORE_COUNT];
 extern struct rte_mempool* g_mempool_read;
 extern struct rte_mempool* g_mempool_write;
 extern struct rte_mempool* g_mempool_bwrcv;
+extern struct rte_mempool* g_mempool_read_data;
+extern struct rte_mempool* g_mempool_write_data;
+extern struct rte_mempool* g_mempool_bwrcv_data;
+extern struct rte_mempool* g_mempool_large_data;
+extern struct rte_mempool* g_mempool_clifdlist_data;
 
 tgg_stats g_tgg_stats = {0};
 static bool s_big_endian = false;
@@ -474,127 +479,139 @@ void tgg_clean_bwprc(int prc_id)
 }
 
 
-
-int cache_ws_buffer(int core_id, int fd, void* data, int len, int pos, int iscomplete)
+int ringbuf_read(int core_id, int fd, std::string& dest, int len, int move_pos)
 {
-	char* buffer = (char*)dpdk_rte_malloc(len);
-	if(!buffer) {
-		return -1;
-	}
-	memcpy(buffer, data, len);
-	SpinLock lock(get_cli_lock());
-	tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data;
-    if (!wsdata) {// 第一次缓存
-    	wsdata = (tgg_ws_data*)dpdk_rte_malloc(sizeof(tgg_ws_data));
-    	if (!wsdata) {
-    		rte_free(buffer);
-    		return -1;
-    	}
-    	wsdata->data_list = (tgg_ws_unit* )dpdk_rte_malloc(sizeof(tgg_ws_unit));
-    	if (!wsdata->data_list) {
-    		rte_free(buffer);
-    		rte_free(wsdata);
-    		return -1;
-    	}
-    	wsdata->data_list->data = buffer;
-    	wsdata->data_list->len = len;
-    	wsdata->data_list->pos = pos;
-    	wsdata->data_list->next = NULL;
-    	wsdata->total_len = len;
-	    wsdata->head_complete = iscomplete ? 1 : 0;
-	    (&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data = wsdata;
+	// 同一个连接的数据都是串行的，同一个连接的ws的缓存只有cliprc进程处理，不需要加锁
+	tgg_ws_data* wsdata = &((&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data);
+    if (!wsdata->data) {// 第一次缓存
+    	LOG_DEBUG("get ws data failed.");
 	    return 0;
+    }
+    int data_size = (wsdata->write_pos >= wsdata->read_pos) ? 
+                     (wsdata->write_pos - wsdata->read_pos) : 
+                     (wsdata->capacity - wsdata->read_pos + wsdata->write_pos);
+    if (data_size < len) len = data_size;
 
+    // 分两段读取
+    int first_chunk = (wsdata->read_pos + len > wsdata->capacity) ? 
+                       (wsdata->capacity - wsdata->read_pos) : len;
+    
+    dest.append(static_cast<const char*>(wsdata->data) + wsdata->read_pos, first_chunk);
+    
+    if (len > first_chunk) {
+        dest.append(static_cast<const char*>(wsdata->data), len - first_chunk);
     }
-    if (wsdata->total_len >= MAX_WSDATA_LEN) {
-    	LOG_ERROR("Cache buffer len[%d] beyond MAX_WSDATA_LEN.", wsdata->total_len);
-    	rte_free(buffer);
-    	return -1;
+    if(move_pos) {
+    	wsdata->read_pos = (wsdata->read_pos + len) % wsdata->capacity;
     }
-    tgg_ws_unit* punit = (tgg_ws_unit* )dpdk_rte_malloc(sizeof(tgg_ws_unit));
-    if (!punit) {
-   		rte_free(buffer);
-    	return -1;
-    }
-    punit->data = buffer;
-    punit->len = len;
-    punit->pos = pos;
-    wsdata->total_len += len;
-    wsdata->head_complete = iscomplete ? 1 : 0;
-    tgg_ws_unit* ptail = wsdata->data_list;
-    if(!ptail) {
-    	wsdata->data_list = punit;
-    } else {
-    	while(ptail->next) {
-    		ptail = ptail->next;
+    return len;
+}
+
+int ringbuf_write(int core_id, int fd, const char* data, int len)
+{
+	tgg_ws_data* wsdata = &((&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data);
+    if (!wsdata->data) {// 第一次缓存
+    	wsdata->data = dpdk_rte_malloc(DEFAULT_WSDATA_LEN);
+    	if (!wsdata->data) {
+    		LOG_ERROR("malloc memery failed.");
+    		return -1;
     	}
-    	ptail->next = punit;
-	}
+    	memset(wsdata->data, 0, DEFAULT_WSDATA_LEN);
+    	wsdata->capacity = DEFAULT_WSDATA_LEN;
+    	wsdata->read_pos = 0;
+    	wsdata->write_pos = 0;
+    }
+    int free_space = wsdata->capacity - ((wsdata->write_pos >= wsdata->read_pos) ? 
+                      (wsdata->write_pos - wsdata->read_pos) : 
+                      (wsdata->capacity - wsdata->read_pos + wsdata->write_pos));
+    if (free_space < len) len = free_space;
 
-    return 0;
+    // 分两段写入
+    int first_chunk = wsdata->capacity - wsdata->write_pos;
+    if (first_chunk > len) first_chunk = len;
+    
+    memcpy((char*)wsdata->data + wsdata->write_pos, data, first_chunk);
+    
+    if (len > first_chunk) {
+        memcpy(wsdata->data, data + first_chunk, len - first_chunk);
+    }
+    
+    wsdata->write_pos = (wsdata->write_pos + len) % wsdata->capacity;
+    return len;
+}
+
+// 获取缓冲区中可读数据大小
+int ringbuf_size(int core_id, int fd)
+{
+	tgg_ws_data* wsdata = &((&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data);
+    if (!wsdata->data) {// 没有缓存数据
+    	// LOG_DEBUG("get ws data failed.");
+	    return 0;
+    }
+    if (wsdata->write_pos >= wsdata->read_pos) {
+        return wsdata->write_pos - wsdata->read_pos;
+    }
+    return wsdata->capacity - wsdata->read_pos + wsdata->write_pos;
+}
+
+int ringbuf_space(int core_id, int fd)
+{
+	tgg_ws_data* wsdata = &((&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data);
+    if (!wsdata->data) {// 没有缓存数据
+    	LOG_DEBUG("get ws data failed.");
+	    return -1;
+    }
+    return wsdata->capacity - ringbuf_size(core_id, fd) - 1;
 }
     
 std::string get_one_frame_buffer(int core_id, int fd, void* data, int len)
 {
-	SpinLock lock(get_cli_lock());
+	// SpinLock lock(get_cli_lock());
 	std::string buffer;
-	tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data;
-    if (!wsdata || wsdata->data_list) {// 没有数据
-    	buffer = std::string((char*)data, len);
+    int reserved_len = ringbuf_size(core_id, fd);
+    if (reserved_len <= 0) {// 上一次缓存没有遗留数据
+    	buffer.append(static_cast<const char*>(data), len);
     	return buffer;
     }
-    tgg_ws_unit* phead = wsdata->data_list;
-    if (!wsdata->head_complete && phead) {
-        // 数据头不完整，拿最后一个节点和当前数据拼接构成一个头，
-        // 头部解析只需要两个字节，不可能存在于三个节点中，所以这里没有考虑头部分散在三个或以上节点中的情况
-    	while(phead->next) {
-    		phead = phead->next;
-    	}
-        // 取最后一个节点的数据和当前数据组成一个头
-    	buffer += std::string((char*)phead->data, phead->len);
-    }
-    // 其他情况直接返回数据本身
-    buffer += std::string((char*)data, len);
+    ringbuf_read(core_id, fd, buffer, reserved_len, 1);
+    // 把当前数据附加进去
+	buffer.append(static_cast<const char*>(data), len);
     return buffer;
 }
 
 std::string get_whole_buffer(int core_id, int fd)
 {
-	SpinLock lock(get_cli_lock());
+	// SpinLock lock(get_cli_lock());
 	std::string buffer;
-	tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data;
-    if (!wsdata || !wsdata->data_list) {// 没有数据
-        // buffer = std::string((char*)data + pos, len);
+    int reserved_len = ringbuf_size(core_id, fd);
+    if (reserved_len <= 0) {// 上一次缓存没有遗留数据
     	return buffer;
     }
-    tgg_ws_unit* phead = wsdata->data_list;
-    while(phead) {
-    	buffer += std::string((char*)phead->data + phead->pos, phead->len - phead->pos);
-    	phead = phead->next;
-    }
+    // 取上一次剩余数据
+    ringbuf_read(core_id, fd, buffer, reserved_len, 0);
     return buffer;
 }
 
 void clean_ws_buffer(int core_id, int fd)
 {
-	SpinLock lock(get_cli_lock());
-    tgg_ws_data* wsdata = (&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data;
-    if (!wsdata) {// 没有数据
+    // tgg_ws_data* wsdata = &((&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data);
+    // if (!wsdata->data) {// 没有数据
+    //     return;
+    // }
+    // // 释放内存
+    // memset(wsdata->data, 0, );
+    // wsdata->len = 0;
+    // wsdata->pos = 0;
+}
+void release_ws_buffer(int core_id, int fd)
+{
+    tgg_ws_data* wsdata = &((&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data);
+    if (!wsdata->data) {// 没有数据
         return;
     }
-
-    tgg_ws_unit* phead = wsdata->data_list;
-    while(phead) {
-        wsdata->data_list = phead->next;
-        memset(phead->data, 0, phead->len);
-        rte_free(phead->data);
-        memset(phead, 0, sizeof(tgg_ws_unit));
-        rte_free(phead);
-        phead = wsdata->data_list;
-    }
+    // 释放内存
+    rte_free(wsdata->data);
     memset(wsdata, 0, sizeof(tgg_ws_data));
-    rte_free(wsdata);
-    (&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data = NULL;
 }
 
 int tgg_enqueue_read(tgg_read_data* data)
@@ -680,7 +697,8 @@ void clean_bw_data(tgg_bw_data* bdata)
 {
     if (bdata->data) {
     	memset(bdata->data, 0, bdata->data_len);
-        rte_free(bdata->data);
+        high_freq_free(g_mempool_bwrcv_data, bdata->data, bdata->data_len);
+        bdata->data = NULL;
     }
     memset(bdata, 0, sizeof(tgg_bw_data));
     rte_mempool_put(g_mempool_bwrcv, bdata);
@@ -690,7 +708,8 @@ void clean_read_data(tgg_read_data* rdata)
 {
     if (rdata->data) {
     	memset(rdata->data, 0, rdata->data_len);
-        rte_free(rdata->data);
+        high_freq_free(g_mempool_read_data, rdata->data, rdata->data_len);
+        rdata->data = NULL;
     }
     memset(rdata, 0, sizeof(tgg_read_data));
     rte_mempool_put(g_mempool_read, rdata);
@@ -700,17 +719,36 @@ void clean_write_data(tgg_write_data* wdata)
 {
     if (wdata->data) {
     	memset(wdata->data, 0, wdata->data_len);
-        rte_free(wdata->data);
+        high_freq_free(g_mempool_write_data, wdata->data, wdata->data_len);
+        wdata->data = NULL;
     }
     memset(wdata, 0, sizeof(tgg_write_data));
     rte_mempool_put(g_mempool_write, wdata);
 }
 
+void clean_fdidlist(tgg_fd_id_list* fdiddata)
+{
+    if (!fdiddata) {
+        return;
+    }
+    tgg_fd_id_list* iter = fdiddata;// 第一个节点不存数据，先删除数据节点
+    while(iter->next) {
+        tgg_fd_id_list* tmp = iter->next;
+        iter->next = iter->next->next;
+        memset(tmp, 0, sizeof(tgg_fd_id_list));
+    	high_freq_free(g_mempool_clifdlist_data, tmp, sizeof(tgg_fd_id_list));
+    }
+    // 删除第一个节点
+    memset(fdiddata, 0, sizeof(tgg_fd_id_list));
+    high_freq_free(g_mempool_clifdlist_data, fdiddata, sizeof(tgg_fd_id_list));
+}
+
+
 tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& mapfdidx, int fdopt)
 {
 	tgg_write_data* wdata = NULL;
 	int ret = rte_mempool_get(g_mempool_write, (void**)&wdata);
-        // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
+    // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
 	if (ret < 0) {
 		LOG_ERROR("get mem from write pool failed,code:%d.", ret);
 		return NULL;
@@ -720,9 +758,10 @@ tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& m
 	tgg_fd_id_list* head = NULL;
 	std::map<int, int>::iterator it = mapfdidx.begin();
 	while (it != mapfdidx.end()) {
-		pcur = (tgg_fd_id_list*)dpdk_rte_malloc(sizeof(tgg_fd_id_list));
-		if (!pcur) {
+		ret = high_freq_malloc(g_mempool_clifdlist_data, (void**)&pcur, sizeof(tgg_fd_id_list));
+		if (ret < 0) {
             // TODO 如果只有一个失败了，其他的是不是可以继续发送，而不是全部都不发了
+			LOG_ERROR("get mem from clifdlist pool failed,code:%d.", ret);
 			goto add_data_failed;
 		}
 		pcur->fdid = it->first;
@@ -742,22 +781,24 @@ tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& m
 	} else {
 		goto add_data_failed;
 	}
-	if (sdata.length() > 0) {
-		wdata->data = dpdk_rte_malloc(sdata.length());
-		if (!wdata->data) {
+	if (sdata.size() > 0) {
+		ret = high_freq_malloc(g_mempool_write_data, &wdata->data, sdata.size());
+		// wdata->data = dpdk_rte_malloc(sdata.length());
+		if (ret < 0) {
+			LOG_ERROR("malloc mem from write data pool failed, ret:%d.", ret);
 			goto add_data_failed;
 		}
-		memcpy((char*)(wdata->data), sdata.c_str(), sdata.length());
+		memcpy((char*)(wdata->data), sdata.c_str(), sdata.size());
 	} else {
 		wdata->data = NULL;
 	}
-		wdata->data_len = sdata.length();
+		wdata->data_len = sdata.size();
 	wdata->fd_opt = fdopt;
 	return wdata;
 
 add_data_failed:
-	LOG_ERROR("dpdk_rte_malloc mem failed.");
-	iter_del_fdlist((void*)(wdata->lst_fd));
+	LOG_ERROR("malloc mem failed.");
+	clean_fdidlist(wdata->lst_fd);
 	memset(wdata, 0, sizeof(tgg_write_data));
 	rte_mempool_put(g_mempool_write, wdata);
 	return NULL;
@@ -802,7 +843,7 @@ int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx
 	return enqueue_data_batch_fd(core_id, data, mapfdidx, fdopt);
 }
 
-tgg_read_data* format_send_server_data(int core_id, int fd, const std::string& sdata, int fdopt)
+tgg_bw_data* format_send_server_data(int core_id, int fd, const std::string& sdata, int fdopt)
 {
 	tgg_bw_data* bwdata = NULL;
 	int ret = rte_mempool_get(g_mempool_bwrcv, (void**)&bwdata);
@@ -811,13 +852,19 @@ tgg_read_data* format_send_server_data(int core_id, int fd, const std::string& s
 		LOG_ERROR("get mem from bwrcv pool failed,code:%d.", ret);
 		return NULL;
 	}
-	if(sdata.length() > 0) {
-		bwdata->data = dpdk_rte_malloc(sdata.length());
-		memcpy(bwdata->data, sdata.c_str(), sdata.length());
+	if(sdata.size() > 0) {
+		ret = high_freq_malloc(g_mempool_bwrcv_data, &bwdata->data, sdata.size());
+		if (ret < 0) {
+			rte_mempool_put(g_mempool_bwrcv, (void*)bwdata);
+			LOG_ERROR("get mem from bwrcv data pool failed,code:%d.", ret);
+			return NULL;
+		}
+		// bwdata->data = dpdk_rte_malloc(sdata.size());
+		memcpy(bwdata->data, sdata.c_str(), sdata.size());
 	} else {
 		bwdata->data = NULL;
 	}
-	bwdata->data_len = sdata.length();
+	bwdata->data_len = sdata.size();
 	bwdata->fd_opt = fdopt;
 	bwdata->fd = fd;
 	bwdata->coreid = core_id;
@@ -883,13 +930,24 @@ int enqueue_data_send_server(int core_id, int fd, const std::string& data, int f
 
 
 #include <sys/prctl.h>
-void init_core(const char* dumpfile)
+static void set_core_path(const char *core_path) {
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "echo '%score_%%e_%%p' > /proc/sys/kernel/core_pattern", core_path);
+    system(cmd);  // 需 root 权限
+}
+
+void init_core(const char* core_path)
 {
 	// 设置 core 文件的路径
     prctl(PR_SET_DUMPABLE, 1);  // 确保程序可以生成 core 文件
-    char core_path[256];
-    snprintf(core_path, sizeof(core_path), "%s.%d", dumpfile, getpid());
-    prctl(PR_SET_DUMPABLE, core_path, 0, 0, 0);
+    // char core_path[256];
+    // snprintf(core_path, sizeof(core_path), "%s.core_%e_%p", dumpfile, getpid());
+#ifdef PR_SET_COREDUMP_FILENAME
+    prctl(PR_SET_COREDUMP_FILENAME, core_path, 0, 0, 0);
+#else
+    // #pragma message("警告：PR_SET_COREDUMP_FILENAME 不可用，使用备用方案")
+    set_core_path(core_path);  // 调用上述备用方案
+#endif
 }
 
 void* dpdk_rte_malloc(int size)
@@ -902,3 +960,32 @@ void* dpdk_rte_malloc(int size)
 	// 		可以用链表管理起来，然后注册rte_service给master进程去管理，也可以放到定时任务管理
 	return pdata;
 }
+
+int high_freq_malloc(struct rte_mempool* pool, void** data, int size)
+{
+	if(size <= 0) {
+		LOG_INFO("invalid size[%d] to malloc.", size);
+		return -1;
+	}
+	if(size > COMMON_PACKET_LEN) {
+		LOG_INFO("recieved an large packet, size:%d", size);
+		return rte_mempool_get(g_mempool_large_data, data);
+	} else {
+		return rte_mempool_get(pool, data);
+	}
+}
+
+void high_freq_free(struct rte_mempool* pool, void* data, int size)
+{
+	if(size <= 0) {
+		LOG_INFO("invalid size[%d] to free.", size);
+		return ;
+	}
+	if(size > COMMON_PACKET_LEN) {
+		LOG_INFO("free an large packet, size:%d", size);
+		rte_mempool_put(g_mempool_large_data, data);
+	} else {
+		rte_mempool_put(pool, data);
+	}
+}
+
