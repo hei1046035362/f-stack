@@ -20,6 +20,10 @@
 #define TGG_FD_CLOSED -2
 #define TGG_FD_NOTEXIST -3
 
+#define COMMON_PACKET_LEN 1024
+#define MAX_PACKET_LEN 8192
+
+
 // 应用层协议类型
 enum L4_TYPE
 {
@@ -56,20 +60,16 @@ enum FD_STATUS
     FD_STATUS_CLOSED = 32    // 这个状态下或者为0才能接收新的连接
 };
 
-#define MAX_WSDATA_LEN 10*1024*1024   // websocket最多缓存10M的数据
-typedef struct st_ws_unit {
-    int len;
-    int pos;    // 偏移量，
-                // 1、方便取数据的时候通过偏移量直接取到有效数据部分
-                // 2、这里的data存放的是fd读取的数据，为减少拷贝，不能改变data的位置，所以加一个pos
-    void* data;
-    struct st_ws_unit *next;
-} tgg_ws_unit;
+#define DEFAULT_WSDATA_LEN 4096   // ws默认缓存是4k，超过4k的连接  10w个连接就是400M，
+#define MAX_WSDATA_LEN 10*1024*1024   // websocket最多缓存10M的数据  暂时不器用，后续如果真的有超过4096的数据包
 
 typedef struct st_ws_data {
-    int total_len;        // 限制可接收数据长度，防止内存涨爆
-    int head_complete;
-    tgg_ws_unit* data_list;
+    int read_pos;
+    int write_pos;    // 偏移量，
+                // 1、方便取数据的时候通过偏移量直接取到有效数据部分
+                // 2、这里的data存放的是fd读取的数据，为减少拷贝，不能改变data的位置，所以加一个pos
+    int capacity;
+    void* data;
 } tgg_ws_data;
 
 // 客户端需要保留的信息
@@ -79,7 +79,7 @@ typedef struct st_cli_info {
     int idx;        // 和fd一起标识唯一连接，(fd可能被重用了,但是处理方仍不知情)
                     // -1 标识关闭中，后续的数据包不再处理，0标识关闭完成并准备就绪
     int authorized; // 连接确认
-    tgg_ws_data* ws_data;    // 缓存websocket的数据，用于处理分包的情况下
+    tgg_ws_data ws_data;    // 缓存websocket的数据，用于处理分包的情况下
     // int need_keep;    // 是否为长连接                         process填充
     // int l4_type;    // 应用层协议类型，http/websocket        process填充
     char ip_str[INET_ADDRSTRLEN];  // ws握手时需要打包发送给bw
@@ -137,7 +137,7 @@ typedef struct st_tgg_fd_idx_list {
     int fdid;// 存储在hash表中的是fdid，在线程或进程之间传递时是fd
     int idx;
     struct st_tgg_fd_idx_list* next;
-} tgg_fd_id_list;
+} __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_fd_id_list;
 
 
 // process回传给master处理

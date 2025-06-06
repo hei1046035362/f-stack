@@ -217,7 +217,7 @@ static int tgg_hash_get_allkeys(const rte_hash* hash, std::list<std::string>& ls
     while (1) {
         ret = rte_hash_iterate(hash, (const void**)&key, (void**)&value, &next);
         if (-ENOENT == ret) {
-            LOG_ERROR("iter to the end.");
+            // LOG_DEBUG("iter to the end.");
             break;
         } else if (ret < 0) {
             LOG_ERROR("catch an error");
@@ -772,7 +772,6 @@ int tgg_get_load_balance()
     void *value;
     uint32_t index = 0;
     int ret;
-    printf("unit count: %d\n", rte_hash_count(g_bwfdx_hash));
     ReadLock lock(get_bwfdxhsh_lock());
     // 遍历哈希表，找到负载最小的 fd
     ret = rte_hash_iterate(g_bwfdx_hash, (const void**)&key, (void**)&value, &index);

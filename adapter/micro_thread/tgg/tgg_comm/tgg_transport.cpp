@@ -39,7 +39,7 @@ void Send2Client(int cid, const std::string& data, int fd_opt, int encode)
     } else {
         sendData = Websocket::EncodeWebsocketMessage(BINARY_FRAME, encode ? packData : data);
     }
-    LOG_DEBUG("send data cid[%d]:%s", cid, sendData.c_str());
+    LOG_DEBUG("send data cid[%d]:%s", cid, bin2hex(sendData).c_str());
     if (enqueue_data_single_fd(core_id, sendData, fd, idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
         LOG_ERROR("Enqueue data Failed: cid:%d,opt:%d", cid, fd_opt);
     }
@@ -117,7 +117,7 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
         }
     }
 }
-
+static int s_enqueued_to_server_count = 0;
 int Send2Server(int core_id, int fd, const std::string& data, int fd_opt)
 {
     if(tgg_get_bwfdx_count() <= 0) {
@@ -125,9 +125,11 @@ int Send2Server(int core_id, int fd, const std::string& data, int fd_opt)
         return NO_BW_AVALIABLE;
     }
     if (enqueue_data_trans(core_id, fd, data, fd_opt) < 0) {// 函数内部会循环尝试发送10次
-        LOG_ERROR("Send data to server Failed.");
+        LOG_ERROR("Send data to server Failed,[core:%d][fd:%d] current count:%d.",
+         core_id, fd, s_enqueued_to_server_count);
         return SEND_FAILED;
     }
+    s_enqueued_to_server_count++;
     LOG_DEBUG("send to server:%s.", bin2hex(data).c_str());
     return SEND_SUCCESS;
 }
