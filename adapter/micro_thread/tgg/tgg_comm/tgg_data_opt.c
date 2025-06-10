@@ -13,7 +13,7 @@ int tgg_bind_session(const char* uid, int cid)
         LOG_ERROR("get fd by cid[%d] failed.", cid);
         return -1;
     }
-	int core_id = fdid & 0xf;
+	int core_id = fdid & 0xff;
 	int fd = fdid >> 8;
 	int idx = tgg_get_cli_idx(core_id, fd);
 	if (idx < 0) {
@@ -43,7 +43,7 @@ int tgg_unbind_session(int cid)
         // TODO 有可能前面已经删除了，还需要观察
         return 0;
     }
-	int core_id = fdid & 0xf;
+	int core_id = fdid & 0xff;
 	int fd = fdid >> 8;
 	int idx = tgg_get_cli_idx(core_id, fd);
 	if (idx < 0) {
@@ -108,7 +108,7 @@ int tgg_free_session(int core_id, int fd)
 int tgg_join_group(const char* gid, int cid)
 {
 	int fdid = tgg_get_fdbycid(cid);
-	int core_id = fdid & 0xf;
+	int core_id = fdid & 0xff;
 	int fd = fdid >> 8;
 	int idx = tgg_get_cli_idx(core_id, fd);
 	if (fd < 0 || idx < 0 || cid <= 0) {
@@ -132,7 +132,7 @@ int tgg_join_group(const char* gid, int cid)
 int tgg_exit_group(const char* gid, int cid)
 {
 	int fdid = tgg_get_fdbycid(cid);
-	int core_id = fdid & 0xf;
+	int core_id = fdid & 0xff;
 	int fd = fdid >> 8;
 	int idx = tgg_get_cli_idx(core_id, fd);
 	if (fd < 0 || idx < 0) {

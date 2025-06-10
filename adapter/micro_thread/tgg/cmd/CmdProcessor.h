@@ -12,7 +12,7 @@ public:
 	virtual ~CmdBaseProcessor() {};
 protected:
 	// 发送给服务端，这时候this->fd 就是服务端的fd
-	void Send2BW(const std::string& data);
+	void Send2BW(const nlohmann::json& data, bool serialize = true);
 
 protected:
 	int prc_id;// bwprc的进程编号，不是gwprc的
@@ -136,7 +136,7 @@ public:
 
 	CmdGetAllClientSession(int prc_id, int fd, void* data, const nlohmann::json& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
 	~CmdGetAllClientSession() {}
-    int ExecCmd() {return 0;}
+    int ExecCmd();
 };
 
 class CmdIsOnline : public CmdBaseProcessor {
