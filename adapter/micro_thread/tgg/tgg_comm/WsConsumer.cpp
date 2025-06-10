@@ -202,12 +202,17 @@ void WsConsumer::OnHandShake(const std::string& response, HttpRequest& req)
 
 void WsConsumer::OnPing(const std::string& response)
 {
-    std::string result = EncodeWebsocketMessage(PONG_FRAME, response);
+    std::string result = std::move(EncodeWebsocketMessage(PONG_FRAME, response));
     OnSend(result, FD_WRITE);
+    // 不单独开线程去发送ping了，收到ping之后发送完pong后即刻发送ping，在Onpong中检测是否超时
+    std::string ping = std::move(EncodeWebsocketMessage(PING_FRAME, response));
+    OnSend(ping, FD_WRITE);
 }
 
 void WsConsumer::OnPong(const std::string& response)
 {
+    // 在这里可以获取主动检测结果
+    // printf("recieve pong:%s\r\n", response.c_str());
 }
 
 void WsConsumer::OnMessage(const std::string& msg)

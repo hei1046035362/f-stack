@@ -309,7 +309,7 @@ static void tgg_do_send(tgg_write_data* wdata)
 	while (fd_id_list) {
 		int cli_fd = fd_id_list->fdid;// 数据传递时fdid存的是fd
 		int idx = tgg_get_cli_idx(g_core_id, cli_fd);
-		if(!strncmp((char*)wdata->data, "HTTP", 4)) {// GET请求消息
+		if(wdata->data_len > 4 && !strncmp((char*)wdata->data, "HTTP", 4)) {// GET请求消息
 			LOG_DEBUG("fd:%d idx:%d send to clien:%s.", cli_fd, idx, (char*)wdata->data);
 		} else {// 其他消息
 	    	LOG_DEBUG("fd:%d idx:%d send to clien:%s.", cli_fd, idx, bin2hex(std::string((char*)wdata->data, wdata->data_len)).c_str());
@@ -338,8 +338,10 @@ static void tgg_do_send(tgg_write_data* wdata)
 			if ( wdata->fd_opt & FD_CLOSE) {
 				LOG_INFO("Closing Connection[%d].", cli_fd);
 				tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSING);// 先设置标记，防止队列没人消费，影响其他连接
-				mt_sleep(1000);// ws的关闭帧发送完以后等待客户端先关闭，如果1s后没有关闭，我们要主动结束
-								// 到了这里后面的数据其实都应该要丢弃了，所以后续数据已经不重要了
+				if(wdata->fd_opt & FD_WRITE) {
+					mt_sleep(1000);// ws的关闭帧发送完以后等待客户端先关闭，如果1s后没有关闭，我们要主动结束
+									// 到了这里后面的数据其实都应该要丢弃了，所以后续数据已经不重要了
+				}
 				mt_close(cli_fd);// TODO:待优化，在这里结束可能会报错，四次挥手不完整：epoll schedule failed, errno: 62
 								 // 但正常结束流程里close，需要等待30s，不可配置，freebsd内部控制
 			}

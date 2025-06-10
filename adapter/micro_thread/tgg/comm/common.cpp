@@ -3,6 +3,7 @@
 #include <sys/time.h>
 #include "common.hpp"
 #include <iomanip>
+#include <string.h>
 
 std::string tgg_trim(const std::string& str) {
     auto start = str.begin();

@@ -397,7 +397,7 @@ void tgg_close_bw_session(int prc_id, int fd)
 {
 	int cmd = tgg_get_bwfdx_cmd(prc_id, fd);
 	if(cmd == GatewayProtocal::CMD_WORKER_CONNECT) {
-		tgg_del_bwfdx((fd << 8) | (prc_id & 0xf));
+		tgg_del_bwfdx((fd << 8) | (prc_id & 0xff));
 		std::string workerkey = tgg_get_bwfdx_workerkey(prc_id, fd);
 		tgg_del_bwwkkey(workerkey.c_str());
 	}

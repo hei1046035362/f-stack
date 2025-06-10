@@ -220,10 +220,10 @@ void *write_routine( void *arg )
             continue;
         }
         int bwfdx = bdata->bwfdx;//tgg_get_cli_bwfdx(bdata->coreid, bdata->fd);
-        int prc_id = bwfdx & 0xf;
+        int prc_id = bwfdx & 0xff;
         int fd = bwfdx >> 8;
         // cli对应的bwfd已经改变或者 bwfdx已关闭，丢弃
-        if(prc_id != g_prc_id || bdata->bwfdx != bwfdx || !tgg_get_bwfdx_status((bwfdx & 0xf), fd)) {
+        if(prc_id != g_prc_id || bdata->bwfdx != bwfdx || !tgg_get_bwfdx_status((bwfdx & 0xff), fd)) {
             clean_bw_data(bdata);
             continue;
         }
