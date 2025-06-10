@@ -107,16 +107,13 @@ static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int 
             return -1;
         }
         pdata = value->next;
-        while (pdata->next) {
+        while (pdata) {
             // TODO 对于已存在的fd+idx是否要比较，可能会有性能损耗
-            if(pdata->next->fdid == fdid) {
+            if(pdata->fdid == fdid) {
                 LOG_WARNING("Duplicate key[%s] found.", key);
-                break;
+                return 0;
             }
             pdata = pdata->next;
-        }
-        if(pdata->next) {
-            return 0;
         }
         tgg_fd_list* tmp = (tgg_fd_list*)dpdk_rte_malloc(sizeof(tgg_fd_list));
         if(!tmp) {
@@ -124,7 +121,7 @@ static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int 
         }
         tmp->fdid = fdid;
         tmp->next = NULL;
-        pdata->next = tmp;
+        pdata = tmp;
     }
     return 0;
 }
@@ -140,7 +137,7 @@ static void* tgg_hash_get_value(const rte_hash* hash, const char* key, int key_l
     void* pdata = NULL;
     int ret = rte_hash_lookup_with_hash_data(hash, key, rte_hash_crc(key, key_len, 0), &pdata);
     if (ret < 0) {
-        LOG_ERROR("Get key[%s] data failed:%d", key, ret);
+        LOG_INFO("Get key[%s] data failed:%d", key, ret);
         return NULL;
     }
     return pdata;
@@ -319,7 +316,7 @@ static int tgg_hash_get_all_intkeys(const rte_hash* hash, std::list<int>& lst_it
     while (1) {
         ret = rte_hash_iterate(hash, (const void**)&key, (void**)&value, &next);
         if (-ENOENT == ret) {
-            LOG_ERROR("iter to the end.");
+            LOG_DEBUG("iter to the end.");
             break;
         } else if (ret < 0) {
             LOG_ERROR("catch an error");
@@ -414,6 +411,7 @@ int tgg_get_fdsbyuid(const char* uid, std::list<int>& lst_fd)
     ReadLock lock(get_uidfd_lock());
     tgg_uid_data* value = (tgg_uid_data*)tgg_hash_get_value(g_uid_hash, _key, TGG_UID_LEN);
     if(!value) {
+        LOG_INFO("[%s][%d]get fdid by uid[%s] failed.", uid);
         return -1;
     }
     while (value->next) {
@@ -618,7 +616,7 @@ int tgg_get_gidsbyuid(const char* uid, std::set<std::string>& set_gid)
     tgg_get_fdsbyuid(uid, lstFds);// 通过uid找到cid列表
     std::list<int>::iterator it = lstFds.begin();
     while(it != lstFds.end()) {
-        int cid = tgg_get_cli_cid(*it & 0xf, *it >> 8);
+        int cid = tgg_get_cli_cid(*it & 0xff, *it >> 8);
         std::list<std::string> lstGids;
         tgg_get_gidsbycid(cid, lstGids);// 通过cid找到gid列表
         set_gid.insert(std::make_move_iterator(lstGids.begin()), 
@@ -635,7 +633,7 @@ void tgg_del_gid_cidgid(const char* gid)
     // 这里没有复用tgg_get_fdsbygid中的循环是为了减少加锁的时间
     std::list<int>::iterator it = fds.begin();
     while (it != fds.end()) {
-        int cid = tgg_get_cli_cid(*it & 0xf, *it >> 8);
+        int cid = tgg_get_cli_cid(*it & 0xff, *it >> 8);
         if(cid <= 0) {
             // TODO 调试+兜底:防止连接已关闭但是gid hash中的fd还在，出现这个日志，说明释放逻辑依然存在问题
             LOG_ERROR("Del gid[%s] for cidgid failed: cid%d is not avaliable.", gid, cid);            
@@ -787,11 +785,11 @@ int tgg_get_load_balance()
         }
     }
     bwfdx = *(int *)key;
-    min_load = tgg_get_bwfdx_load(bwfdx & 0xf, bwfdx >> 8);
+    min_load = tgg_get_bwfdx_load(bwfdx & 0xff, bwfdx >> 8);
 
     while ((ret = rte_hash_iterate(g_bwfdx_hash, (const void**)&key, (void**)&value, &index)) >= 0) {
         cur_bwfdx = *(int *)key;
-        cur_load = tgg_get_bwfdx_load(cur_bwfdx & 0xf, cur_bwfdx >> 8);
+        cur_load = tgg_get_bwfdx_load(cur_bwfdx & 0xff, cur_bwfdx >> 8);
         if (cur_load < min_load) {
             bwfdx = cur_bwfdx;
             min_load = cur_load;
@@ -821,7 +819,7 @@ void tgg_iter_del_bwfdx(int prc_id)
     ret = rte_hash_iterate(g_bwfdx_hash, (const void**)&key, (void**)&value, &index);
     while (ret >= 0) {
         // 删除当前键
-        if( ((*key) & 0xf) == prc_id ) {
+        if( ((*key) & 0xff) == prc_id ) {
             ret = rte_hash_del_key(g_bwfdx_hash, key);
             if (ret < 0) {
                 if (ret == -ENOENT) {

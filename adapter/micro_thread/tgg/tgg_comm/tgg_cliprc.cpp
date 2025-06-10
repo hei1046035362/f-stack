@@ -66,10 +66,10 @@ static void* deal_trans(void*)
         }
 #endif
         int bwfdx = tgg_get_cli_bwfdx(bdata->coreid, bdata->fd);
-        if(bwfdx && tgg_get_bwfdx_status((bwfdx & 0xf), bwfdx >> 8)) {
+        if(bwfdx && tgg_get_bwfdx_status((bwfdx & 0xff), bwfdx >> 8)) {
             // 已经绑定服务端，正常透传
             bdata->bwfdx = bwfdx;
-            tgg_enqueue_bwsnd( (bwfdx & 0xf), bdata);
+            tgg_enqueue_bwsnd( (bwfdx & 0xff), bdata);
         } else {
             // 重新绑定或首次绑定，先绑定再透传
             int index = MAX_CALC_LOAD_BALANCE_TRY;
@@ -83,7 +83,7 @@ static void* deal_trans(void*)
                     usleep(10);
                     continue;
                 }
-                if(bwfdx > 0 && tgg_get_bwfdx_status((bwfdx & 0xf), bwfdx >> 8)) {
+                if(bwfdx > 0 && tgg_get_bwfdx_status((bwfdx & 0xff), bwfdx >> 8)) {
                     break;
                 }
             }
@@ -98,9 +98,9 @@ static void* deal_trans(void*)
                 // 客户端连接绑定到服务端连接
                 tgg_set_cli_bwfdx(bdata->coreid, bdata->fd, bwfdx);
                 // 负载++
-                tgg_add_bwfdx_load(bwfdx & 0xf, bwfdx >> 8);
+                tgg_add_bwfdx_load(bwfdx & 0xff, bwfdx >> 8);
                 bdata->bwfdx = bwfdx;
-                if (tgg_enqueue_bwsnd( (bwfdx & 0xf), bdata) < 0) {
+                if (tgg_enqueue_bwsnd( (bwfdx & 0xff), bdata) < 0) {
                     // TODO 判断进程是否还在，不在了的话要做些什么操作
                     LOG_ERROR("enque bwsnd failed, bwfdx:%d.", bwfdx);
                     clean_bw_data(bdata);

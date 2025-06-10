@@ -10,7 +10,7 @@ endif
 PKGCONF ?= pkg-config
 
 DEBUG= -g
-BINARY = gwrcv gwcliprc gwbwprc gwredis
+BINARY = gwrcv gwcliprc gwbwprc gwredis gwregister
 FF_LIBS+= $(shell $(PKGCONF) --static --libs libdpdk)
 FF_LIBS+= -L${FF_PATH}/lib -Wl,--whole-archive,-lfstack,--no-whole-archive \
 		-L${FF_PATH}/app/libco/lib
