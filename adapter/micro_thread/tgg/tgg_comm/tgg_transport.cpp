@@ -16,7 +16,7 @@ void Send2Client(int cid, const std::string& data, int fd_opt, int encode)
         return;
     }
     int fd = fdidx >> 8;
-    int core_id = fdidx & 0xf;
+    int core_id = fdidx & 0xff;
     int idx = tgg_get_cli_idx(core_id, fd);
     if(idx < 0) {
         LOG_ERROR("client[%d] already closed.", cid);
@@ -28,15 +28,15 @@ void Send2Client(int cid, const std::string& data, int fd_opt, int encode)
     }
     std::string packData;
     std::string sendData;
-    // 打包封装到
-    if (encode && message_pack(2, 1, 0, 1, data, packData) < 0)
-    {
-        LOG_ERROR("message_pack data[%s] failed.", data.c_str());
-        return;
-    }
     if(fd_opt & FD_CLOSE) {
-        sendData = Websocket::EncodeCloseFrame(encode ? packData : data);
+        sendData = Websocket::EncodeCloseFrame(data);
     } else {
+        // 打包封装
+        if (encode && message_pack(2, 1, 0, 1, data, packData) < 0)
+        {
+            LOG_ERROR("message_pack data[%s] failed.", data.c_str());
+            return;
+        }
         sendData = Websocket::EncodeWebsocketMessage(BINARY_FRAME, encode ? packData : data);
     }
     LOG_DEBUG("send data cid[%d]:%s", cid, bin2hex(sendData).c_str());
@@ -71,7 +71,7 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
     std::map<int, std::list<int> > mapEachcorefds;
     std::list<int>::iterator itFd = fds.begin();
     while(itFd != fds.end()) {
-        mapEachcorefds[(*itFd) & 0xf].push_back((*itFd) >> 8);
+        mapEachcorefds[(*itFd) & 0xff].push_back((*itFd) >> 8);
         itFd++;
     }
     for (auto coreidFds : mapEachcorefds) {
@@ -111,7 +111,7 @@ void BatchSend2ClientByfds(std::list<int> fds, const std::string& data, int fd_o
         } else {
             sendData = Websocket::EncodeWebsocketMessage(BINARY_FRAME, encode ? packData : data);
         }
-        LOG_DEBUG("send group data:%s.", bin2hex(sendData).c_str());
+        LOG_DEBUG("send to batch client,coreid:%d data:%s.", coreidFds.first, bin2hex(sendData).c_str());
         if (enqueue_data_batch_fd(coreidFds.first, sendData, mapFdidx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
             LOG_ERROR("Batch Enqueue data Failed.");
         }
