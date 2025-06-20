@@ -2,14 +2,17 @@
 #define _TGG_STRUCT_H_
 #include <rte_build_config.h>
 #include <netinet/in.h>
+#include <rte_rwlock.h>
+
 // #define CACHE_LINE_SIZE 64
+#define MAX_CPU_COUNT 128
 #define SECRET_KEY_LEN 32
 #define WOKER_KEY_LEN 64
 
 #define MAX_LCORE_COUNT 32    // 最大允许的 lcore个数 TODO 可以优化，需要改相关逻辑以支持更多核
                               // 目前最大吃吃16个gw收包进程和16个cli处理线程
 
-#define TGG_CID_LEN 24
+#define TGG_CID_LEN 24  // 最优性能：按8字节对齐
 #define TGG_UID_LEN 24
 #define TGG_GID_LEN 24
 #define TGG_BWWKKEY_LEN 64 // 标识唯一的bw的字符串长度,格式 ip(16进制的int):worker_key
@@ -22,6 +25,34 @@
 
 #define COMMON_PACKET_LEN 1024
 #define MAX_PACKET_LEN 8192
+
+// fdid:fd << 8 & coreid
+// 从fdid中取出coreid和fd   // 确保不同进程中fd的唯一性
+// 直接取出来fd，fd后面的coreid和cid都右移掉
+#define GET_FD_FDID_MASK(X) (X >> 8)
+// coreid直接从cid中取
+#define GET_COREID_FDID_MASK(X) (X & 0xff)
+
+// fdidcid: (fd << 8 & coreid) << 32 & cid
+// 从fdidcid中取对应的数据   主要作为gid,uid,cid hash的value，确保连接的唯一性
+// 直接取出来fdid，fd后面的coreid和cid都右移掉
+#define GET_FDID_FDIDCID_MASK(X) (X >> 32)
+
+// 直接取出来fd，fd后面的coreid和cid都右移掉
+#define GET_FD_FDCID_MASK(X) (X >> 40)
+
+// cid: idx << 8 & coreid
+// cid中包含core_id
+#define GET_CID_FDCID_MASK(X) (X & 0xffffffff)
+#define GET_IDX_FDCID_MASK(X) ((X & 0xffffffff) >> 8)
+// coreid直接从cid中取
+#define GET_COREID_FDCID_MASK(X) (X & 0xff)
+
+// 从cid中取idx
+#define GET_IDX_CID_MASK(X) (X >> 8)
+
+
+// #define GET_FDIDCID_MASK(core_id, fd, cid) ((((fd << 8) | core_id) << 32) | cid)
 
 
 // 应用层协议类型
@@ -86,10 +117,13 @@ typedef struct st_cli_info {
     int ip;
     unsigned short port;
     int bwfdx;        // 绑定的bw
+} __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_cli_info;
+
+typedef struct st_cli_bw_info {
     int cid;    // client id                             process 填充
     char uid[TGG_UID_LEN];    // user id                             process 填充
-    char reserved[128];    // reserved
-} __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_cli_info;
+    char reserved[128];    // reserved    
+} __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_cli_bw_info;
 
 // BW连接信息
 typedef struct st_bw_info {
@@ -122,13 +156,14 @@ typedef struct st_read_data {
     void* data;        // 携带的数据
     unsigned int peer_ip; // 远端ip
     unsigned short peer_port;
-    unsigned int cid;
+    // unsigned int cid;
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_read_data;
 
 // list<fd>
 typedef struct st_tgg_fd_list {
-    int fdid;// 存储在hash表中的是fdid，在线程或进程之间传递时是fd
+    int64_t fdidcid;// 存储在hash表中的是fdidcid，在线程或进程之间传递时是fd
     // int idx;
+    rte_rwlock_t lock;
     struct st_tgg_fd_list* next;
 } tgg_fd_list;
 
@@ -151,6 +186,16 @@ typedef struct st_write_data {
 
 // bw数据处理传输结构
 typedef struct st_read_data tgg_bw_data;
+
+enum BWFDX_CMD {
+    BWFDX_CMD_ADD = 0,
+    BWFDX_CMD_DELETE,
+    BWFDX_CMD_UPDATEALL
+};
+typedef struct st_bwfdx_data {
+    int bwfdx;
+    int cmd;
+} tgg_bwfdx_data;
 
 typedef struct st_en_queue_stats {
     int malloc_st;
@@ -183,6 +228,7 @@ typedef tgg_fd_list tgg_uid_data;
 
 typedef struct st_list_iddata {
     char data[TGG_GID_LEN];
+    rte_rwlock_t lock;
     struct st_list_iddata* next;
 } tgg_list_id;
 

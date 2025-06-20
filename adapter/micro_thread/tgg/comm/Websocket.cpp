@@ -432,6 +432,7 @@ int Websocket::ReadData(void* data, int len)
             HttpRequest req;
             std::string response = _HandleHandshake(std::string((char*)input, in_len), req);
             if (response.empty()) {
+                LOG_ERROR("handle shake response is empty.");
                 return -1;
             }
             OnHandShake(response.c_str(), req);

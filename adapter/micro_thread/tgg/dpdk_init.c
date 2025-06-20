@@ -11,6 +11,7 @@
 #include <rte_atomic.h>
 #include <rte_hash.h>
 #include <rte_hash_crc.h>
+#include <rte_rcu_qsbr.h>
 
 #include "mt_api.h"
 #include "dpdk_init.h"
@@ -23,6 +24,10 @@
 const char* g_gateway_ip_str = "192.168.40.129";
 ushort g_gateway_port = 80;
 uint32_t g_gate_ip = 0;
+
+
+// fdid(coreid+idx)中的fd和cid(coreid+idx)中的idx 能够取的极限值是8388607  因为存放的时候只用了三个字节，有一个字节要用来存放coreid，
+//                               三个字节的第一位是符号位，所以能表达的最大值是 7f ff ff
 
 // static const char* s_init_flag = "/run/lock/tgg_init";
 
@@ -39,8 +44,16 @@ static uint32_t s_zone_size = g_fd_limit*sizeof(tgg_cli_info);  // 单个进程�
 struct rte_memzone* g_fd_zones[MAX_LCORE_COUNT] = {NULL};
 const char* fd_zone_name_prev = "tgg_fd_zone";
 
+
+/// 连接管理的fd数组 bw使用
+// uint32_t g_fd_limit = 10*10000; // 单个进程10W 个fd
+static uint32_t s_zone_bw_size = g_fd_limit*sizeof(tgg_cli_bw_info);  // 单个进程存储最多10w个fd
+struct rte_memzone* g_fd_bw_zones[MAX_LCORE_COUNT] = {NULL};
+const char* fd_bw_zone_name_prev = "tgg_fd_bw_zone";
+
+
 /// bw连接状态记录的fd数组
-uint32_t g_bwfdx_limit = 10*10000; // 单个进程1W 个fd
+uint32_t g_bwfdx_limit = 10*10000; // 单个进程10W 个fd
 static uint32_t s_bwzone_size = g_bwfdx_limit*sizeof(tgg_bw_info);  // 单个进程存储最多10w个fd
 struct rte_memzone* g_bwfdx_zones[MAX_LCORE_COUNT] = {NULL};
 const char* bwfdx_zone_name_prev = "tgg_bwfd_zone";
@@ -58,12 +71,14 @@ const char* s_lock_zone_name = "tgg_lock_zone";
 // 队列名
 const char* s_read_ring_name = "tgg_read_ring";
 const char* s_trans_ring_name = "tgg_trans_ring";
+const char* s_bwfdx_ring_name = "tgg_bwfdx_ring";
 const char* write_ring_name_prev = "tgg_write_ring";
 const char* cliprc_ring_name_prev = "tgg_cliprc_ring";
 const char* bwrcv_ring_name_prev = "tgg_bwrcv_ring";
 const char* bwsnd_ring_name_prev = "tgg_bwsnd_ring";
 // 队列长度
 static uint32_t s_ring_size = 1024*8;  // 缓冲队列的长度，得是2的幂
+static uint32_t s_write_ring_size = 1024*256;  // 缓冲队列的长度，得是2的幂
 // 队列对象
 struct rte_ring* g_ring_read = NULL;// lcore cli上行  暂时不用了
 struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT] = {NULL};// BW上行  暂时不用
@@ -72,6 +87,7 @@ struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT] = {NULL};// BW上行  暂时不�
 struct rte_ring* g_ring_cliprcs[MAX_LCORE_COUNT] = {NULL};// 客户端上行
 struct rte_ring* g_ring_writes[MAX_LCORE_COUNT] = {NULL};// 客户端下行
 struct rte_ring* g_ring_trans = NULL;// 上行透传
+struct rte_ring* g_ring_bwfdx = NULL;// bwprc 接收到新的/删除旧的 fd时 要通知透传线程
 struct rte_ring* g_ring_bwsnds[MAX_LCORE_COUNT] = {NULL};// BW下行
 
 
@@ -83,14 +99,15 @@ const char* s_pool_write_name = "tgg_pool_write_name";// 客户端下行
 const char* s_pool_bwrcv_name = "tgg_pool_bwrcv_name";// 客户端上行透传 和 bw上行共用
 
 // 网络数据实际使用缓存
-const char* s_pool_read_data_name = "tgg_pool_read_data_name";// 客户端上行 和 上行prc共用
-const char* s_pool_write_data_name = "tgg_pool_write_data_name";// 客户端下行
-const char* s_pool_bwrcv_data_name = "tgg_pool_bwrcv_data_name";// 客户端上行透传 和 bw上行共用
-const char* s_pool_large_data_name = "tgg_pool_large_data_name";// 客户端上行透传 和 bw上行共用
-const char* s_pool_clifdlist_data_name = "tgg_pool_clifdlist_data_name";// 下行发送fd列表的队列
+const char* s_pool_read_data_name = "tgg_pl_rdata";// 客户端上行 和 上行prc共用
+const char* s_pool_write_data_name = "tgg_pl_wdata";// 客户端下行
+const char* s_pool_bwrcv_data_name = "tgg_pl_bwdata";// 客户端上行透传 和 bw上行共用
+const char* s_pool_large_data_name = "tgg_pl_large_data";// 客户端上行透传 和 bw上行共用
+const char* s_pool_clifdlist_data_name = "tgg_pl_fdlst_data";// 下行发送fd列表的队列
 
 // 内存池大小 TODO 大小待调试
 static uint32_t s_mempool_size = 1024*64;// 尽量设置成2^n
+static uint32_t s_write_mempool_size = 1024*512;// 尽量设置成2^n
 // 每个内存池单个内存块儿的大小
 static uint32_t s_mempool_read_cache = sizeof(struct st_read_data);// 单个缓存的大小待定
 static uint32_t s_mempool_write_cache = sizeof(struct st_write_data);// 单个缓存的大小待定
@@ -133,12 +150,22 @@ struct rte_hash *g_uid_hash = NULL;// map[uid] = list{fdx}    每个uid，存放
 struct rte_hash *g_cid_hash = NULL;// map[cid] = {fdx}        通过cid查找fd的map
 struct rte_hash *g_cidgid_hash = NULL;// map[cid] = list{gid}    每个cid，存放这个cid所属的gid列表
 
-struct rte_hash *g_idx_hash = NULL;  // 存放已使用的client idx，idx会在指定的数字内循环，直到找到一个可用的
+struct rte_hash *g_idx_hash[MAX_LCORE_COUNT] = {NULL};  // 存放已使用的client idx，idx会在指定的数字内循环，直到找到一个可用的
 									//  客户端的连接需要在不同的进程中保留状态码，而fd是可重用的
 									/// 所以需要一个idx来代替fd作为唯一键，在判断状态的时候确定连接的唯一性
 // bwserver持有
 struct rte_hash *g_bwfdx_hash = NULL;  // 用于服务端连接的负载均衡，存放正在使用的bwfd, 确定客户端的数据要发送到哪个服务端
 struct rte_hash *g_bwwkkey_hash = NULL;  // 存放正在使用的bw的worker key
+
+struct rte_rcu_qsbr *g_gid_rcu = NULL;
+struct rte_rcu_qsbr *g_uid_rcu = NULL;
+struct rte_rcu_qsbr *g_cid_rcu = NULL;
+struct rte_rcu_qsbr *g_cidgid_rcu = NULL;
+struct rte_rcu_qsbr *g_bwfdx_rcu = NULL;
+struct rte_rcu_qsbr *g_bwwkkey_rcu = NULL;
+
+struct rte_memzone* g_rcu_zone = NULL;
+const char* s_rcu_zone_name = "tgg_rcu_zone";
 
 // 初始化锁
 static void init_locks()
@@ -306,16 +333,16 @@ struct rte_hash* init_hash(const char* hash_name, uint32_t ent_cnt, uint32_t key
 
 	struct rte_hash_parameters hash_params = {
 		.name = hash_name,
-		.entries = ent_cnt,
-		.key_len = key_len,
+		.entries = ent_cnt*4,
+		.key_len = RTE_ALIGN(key_len, 8),
 		.hash_func = rte_hash_crc,
 		.hash_func_init_val = 0,
 		.socket_id = (int)rte_socket_id(),
 		.extra_flag = RTE_HASH_EXTRA_FLAGS_EXT_TABLE | 
 						RTE_HASH_EXTRA_FLAGS_MULTI_WRITER_ADD | 
-						RTE_HASH_EXTRA_FLAGS_TRANS_MEM_SUPPORT
-						//RTE_HASH_EXTRA_FLAGS_RW_CONCURRENCY_LF |
-						//RTE_HASH_EXTRA_FLAGS_NO_FREE_ON_DEL, // 无锁并发+扩展桶
+						RTE_HASH_EXTRA_FLAGS_TRANS_MEM_SUPPORT |
+						RTE_HASH_EXTRA_FLAGS_RW_CONCURRENCY_LF 
+						// RTE_HASH_EXTRA_FLAGS_NO_FREE_ON_DEL, // 无锁并发+扩展桶
 	};
 
 	_hash = rte_hash_create(&hash_params);
@@ -327,6 +354,27 @@ struct rte_hash* init_hash(const char* hash_name, uint32_t ent_cnt, uint32_t key
 	}
 	LOG_INFO("New hash created: %s", hash_name);
 	return _hash;
+}
+
+struct rte_memzone* init_rcu_zone(const char* rcu_zone_name, int size)
+{
+    struct rte_memzone* rcu_zone = make_memzone(s_rcu_zone_name, size);
+    return rcu_zone;
+}
+
+static void init_rcu(struct rte_rcu_qsbr *rcu, struct rte_hash *hash)
+{
+    if(rte_rcu_qsbr_init(rcu, RTE_MAX_LCORE)) {
+        rte_exit(EXIT_FAILURE, "Failed to init RCU, init qsbr failed:%s.\n", rte_strerror(rte_errno));
+    }
+
+    struct rte_hash_rcu_config rcu_cfg = {
+        .v = rcu,                // 传递 RCU 对象
+        .mode = RTE_HASH_QSBR_MODE_SYNC  // 同步模式
+    };
+    if (rte_hash_rcu_qsbr_add(hash, &rcu_cfg) != 0) { 
+        rte_exit(EXIT_FAILURE, "Failed to add RCU to hash,error:%s\n", rte_strerror(rte_errno));
+    }
 }
 
 void tgg_master_init()
@@ -347,6 +395,15 @@ void tgg_master_init()
 			tgg_set_cli_idx(i, j, TGG_FD_CLOSED);
 		}
 
+		char zone_fd_name[RTE_MEMZONE_NAMESIZE] = {0};
+		sprintf(zone_fd_name, "%s_%d", fd_bw_zone_name_prev, i);
+		g_fd_bw_zones[i] = make_memzone(zone_fd_name, s_zone_bw_size);
+		for (uint32_t j = 0; j < g_fd_limit; j++) {
+			// 所有fd的初始状态设置为
+			tgg_set_cli_cid(i, j, -1);
+		}
+
+
 		// cli 处理队列
 		char cliprc_ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(cliprc_ring_name, "%s_%d", cliprc_ring_name_prev, i);
@@ -355,7 +412,7 @@ void tgg_master_init()
 		// cli 发送队列
 		char write_ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(write_ring_name, "%s_%d", write_ring_name_prev, i);
-		g_ring_writes[i] = make_ring(write_ring_name, s_ring_size);
+		g_ring_writes[i] = make_ring(write_ring_name, s_write_ring_size);
 
 		// bw 接收
 		char bwrcv_ring_name[RTE_RING_NAMESIZE] = {0};
@@ -375,28 +432,55 @@ void tgg_master_init()
 		// bw 发送
 		char bwsnd_ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(bwsnd_ring_name, "%s_%d", bwsnd_ring_name_prev, i);
-		g_ring_bwsnds[i] = make_ring(bwsnd_ring_name, s_ring_size);
+		g_ring_bwsnds[i] = make_ring(bwsnd_ring_name, s_write_ring_size);
 	}
 	// cli 接收队列
 	g_ring_read = make_ring(s_read_ring_name, s_ring_size);
 	// cli上行透传
 	g_ring_trans = make_ring(s_trans_ring_name, s_ring_size);
+	g_ring_bwfdx = make_ring(s_bwfdx_ring_name, s_ring_size);
 
 	g_mempool_read = make_mempool(s_pool_read_name, s_mempool_size, s_mempool_read_cache);
-	g_mempool_write = make_mempool(s_pool_write_name, s_mempool_size, s_mempool_write_cache);
+	g_mempool_write = make_mempool(s_pool_write_name, s_write_mempool_size, s_mempool_write_cache);
 	g_mempool_bwrcv = make_mempool(s_pool_bwrcv_name, s_mempool_size, s_mempool_bwrcv_cache);
 	g_gid_hash = init_hash(s_gid_hash_name, g_fd_limit, TGG_GID_LEN);
 	g_uid_hash = init_hash(s_uid_hash_name, g_fd_limit, TGG_UID_LEN);
-	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, sizeof(int));
-	g_cidgid_hash = init_hash(s_cidgid_hash_name, g_fd_limit, sizeof(int));
-	g_idx_hash = init_hash(s_idx_hash_name, g_fd_limit, sizeof(int));
-	g_bwfdx_hash = init_hash(s_bwfdx_hash_name, g_fd_limit, sizeof(int));
+	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, sizeof(int64_t));
+	g_cidgid_hash = init_hash(s_cidgid_hash_name, g_fd_limit, sizeof(int64_t));
+	for (int i = 0; i < MAX_LCORE_COUNT; ++i)
+	{// idx hash是每个lcore进程独享的，进程之间不共享
+		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
+			continue;
+		}
+		char idx_hash_name[128] = {0};
+		sprintf(idx_hash_name, "%s_%d", s_idx_hash_name, i);
+		g_idx_hash[i] = init_hash(idx_hash_name, g_fd_limit, sizeof(int64_t));
+		// g_idx_rcu[i] = rte_rcu_qsbr_create(rte_socket_id());
+		// rte_hash_rcu_qsbr_add(g_idx_hash[i], g_idx_rcu);
+	}
+	g_bwfdx_hash = init_hash(s_bwfdx_hash_name, g_fd_limit, sizeof(int64_t));
 	g_bwwkkey_hash = init_hash(s_bwwkkey_hash_name, g_fd_limit, TGG_BWWKKEY_LEN);
 	g_bwprc_zone = make_memzone(bwprc_zone_name, TggConfigure::getInstance()->get_bwsvr_count()*sizeof(pid_data));
 
+	// 初始化rcu
+	// size_t rcu_sz = rte_rcu_qsbr_get_memsize(RTE_MAX_LCORE);
+	// g_rcu_zone = init_rcu_zone(s_rcu_zone_name, 6*rcu_sz);// 有6个hash表需要使用rcu
+	// g_gid_rcu = (struct rte_rcu_qsbr *)((char*)(g_rcu_zone->addr));
+	// init_rcu(g_gid_rcu, g_gid_hash);
+	// g_uid_rcu = (struct rte_rcu_qsbr *)(((char*)(g_rcu_zone->addr)) + rcu_sz);
+	// init_rcu(g_uid_rcu, g_uid_hash);
+	// g_cid_rcu = (struct rte_rcu_qsbr *)(((char*)(g_rcu_zone->addr)) + 2*rcu_sz);
+	// init_rcu(g_cid_rcu, g_cid_hash);
+	// g_cidgid_rcu = (struct rte_rcu_qsbr *)(((char*)(g_rcu_zone->addr)) + 3*rcu_sz);
+	// init_rcu(g_cidgid_rcu, g_cidgid_hash);
+	// g_bwfdx_rcu = (struct rte_rcu_qsbr *)(((char*)(g_rcu_zone->addr)) + 4*rcu_sz);
+	// init_rcu(g_bwfdx_rcu, g_bwfdx_hash);
+	// g_bwwkkey_rcu = (struct rte_rcu_qsbr *)(((char*)(g_rcu_zone->addr)) + 5*rcu_sz);
+	// init_rcu(g_bwwkkey_rcu, g_bwwkkey_hash);
+
 	g_mempool_read_data = make_mempool(s_pool_read_data_name, s_mempool_size, COMMON_PACKET_LEN);
 	g_mempool_write_data = make_mempool(s_pool_write_data_name, s_mempool_size, COMMON_PACKET_LEN);
-	g_mempool_bwrcv_data = make_mempool(s_pool_bwrcv_data_name, s_mempool_size, COMMON_PACKET_LEN);
+	g_mempool_bwrcv_data = make_mempool(s_pool_bwrcv_data_name, s_write_mempool_size, COMMON_PACKET_LEN);
 	g_mempool_large_data = make_mempool(s_pool_large_data_name, s_large_mempool_size, MAX_PACKET_LEN);
 	g_mempool_clifdlist_data = make_mempool(s_pool_clifdlist_data_name, s_clifdlist_mempool_size, sizeof(tgg_fd_id_list));
 
@@ -411,6 +495,9 @@ void tgg_master_uninit()
 		}
 		rte_memzone_free(g_fd_zones[i]);
 		g_fd_zones[i] = NULL;
+
+		rte_memzone_free(g_fd_bw_zones[i]);
+		g_fd_bw_zones[i] = NULL;
 
 		rte_ring_free(g_ring_writes[i]);
 		g_ring_writes[i] = NULL;
@@ -453,6 +540,9 @@ void tgg_master_uninit()
 	g_ring_read = NULL;
 	rte_ring_free(g_ring_trans);
 	g_ring_trans = NULL;
+	rte_ring_free(g_ring_bwfdx);
+	g_ring_bwfdx = NULL;
+
 	rte_hash_free(g_uid_hash);
 	g_uid_hash = NULL;
 	rte_hash_free(g_gid_hash);
@@ -461,14 +551,21 @@ void tgg_master_uninit()
 	g_cid_hash = NULL;
 	rte_hash_free(g_cidgid_hash);
 	g_cidgid_hash = NULL;
-	rte_hash_free(g_idx_hash);
-	g_idx_hash = NULL;
+	for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
+		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
+			continue;
+		}
+		rte_hash_free(g_idx_hash[i]);
+		g_idx_hash[i] = NULL;
+	}
 	rte_hash_free(g_bwfdx_hash);
 	g_bwfdx_hash = NULL;
 	rte_hash_free(g_bwwkkey_hash);
 	g_bwwkkey_hash = NULL;
 	rte_memzone_free(g_bwprc_zone);
 	g_bwprc_zone = NULL;
+	rte_memzone_free(g_rcu_zone);
+	g_rcu_zone = NULL;
 }
 
 void init_multi_for_secondary()
@@ -481,6 +578,11 @@ void init_multi_for_secondary()
 		char zone_name[RTE_MEMZONE_NAMESIZE] = {0};
 		sprintf(zone_name, "%s_%d", fd_zone_name_prev, i);
 		g_fd_zones[i] = find_memzone(zone_name);
+
+		char zone_name1[RTE_MEMZONE_NAMESIZE] = {0};
+		sprintf(zone_name1, "%s_%d", fd_bw_zone_name_prev, i);
+		g_fd_bw_zones[i] = find_memzone(zone_name1);
+
 		// 初始化发送队列ring
 		char ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(ring_name, "%s_%d", write_ring_name_prev, i);
@@ -511,6 +613,7 @@ void tgg_secondary_init()
 	g_lock_zone = find_memzone(s_lock_zone_name);
 	g_ring_read = find_ring(s_read_ring_name);
 	g_ring_trans = find_ring(s_trans_ring_name);
+	g_ring_bwfdx = find_ring(s_bwfdx_ring_name);
 	g_mempool_read = find_mempool(s_pool_read_name);
 	g_mempool_write = find_mempool(s_pool_write_name);
 	g_mempool_bwrcv = find_mempool(s_pool_bwrcv_name);
@@ -523,14 +626,67 @@ void tgg_secondary_init()
 	g_uid_hash = get_hash_byname(s_uid_hash_name);
 	g_cid_hash = get_hash_byname(s_cid_hash_name);
 	g_cidgid_hash = get_hash_byname(s_cidgid_hash_name);
-	g_idx_hash = get_hash_byname(s_idx_hash_name);
+	// g_idx_hash = get_hash_byname(s_idx_hash_name);
 	g_bwfdx_hash = get_hash_byname(s_bwfdx_hash_name);
 	g_bwwkkey_hash = get_hash_byname(s_bwwkkey_hash_name);
+
+	// 初始化rcu
+	// size_t rcu_sz = rte_rcu_qsbr_get_memsize(RTE_MAX_LCORE);
+	// g_rcu_zone = find_memzone(s_rcu_zone_name);
+	// g_gid_rcu = (struct rte_rcu_qsbr *)((char*)(g_rcu_zone->addr));
+	// g_uid_rcu = (struct rte_rcu_qsbr *)(((char*)(g_rcu_zone->addr)) + rcu_sz);
+	// g_cid_rcu = (struct rte_rcu_qsbr *)(((char*)(g_rcu_zone->addr)) + 2*rcu_sz);
+	// g_cidgid_rcu = (struct rte_rcu_qsbr *)(((char*)(g_rcu_zone->addr)) + 3*rcu_sz);
+	// g_bwfdx_rcu = (struct rte_rcu_qsbr *)(((char*)(g_rcu_zone->addr)) + 4*rcu_sz);
+	// g_bwwkkey_rcu = (struct rte_rcu_qsbr *)(((char*)(g_rcu_zone->addr)) + 5*rcu_sz);
+	// 所有进程注册线程到 RCU
+	// rte_rcu_qsbr_thread_register(g_gid_rcu, rte_lcore_id());
+    // rte_rcu_qsbr_thread_online(g_gid_rcu, rte_lcore_id());
+	// rte_rcu_qsbr_thread_register(g_uid_rcu, rte_lcore_id());
+    // rte_rcu_qsbr_thread_online(g_uid_rcu, rte_lcore_id());
+	// rte_rcu_qsbr_thread_register(g_cid_rcu, rte_lcore_id());
+    // rte_rcu_qsbr_thread_online(g_cid_rcu, rte_lcore_id());
+	// rte_rcu_qsbr_thread_register(g_cidgid_rcu, rte_lcore_id());
+    // rte_rcu_qsbr_thread_online(g_cidgid_rcu, rte_lcore_id());
+	// rte_rcu_qsbr_thread_register(g_bwfdx_rcu, rte_lcore_id());
+    // rte_rcu_qsbr_thread_online(g_bwfdx_rcu, rte_lcore_id());
+	// rte_rcu_qsbr_thread_register(g_bwwkkey_rcu, rte_lcore_id());
+    // rte_rcu_qsbr_thread_online(g_bwwkkey_rcu, rte_lcore_id());
+
 }
 
 void tgg_secondary_uninit()
 {
 	rte_eal_cleanup();
+}
+
+void tgg_unregister_rcu()
+{
+	// rte_rcu_qsbr_thread_offline(g_gid_rcu, rte_lcore_id());
+	// (void)rte_rcu_qsbr_thread_unregister(g_gid_rcu, rte_lcore_id());
+	// rte_rcu_qsbr_thread_offline(g_uid_rcu, rte_lcore_id());
+	// (void)rte_rcu_qsbr_thread_unregister(g_uid_rcu, rte_lcore_id());
+	// rte_rcu_qsbr_thread_offline(g_cid_rcu, rte_lcore_id());
+	// (void)rte_rcu_qsbr_thread_unregister(g_cid_rcu, rte_lcore_id());
+	// rte_rcu_qsbr_thread_offline(g_cidgid_rcu, rte_lcore_id());
+	// (void)rte_rcu_qsbr_thread_unregister(g_cidgid_rcu, rte_lcore_id());
+	// rte_rcu_qsbr_thread_offline(g_bwfdx_rcu, rte_lcore_id());
+	// (void)rte_rcu_qsbr_thread_unregister(g_bwfdx_rcu, rte_lcore_id());
+	// rte_rcu_qsbr_thread_offline(g_bwwkkey_rcu, rte_lcore_id());
+	// (void)rte_rcu_qsbr_thread_unregister(g_bwwkkey_rcu, rte_lcore_id());
+}
+
+void tgg_gwrcv_secondary_init()
+{
+	for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
+		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
+			continue;
+		}
+		char idx_hash_name[128] = {0};
+		sprintf(idx_hash_name, "%s_%d", s_idx_hash_name, i);
+		g_idx_hash[i] = get_hash_byname(idx_hash_name);
+	}
+	tgg_secondary_init();
 }
 
 void tgg_cliprc_init()
@@ -540,7 +696,7 @@ void tgg_cliprc_init()
 
 void tgg_cliprc_uninit()
 {
-	rte_eal_cleanup();
+	tgg_secondary_uninit();
 }
 
 // bw 消息处理进程处理dpdk操作相关数据结构初始化
@@ -552,7 +708,7 @@ void tgg_bwprc_init(int bwcount)
 
 void tgg_bwprc_uninit(int bwcount)
 {
-	rte_eal_cleanup();
+	tgg_secondary_uninit();
 }
 
 // register
@@ -564,7 +720,7 @@ void tgg_register_init()
 
 void tgg_register_uninit()
 {
-	rte_eal_cleanup();
+	tgg_secondary_uninit();
 }
 
 
@@ -574,6 +730,6 @@ void prc_exit(int exit_code, const char* fmt, ...)
 	va_start(ap, fmt);
 	rte_vlog(RTE_LOG_ERR, RTE_LOGTYPE_USER1, fmt, ap);
 	va_end(ap);
-	rte_eal_cleanup();
+	tgg_secondary_uninit();
 	exit(exit_code);
 }

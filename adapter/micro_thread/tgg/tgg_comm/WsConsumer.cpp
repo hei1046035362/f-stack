@@ -12,6 +12,7 @@
 #include "tgg_comm/tgg_conf.h"
 #include "comm/common.hpp"
 #include "comm/log.hpp"
+#include "mt_api.h"
 
 int WsConsumer::ConsumerData(void* data)
 {
@@ -20,7 +21,7 @@ int WsConsumer::ConsumerData(void* data)
         // TODO close fd or just drop data
         _CleanData();
         // _CleanAndClose();
-        return 0;
+        return -1;
     }
     this->fd = rdata->fd;
     this->data = data;
@@ -36,12 +37,13 @@ int WsConsumer::ConsumerData(void* data)
     }
 
     InitWebsocket(rdata->fd, tgg_get_cli_authorized(rdata->coreid, rdata->fd));
-    _cid = tgg_get_cli_cid(core_id, fd);
-    _uid = tgg_get_cli_uid(core_id, fd);
+    // _cid = tgg_get_cli_cid(core_id, fd);
+    // _uid = tgg_get_cli_uid(core_id, fd);
 
     int ret = ReadData(rdata->data, rdata->data_len);
     if (ret < 0) {
         _CleanAndClose();
+        return -1;
     } else if (ret > 0) {
         _CleanData();
     }// 等于0属于帧不完整，ws缓存了数据不能清理
@@ -51,14 +53,10 @@ int WsConsumer::ConsumerData(void* data)
 bool WsConsumer::ConnectionValid(int core_id, int fd, void* data)
 {
     _idx = tgg_get_cli_idx(core_id, fd);
-    if(_idx < 0) {// fd超过了可用范围
+    if(_idx < 0 || fd <= 0) {// fd超过了可用范围
+        LOG_ERROR("invalid idx[%d] or invalid fd[%d].", _idx, fd);
         return false;
     }
-    // _status = tgg_get_cli_status(fd);
-    // if (_status > FD_STATUS_KEEP) {
-    //     // TODO 状态迁移待改进，连接已经关闭了
-    //     return false;
-    // }
     if (_idx != ((tgg_read_data*)data)->idx) {
         // 说明当前的数据已经是上一个连接的数据了
         LOG_ERROR("client idx[%d] not match to data idx[%d].", _idx, ((tgg_read_data*)data)->idx);
@@ -71,6 +69,7 @@ void WsConsumer::OnClose()
 {// 子类继承后要执行clean_buffer清理缓存
     // std::string data = "\x88\x02\x03\xe8\x00\x00";// 关闭websocket
     // OnSend(data, FD_WRITE|FD_CLOSE);
+    _status = FD_STATUS_CLOSING;
     Send2Server(this->core_id, this->fd, "", FD_CLOSE);
     SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     // SendData("", FD_CLOSE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
@@ -79,9 +78,9 @@ void WsConsumer::OnClose()
 void WsConsumer::OnConnect()
 {
     tgg_set_cli_authorized(this->core_id, this->fd, AUTH_TYPE_CLIENTCONNECT);
-    int cid = ((this->core_id << 24) | this->_idx);
-    tgg_set_cli_cid(this->core_id, this->fd, cid);
-    this->_cid = cid;
+    // int cid = (this->core_id  | this->_idx << 8);
+    // tgg_set_cli_cid(this->core_id, this->fd, cid);
+    // this->_cid = cid;
     if(Send2Server(this->core_id, this->fd, "", FD_NEW) == NO_BW_AVALIABLE) {
         SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     }
@@ -163,7 +162,7 @@ bool WsConsumer::_CheckToken(const std::string& token)
 }
 
 // 握手
-void WsConsumer::OnHandShake(const std::string& response, HttpRequest& req)
+void WsConsumer::OnHandShake(const std::string& response, struct HttpRequest& req)
 {
     std::string token, properties;
     if(!tgg_request_valid_check(req, token, properties)) {
@@ -197,7 +196,7 @@ void WsConsumer::OnHandShake(const std::string& response, HttpRequest& req)
     // 通知服务端websocket 握手完成
     if (Send2Server(this->core_id, this->fd, result, FD_HANDLESHAKE) == NO_BW_AVALIABLE) {
         SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
-    };
+    }
 }
 
 void WsConsumer::OnPing(const std::string& response)
@@ -219,16 +218,17 @@ void WsConsumer::OnMessage(const std::string& msg)
 {
     int cli_status = tgg_get_cli_authorized(this->core_id, this->fd);
     if(cli_status != AUTH_TYPE_HANDLESHAKED) {
-        LOG_ERROR("cli[%d] status[%d] is not handleshaked, msg[%s] droped.", this->_cid, cli_status, msg.c_str());
+        LOG_ERROR("cli[coreid:%d fd:%d] status[%d] is not handleshaked, msg[%s] droped.", this->core_id, this->fd, cli_status, msg.c_str());
         return;
     }
     if(Send2Server(this->core_id, this->fd, msg, FD_WRITE) == NO_BW_AVALIABLE) {
         SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
-    };
+    }
 }
 
 void WsConsumer::OnSend(const std::string& msg, int fd_opt)
 {
+    #if 0
     // 连接已关闭或尚未建立
     if(tgg_get_cli_idx(this->core_id, this->fd) < 0) {
         LOG_ERROR("Send data Failed, connection invalid: cid:%d,uid:%s,opt:%d.", _cid, _uid.c_str(), fd_opt);        
@@ -240,6 +240,18 @@ void WsConsumer::OnSend(const std::string& msg, int fd_opt)
         LOG_ERROR("Enqueue data Failed: cid:%d,uid:%s,opt:%d.", _cid, _uid.c_str(), fd_opt);
         enqueue_data_single_fd(this->core_id, "", this->fd, _idx, FD_WRITE|FD_CLOSE);
     }
+    #endif
+    // if(fd_opt & FD_CLOSE) {
+    //     tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSING);// 设置关闭标记，表明不会再发送数据,直接关闭连接，后续的数据直接丢弃
+    // }
+    int ret = NS_MICRO_THREAD::mt_send(this->fd, msg.c_str(), msg.size(), 0, 1000);
+    if (ret == -4) {
+        // 主动断开连接
+        LOG_INFO("closing connection affected.");
+    } else if (ret < 0) {
+        LOG_ERROR("send data to client fd[%d] idx[%d] error, ret[%d]", this->fd, _idx, ret);
+    }
+    LOG_DEBUG("OnSend to client fd[%d] idx[%d]: %s", this->fd, _idx, bin2hex(msg).c_str());
 }
 
 void WsConsumer::_CleanAndClose()

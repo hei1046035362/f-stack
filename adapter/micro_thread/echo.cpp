@@ -54,7 +54,7 @@ int echo_server()
 	struct sockaddr_in addr;
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = INADDR_ANY;
-	addr.sin_port = htons(80);
+	addr.sin_port = htons(8086);
 
 	int fd = create_tcp_sock();
 	if (fd < 0) {
@@ -75,6 +75,7 @@ int echo_server()
 	}
     int clt_fd = 0;
 	int *p;
+	int count = 0;
 	while (true) {
 		struct sockaddr_in client_addr;
 		int addr_len = sizeof(client_addr);
@@ -91,6 +92,7 @@ int echo_server()
 
 		p = new int(clt_fd);
 		mt_start_thread((void *)echo, (void *)p);
+		printf("started new connection, total count:%d\n", ++count);
 	}
 	return 0;
 }

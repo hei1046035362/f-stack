@@ -8,25 +8,20 @@
 // 执行bind   cid bind uid的时候需要执行这个函数
 int tgg_bind_session(const char* uid, int cid)
 {
-    int fdid = tgg_get_fdbycid(cid);
-    if(fdid < 0) {
+    int64_t fdidcid = tgg_get_fdbycid(cid);
+    if(fdidcid < 0) {
         LOG_ERROR("get fd by cid[%d] failed.", cid);
         return -1;
     }
-	int core_id = fdid & 0xff;
-	int fd = fdid >> 8;
-	int idx = tgg_get_cli_idx(core_id, fd);
-	if (idx < 0) {
-		LOG_ERROR("session is closing, uid[%s] cid[%d].", uid, cid);
-		return -1;
-	}
+	int core_id = GET_COREID_FDCID_MASK(fdidcid);
+	int fd = GET_FD_FDCID_MASK(fdidcid);
 	if(strlen(uid) <= 0 || cid <= 0) {
 		LOG_ERROR("uid[%s] and cid[%d] should not be empty.", uid, cid);
 		return -1;
 	}
 	// 添加到 hash<uid, list<fd>>
-	if (tgg_add_uid(uid, fdid) < 0) {
-		LOG_ERROR("add uid[%s] fdid[%d] failed.", uid, fd);
+	if (tgg_add_uid(uid, fdidcid) < 0) {
+		LOG_ERROR("add uid[%s] fdidcid[%lld] failed.", uid, fdidcid);
 		return -1;
 	}
 	tgg_set_cli_uid(core_id, fd, uid);
@@ -37,19 +32,14 @@ int tgg_bind_session(const char* uid, int cid)
 // 执行unbind
 int tgg_unbind_session(int cid)
 {
-    int fdid = tgg_get_fdbycid(cid);
-    if(fdid < 0) {
-        LOG_ERROR("get fdid by cid[%d] failed.", cid);
+    int64_t fdidcid = tgg_get_fdbycid(cid);
+    if(fdidcid < 0) {
+        LOG_ERROR("get fdidcid by cid[%d] failed.", cid);
         // TODO 有可能前面已经删除了，还需要观察
         return 0;
     }
-	int core_id = fdid & 0xff;
-	int fd = fdid >> 8;
-	int idx = tgg_get_cli_idx(core_id, fd);
-	if (idx < 0) {
-		LOG_ERROR("session is closing, cid[%d].", cid);
-		return -1;
-	}
+	int core_id = GET_COREID_FDCID_MASK(fdidcid);
+	int fd = GET_FD_FDCID_MASK(fdidcid);
     std::string suid = tgg_get_cli_uid(core_id, fd);
 	if(suid.length() <= 0) {
 		// fdid 的 uid已经为空了
@@ -59,7 +49,7 @@ int tgg_unbind_session(int cid)
 		tgg_set_cli_uid(core_id, fd, "");
 	}
 	// 从 hash<uid, list<fd>> 中删除
-	if (tgg_del_fd4uid(suid.c_str(), fdid) < 0) {
+	if (tgg_del_fd4uid(suid.c_str(), fdidcid) < 0) {
 		LOG_ERROR("add uid[%s] fdid[%d] failed.", suid.c_str(), fd);
 		return -1;
 	}
@@ -67,25 +57,38 @@ int tgg_unbind_session(int cid)
 
 }
 
+int tgg_init_session(int core_id, int fd, int idx)
+{
+    int cid = generate_cid(core_id, idx);
+    int64_t fdidcid = generate_fdidcid(core_id, fd, cid);
+    // 添加到 hash<cid, fd>
+    if (tgg_add_cid(cid, fdidcid) < 0) {
+        LOG_ERROR("add cid[%d] fdidcid[%ld] failed.", cid, fdidcid);
+        return -1;
+    }
+    LOG_INFO("add cid[%d] for fdidcid[%ld] success.", cid, fdidcid);
+    tgg_init_cli_bw(core_id, fd, cid);
+    return 0;
+}
+
 // 关闭一个客户端连接时要触发的释放内容
-int tgg_free_session(int core_id, int fd)
+int tgg_free_session(int core_id, int fd, int cid)
 {
 	// 从hash表中清除连接
-	int idx = tgg_get_cli_idx(core_id, fd);
-	if(idx <= TGG_FD_CLOSED) {
-		LOG_WARNING("session is already closed.");
-		return 0;
-	}
+	// int idx = tgg_get_cli_idx(core_id, fd);
+	// if(idx <= TGG_FD_CLOSED) {
+	// 	LOG_WARNING("session is already closed.");
+	// 	return 0;
+	// }
 	std::string uid = tgg_get_cli_uid(core_id, fd);
-	int cid = tgg_get_cli_cid(core_id, fd);
-	int fdid = (fd << 8) | core_id;
+	int64_t fdidcid = generate_fdidcid(core_id, fd, cid);
 	if(cid > 0) {
 		std::list<std::string> lstgid;
 		if (!tgg_get_gidsbycid(cid, lstgid)) {
 			std::list<std::string>::iterator itgid = lstgid.begin();
 			while(itgid != lstgid.end()) {
 				// 清理hash<gid,list<fdx>>
-				tgg_del_fd4gid((*itgid).c_str(), fdid);
+				tgg_del_fd4gid((*itgid).c_str(), fdidcid);
 				itgid++;
 			}
 		}
@@ -96,34 +99,37 @@ int tgg_free_session(int core_id, int fd)
 	}
 	// 清理hash<uid,list<fdx>>
 	if(!uid.empty()) {
-		tgg_del_fd4uid(uid.c_str(), fdid);
+		tgg_del_fd4uid(uid.c_str(), fdidcid);
 	}
-
-	// 清空cli信息  这个信息在由master close以后再清理，这里只清理hash表，由process调用
-	// tgg_close_cli(fd);
+    if (tgg_del_cid(cid) < 0) {// 删除cid就代表客户端连接信息在bw侧的处理已经完全结束了
+        LOG_ERROR("delete cid[%d] failed.", cid);
+    }
+	// 清空bw侧的cli信息
+	tgg_close_cli_bw(core_id, fd);
 	return 0;
 
 }
 
 int tgg_join_group(const char* gid, int cid)
 {
-	int fdid = tgg_get_fdbycid(cid);
-	int core_id = fdid & 0xff;
-	int fd = fdid >> 8;
-	int idx = tgg_get_cli_idx(core_id, fd);
-	if (fd < 0 || idx < 0 || cid <= 0) {
+	int64_t fdidcid = tgg_get_fdbycid(cid);
+	// int fdid = GET_FDID_FDIDCID_MASK(fdidcid);
+	// int core_id = GET_COREID_FDID_MASK(fdid);
+	// int fd = GET_FD_FDID_MASK(fdid);
+	// int idx = GET_IDX_CID_MASK(cid);//tgg_get_cli_idx(core_id, fd);
+	if (fdidcid <= 0) {
 		LOG_ERROR("join group failed, cid[%d] not found.", cid);
 		return -1;
 	}
 	// 添加到 hash<gid, list<fdid>>
-	if (tgg_add_gid(gid, fdid) < 0){
+	if (tgg_add_gid(gid, fdidcid) < 0){
 		LOG_ERROR("join group failed, add gid not found, gid[%s] cid[%d].", gid, cid);
 		return -1;
 	}
 	// 添加到 hash<cid, list<gid>>
 	if (tgg_add_cidgid(cid, gid) < 0) {
 		LOG_ERROR("join group failed, gid[%s] cid[%d].", gid, cid);
-		tgg_del_fd4gid(gid, fdid);// 添加失败时，前面hash<gid, list<fdid>>添加成功的要回退
+		tgg_del_fd4gid(gid, fdidcid);// 添加失败时，前面hash<gid, list<fdid>>添加成功的要回退
 		return -1;
 	}
 	return 0;
@@ -131,16 +137,17 @@ int tgg_join_group(const char* gid, int cid)
 
 int tgg_exit_group(const char* gid, int cid)
 {
-	int fdid = tgg_get_fdbycid(cid);
-	int core_id = fdid & 0xff;
-	int fd = fdid >> 8;
-	int idx = tgg_get_cli_idx(core_id, fd);
-	if (fd < 0 || idx < 0) {
+	int64_t fdidcid = tgg_get_fdbycid(cid);
+	// int fdid = GET_FDID_FDIDCID_MASK(fdidcid);
+	// int core_id = GET_COREID_FDID_MASK(fdid);
+	// int fd = GET_FD_FDID_MASK(fdid);
+	// int idx = GET_IDX_CID_MASK(cid);//tgg_get_cli_idx(core_id, fd);
+	if (fdidcid <= 0) {
 		LOG_ERROR("connection invalid, cid[%d] not found.", cid);
 		return -1;
 	}
 	// 从 hash<gid, list<fdid>>移除cid对应的fd
-	if (tgg_del_fd4gid(gid, fdid) < 0){
+	if (tgg_del_fd4gid(gid, fdidcid) < 0){
 		LOG_ERROR("exit group failed, add gid not found, gid[%s] cid[%d].", gid, cid);
 		return -1;
 	}

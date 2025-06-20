@@ -105,7 +105,7 @@ int CmdWorkerConnect::ExecCmd()
         tgg_new_bw_session(this->prc_id, this->fd, GatewayProtocal::CMD_WORKER_CONNECT
             , bwWokerkey.c_str(), remote_ip, remote_port);
         // 初始化完成后，加入到客户端可选服务池中以便网关能将客户端连接绑定到该bw
-        if (tgg_add_bwfdx((fd << 8) | (prc_id & 0xff)) < 0) {
+        if (tgg_add_bwfdx(generate_bwfdx(this->prc_id, this->fd)) < 0) {
             // 如果加入失败，就要销毁连接，否则这个服务就没有人使用
             tgg_close_bw_session(this->prc_id, this->fd);
             close(this->fd);
@@ -205,33 +205,33 @@ int CmdSendToGroup::ExecCmd()
         }
     }
     // 所有需要发送数据的cid对应的fd
-    std::list<int> lstAllFds;
+    std::list<int64_t> lstAllFds;
     // 判断是否存在group字段且为数组类型
     if (ext_data.contains("group") && ext_data["group"].is_array()) {
         // 遍历需要发送数据的所有group
         for (const auto& element : ext_data["group"]) {
             // 通过gid找到在线的fdx列表
-            std::list<int> lstFds;
+            std::list<int64_t> lstFds;
             if (tgg_get_fdsbygid(element.get<std::string>().c_str(), lstFds) < 0) {// 没找到gid
                 LOG_WARNING("gid[%s] not exist.", element.get<std::string>().c_str());
                 continue;
             }
-            // 根据hash<gid,list<fdid>>找到gid对应的fdid列表,根据fdid找到cid
-            std::list<int>::iterator itFd = lstFds.begin();
+            // 根据hash<gid,list<fdidcid>>找到gid对应的fdid列表,根据fdid找到cid
+            std::list<int64_t>::iterator itFd = lstFds.begin();
             while (itFd != lstFds.end()) {
-                int fdid = *itFd;
-                if(fdid < 0) {
-                    LOG_WARNING("Invalid fdid[%d] for gid[%s].", fdid, element.get<std::string>().c_str());
+                int fdidcid = *itFd;
+                if(fdidcid < 0) {
+                    LOG_WARNING("Invalid fdidcid[%lld] for gid[%s].", fdidcid, element.get<std::string>().c_str());
                     itFd++;
                     continue;
                 }
-                int coreid = fdid & 0xff;
-                int fd = fdid >> 8;
+                // int coreid = GET_COREID_FDCID_MASK(fdidcid);
+                // int fd = GET_FD_FDCID_MASK(fdidcid);
 
-                int cid = tgg_get_cli_cid(coreid, fd);
+                int cid = GET_CID_FDCID_MASK(fdidcid);
                 if(cid <= 0) {
-                    LOG_WARNING("cid for fdid[%d] gid[%s] not exist.", 
-                        fdid, element.get<std::string>().c_str());
+                    LOG_WARNING("cid for fdidcid[%lld] gid[%s] not exist.", 
+                        fdidcid, element.get<std::string>().c_str());
                     itFd++;
                     continue;
                 }
@@ -239,7 +239,7 @@ int CmdSendToGroup::ExecCmd()
                 std::set<std::string>::iterator iter = setExeptCid.find(std::to_string(cid));
                 if(iter == setExeptCid.end()) {
                     // 不在排除队列中就加入发送队列
-                    lstAllFds.push_back(fdid);
+                    lstAllFds.push_back(fdidcid);
                 }
                 itFd++;
             }
@@ -264,6 +264,8 @@ int CmdKick::ExecCmd()
     int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     // Send2Client(cid, body, FD_WRITE, !raw);
     Send2Client(cid, "kick", FD_WRITE|FD_CLOSE, !raw);
+    int64_t fdidcid = tgg_get_fdbycid(cid);
+    tgg_free_session(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), cid);
     LOG_DEBUG("Kick: cmd executed cid[%d].", cid);
     return 0;
 }
@@ -274,6 +276,8 @@ int CmdDestroy::ExecCmd()
     // std::string data = "";// 关闭websocket
     int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     Send2Client(cid, "destroy", FD_WRITE|FD_CLOSE, !raw);// TODO 是否要立即销毁，不发送ws的关闭帧(去掉FD_WRITE就行)了
+    int64_t fdidcid = tgg_get_fdbycid(cid);
+    tgg_free_session(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), cid);
     LOG_DEBUG("Destroy: cmd executed cid[%d].", cid);
     return 0;
 }
@@ -305,7 +309,7 @@ int CmdSendToALL::ExecCmd()
     }
 
     // 所有在线的客户端fd
-    std::list<int> lstFds;
+    std::list<int64_t> lstFds;
     if(tgg_get_allfds(lstFds) < 0) {
         LOG_WARNING("SendToALL: get all online clients failed.");
         return -1;
@@ -318,23 +322,23 @@ int CmdSendToALL::ExecCmd()
     return 0;
 }
 
-void CmdSelect::FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::json& result)
+void CmdSelect::FormatResult(const std::list<int64_t>& lst_fd, int mask, nlohmann::json& result)
 {
-    std::list<int>::const_iterator itFd = lst_fd.begin();
+    std::list<int64_t>::const_iterator itFd = lst_fd.begin();
     while (itFd != lst_fd.end()) {
         if(*itFd < 0) {
             LOG_WARNING("invalid fd.");
             itFd++;
             continue;
         }
-        int coreid = *itFd & 0xff;
-        int fd = *itFd >> 8;
-        int cid = tgg_get_cli_cid(coreid, fd);
-        if(cid <= 0) {
-            LOG_WARNING("cid for fd[%d] not exist.", fd);
-            itFd++;
-            continue;
-        }
+        int coreid = GET_COREID_FDCID_MASK(*itFd);
+        int fd = GET_FD_FDCID_MASK(*itFd);
+        int cid = GET_CID_FDCID_MASK(*itFd);
+        // if(cid <= 0) {
+        //     LOG_WARNING("cid for fd[%d] not exist.", fd);
+        //     itFd++;
+        //     continue;
+        // }
         std::string scid = std::to_string(cid);
         if(!result.contains(scid)) {
             result[scid] = nlohmann::json::object();
@@ -408,7 +412,7 @@ int CmdSelect::ExecCmd()
                         
                     for (const auto& item : items) {// item为gid,uid等  where 条件中的item
                         // 通过gid获取该group下的所有fd
-                        std::list<int> lst_fd;
+                        std::list<int64_t> lst_fd;
                         if(key == "groups") {
                             if (tgg_get_fdsbygid(item.get<std::string>().c_str(), lst_fd) < 0) {// gid是否存在,并取出gid所有连接
                                 continue;
@@ -425,19 +429,19 @@ int CmdSelect::ExecCmd()
                     }
                 } else {
                     // cid {"9527":9527}
-                    std::list<int> lst_fds;
+                    std::list<int64_t> lst_fds;
                     for (const auto& connection_id : it.value()) {
                         int cid = connection_id;
-                        int fdid = tgg_get_fdbycid(cid);
-                        if (fdid > 0) {
-                            lst_fds.push_back(fdid);
+                        int fdidcid = tgg_get_fdbycid(cid);
+                        if (fdidcid > 0) {
+                            lst_fds.push_back(fdidcid);
                         }
                     }
                     FormatResult(lst_fds, mask, result);
                 }
             }
         } else {
-            std::list<int> lst_fds;
+            std::list<int64_t> lst_fds;
             if (!tgg_get_allfds(lst_fds)) {
                 if(lst_fds.size() > 0) {
                     FormatResult(lst_fds, mask, result);
@@ -478,36 +482,36 @@ int CmdSetSession::ExecCmd()
         LOG_ERROR("set session failed, invalid cid[%d].", cid);
         return -1;
     }
-    int fdid = tgg_get_fdbycid(cid);
-    if(fdid < 0) {
-        LOG_ERROR("get fdid by cid[%d] failed.", cid);
+    int64_t fdidcid = tgg_get_fdbycid(cid);
+    if(fdidcid < 0) {
+        LOG_ERROR("get fdidcid by cid[%d] failed.", cid);
         return -1;
     }
     // 判断是不是有效的 php序列化后的字符串
     if(session.length() > 2 && session[1] != ':') {
-        LOG_ERROR("get fdid by cid[%d] failed.", cid);
+        LOG_ERROR("get fdidcid by cid[%d] failed.", cid);
         return -1;
     }
     LOG_DEBUG("SetSession: cmd executed cid[%d] data:%s.", cid, session.c_str());
-    return tgg_set_cli_reserved(fdid & 0xff, fdid >> 8, session.c_str());
+    return tgg_set_cli_reserved(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), session.c_str());
 }
 
 int CmdGetSessionByCid::ExecCmd()
 {
     nlohmann::json result;
     int cid = jdata["connection_id"];
-    int fdid = -1;
+    int64_t fdicid = -1;
     std::string session;
     if(cid <= 0) {
         LOG_ERROR("set session failed, invalid cid[%d].", cid);
         goto SEND_GET_SESSION;
     }
-    fdid = tgg_get_fdbycid(cid);
-    if(fdid <= 0) {
-        LOG_ERROR("get fdid by cid[%d] failed.", cid);
+    fdicid = tgg_get_fdbycid(cid);
+    if(fdicid <= 0) {
+        LOG_ERROR("get fdicid by cid[%d] failed.", cid);
         goto SEND_GET_SESSION;
     }
-    session = tgg_get_cli_reserved(fdid & 0xff, fdid >> 8);
+    session = tgg_get_cli_reserved(GET_COREID_FDCID_MASK(fdicid), GET_FD_FDCID_MASK(fdicid));
     if(session.empty()) {
         result = nlohmann::json::array();
         LOG_INFO("session is empty of cid[%d].", cid);
@@ -526,11 +530,11 @@ SEND_GET_SESSION:
 int CmdGetAllClientSession::ExecCmd()
 {
     nlohmann::json result = nlohmann::json::array();
-    std::list<int> lst_fds;
+    std::list<int64_t> lst_fds;
     tgg_get_allfds(lst_fds);
-    for (auto fdid : lst_fds) {
-        std::string session = tgg_get_cli_reserved(fdid & 0xff, fdid >> 8);
-        int cid = tgg_get_cli_cid(fdid & 0xff, fdid >> 8);
+    for (auto fdidcid : lst_fds) {
+        std::string session = tgg_get_cli_reserved(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid));
+        int cid = tgg_get_cli_cid(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid));
         nlohmann::json node = nlohmann::json::object();
         node[std::to_string(cid)] = session;
         result.push_back(node);
@@ -607,13 +611,13 @@ int CmdUpdateSession::ExecCmd()
         LOG_ERROR("set session failed, invalid cid[%d].",  cid);
         return -1;
     }
-    int fdid = tgg_get_fdbycid(cid);
-    if(fdid < 0) {
+    int64_t fdidcid = tgg_get_fdbycid(cid);
+    if(fdidcid < 0) {
         LOG_ERROR("get fd by cid[%d] failed.", cid);
         return -1;
     }
-    int coreid = fdid & 0xff;
-    int clifd = fdid >> 8;
+    int coreid = GET_COREID_FDCID_MASK(fdidcid);
+    int clifd = GET_FD_FDCID_MASK(fdidcid);
     std::string ext_data = jdata["ext_data"];
     std::string session = tgg_get_cli_reserved(coreid, clifd);
     if(session.empty()) {
@@ -680,11 +684,11 @@ int CmdSendToUid::ExecCmd()
 {
     bool raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string body = jdata["body"];
-    std::list<int> lst_fds;
+    std::list<int64_t> lst_fds;
     nlohmann::json juid = nlohmann::json::parse(jdata["ext_data"].get<std::string>());
     std::vector<std::string> vec_uids = juid.get<std::vector<std::string> >();
     for(auto& it : vec_uids) {
-        std::list<int> lst_fd;
+        std::list<int64_t> lst_fd;
         if (tgg_get_fdsbyuid(it.c_str(), lst_fd) < 0) {
             LOG_WARNING("SendToUid: no fd found for uid[%s].", it.c_str());
             continue;
@@ -762,13 +766,13 @@ int CmdGetClientSessionsByGroup::ExecCmd()
         Send2BW(result);
         return -1;
     }
-    std::list<int> lst_sfd;
+    std::list<int64_t> lst_sfd;
     if (!tgg_get_fdsbygid(group.c_str(), lst_sfd)) {
-        std::list<int>::iterator itFd = lst_sfd.begin();
+        std::list<int64_t>::iterator itFd = lst_sfd.begin();
         while (itFd != lst_sfd.end()) {
-            int coreid = *itFd & 0xff;
-            int fd = *itFd >> 8;
-            int cid = tgg_get_cli_cid(coreid, fd);
+            int coreid = GET_COREID_FDCID_MASK(*itFd);
+            int fd = GET_FD_FDCID_MASK(*itFd);
+            int cid = GET_CID_FDCID_MASK(*itFd);
             if(cid <= 0) {
                 LOG_WARNING("invalid cid[%d].", cid);
                 itFd++;
@@ -793,14 +797,14 @@ int CmdGetClientCountByGroup::ExecCmd()
     nlohmann::json result = 0;
     std::string group = jdata["ext_data"];
     if(group.empty()) {
-        std::list<int> lst_cid;
+        std::list<int64_t> lst_cid;
         tgg_get_allonlinecids(lst_cid);
         result = lst_cid.size();
         LOG_DEBUG("GetAllClientCount:%s.", result.dump().c_str());
         Send2BW(result);
         return 0;
     }
-    std::list<int> lst_sfd;
+    std::list<int64_t> lst_sfd;
     int count = 0;// TODO  前期调试需要排查格式等问题，后期应该直接计算lst_sfd的长度即可
     if (!tgg_get_fdsbygid(group.c_str(), lst_sfd)) {
         count = lst_sfd.size();
@@ -821,11 +825,11 @@ int CmdGetClientIdByUid::ExecCmd()
         Send2BW(result);
         return -1;
     }
-    std::list<int> lst_sfd;
+    std::list<int64_t> lst_sfd;
     if (tgg_get_fdsbyuid(suid.c_str(), lst_sfd) == 0) {
-        std::list<int>::iterator itFd = lst_sfd.begin();
+        std::list<int64_t>::iterator itFd = lst_sfd.begin();
         while (itFd != lst_sfd.end()) {
-          int cid = tgg_get_cli_cid(*itFd & 0xff, *itFd >> 8);
+            int cid = GET_CID_FDCID_MASK(*itFd);//tgg_get_cli_cid(*itFd & 0xff, *itFd >> 8);
             if(cid < 0) {
                 LOG_ERROR("invalid cid[%d].", cid);
                 itFd++;
@@ -851,13 +855,13 @@ int CmdBatchGetClientIdByUid::ExecCmd()
     nlohmann::json juid = nlohmann::json::parse(jdata["ext_data"].get<std::string>());
     std::vector<std::string> vec_uids = juid.get<std::vector<std::string> >();
     for(auto& it : vec_uids) {
-        std::list<int> lst_sfd;
+        std::list<int64_t> lst_sfd;
         nlohmann::json juid = nlohmann::json::object();
         juid[it] = nlohmann::json::array();
         if (!tgg_get_fdsbyuid(it.c_str(), lst_sfd)) {
-            std::list<int>::iterator itFd = lst_sfd.begin();
+            std::list<int64_t>::iterator itFd = lst_sfd.begin();
             while (itFd != lst_sfd.end()) {
-                int cid = tgg_get_cli_cid(*itFd & 0xff, *itFd >> 8);
+                int cid = GET_CID_FDCID_MASK(*itFd);//tgg_get_cli_cid(*itFd & 0xff, *itFd >> 8);
                 if(cid < 0) {
                     LOG_WARNING("invalid cid[%d].", cid);
                     itFd++;

@@ -65,7 +65,7 @@ protected:
 public:
     // 所有发送数据都在子类执行，这里只做websocket相关的公共操作
     virtual void OnConnect() = 0;
-    virtual void OnHandShake(const std::string& response, HttpRequest& req) = 0;
+    virtual void OnHandShake(const std::string& response, struct HttpRequest& req) = 0;
     virtual void OnMessage(const std::string& msg) = 0;
     virtual void OnClose() = 0;// 子类继承后要执行clean_buffer清理缓存
     virtual void OnPing(const std::string& response) {};
