@@ -69,7 +69,8 @@ clean:
 	@rm -f $(BINARY) *.a *.o gwrcv gwprc  tgg_comm/*.o cmd/*.o comm/*.o
 
 
-MASTER_OBJ = dpdk_init.o master.o tgg_comm/tgg_common.o tgg_comm/tgg_bw_cache.o comm/log.o\
+MASTER_OBJ = dpdk_init.o master.o tgg_comm/tgg_common.o tgg_comm/tgg_bwcomm.o tgg_comm/tgg_bw_cache.o comm/log.o\
+			comm/Websocket.o comm/Encrypt.o tgg_comm/WsConsumer.o tgg_comm/tgg_transport.o\
 			tgg_comm/tgg_lock.o comm/RWIni.o tgg_comm/tgg_conf.o comm/common.o tgg_comm/tgg_data_opt.o
 
 
@@ -97,11 +98,11 @@ C_ARGS += -DLOG_TO_FILE
 
 gwrcv: $(MASTER_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
-	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl $(FF_LIBS) -L$(FF_PATH)/adapter/micro_thread -lmt $(CRESET)
+	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl -lz -lssl $(FF_LIBS) -L$(FF_PATH)/adapter/micro_thread -lmt $(CRESET)
 
 gwcliprc: $(CLIPRC_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
-	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl -lz -lssl $(FF_LIBS) $(CRESET)
+	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl -lz -lssl $(FF_LIBS) -L$(FF_PATH)/adapter/micro_thread -lmt $(CRESET)
 
 gwbwprc: $(BWSERVER_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
