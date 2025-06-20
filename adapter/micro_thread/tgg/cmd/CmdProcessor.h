@@ -95,7 +95,7 @@ private:
 	// @param lst_fd    客户端连接链表
 	// @param mask      输出信息掩码，目前之后cid,uid,gid
 	// @param result    返回json对象
-	void FormatResult(const std::list<int>& lst_fd, int mask, nlohmann::json& result);
+	void FormatResult(const std::list<int64_t>& lst_fd, int mask, nlohmann::json& result);
 };
 
 class CmdGetGroupIdList : public CmdBaseProcessor {

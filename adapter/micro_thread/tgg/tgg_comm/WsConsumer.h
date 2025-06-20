@@ -1,19 +1,22 @@
 #ifndef __WS_CONSUMER_H__
 #define __WS_CONSUMER_H__
-#include "comm/Websocket.hpp"
 #include <string>
 #include <list>
+#include "tgg_struct.h"
+#include "comm/Websocket.hpp"
 
 
 class WsConsumer : Websocket
 {
 public:
 
-    WsConsumer() {}
+    WsConsumer() {_status = FD_STATUS_READYFORCONNECT;}
 
     virtual ~WsConsumer() {}//clean_read_data((tgg_read_data*)data);}
 
     int ConsumerData(void* data);
+
+    bool SendedClose() {return _status == FD_STATUS_CLOSING;}
 
 protected:
     bool ConnectionValid(int core_id, int fd, void* data);
@@ -21,7 +24,7 @@ protected:
     virtual void OnConnect();
 
     // 握手
-    virtual void OnHandShake(const std::string& response, HttpRequest& req);
+    virtual void OnHandShake(const std::string& response, struct HttpRequest& req);
 
     virtual void OnPing(const std::string& response);
 

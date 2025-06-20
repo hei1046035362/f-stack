@@ -11,6 +11,16 @@ void init_endians();
 
 bool big_endian();
 
+// 生成fdidcid
+int64_t generate_fdidcid(int core_id, int fd, int cid);
+
+// 生成cid
+int generate_cid(int core_id, int idx);
+
+// 生成bwfdx
+int generate_bwfdx(int prc_id, int fd);
+
+
 int tgg_get_cli_idx(int core_id, int fd);
 int tgg_get_cli_status(int core_id, int fd);
 int tgg_get_cli_authorized(int core_id, int fd);
@@ -34,11 +44,11 @@ int tgg_set_cli_reserved(int core_id, int fd, const char* reserved);
 void tgg_close_cli(int core_id, int fd);
 int tgg_init_cli(int core_id, int fd, char* ip_str, uint32_t ip, ushort port);
 
-
+int tgg_init_cli_bw(int core_id, int fd, int cid);
+void tgg_close_cli_bw(int core_id, int fd);
 
 
 int tgg_get_bwfdx_status(int prc_id, int fd);
-int tgg_get_bwfdx_load(int prc_id, int fd);
 int tgg_get_bwfdx_cmd(int prc_id, int fd);
 int tgg_get_bwfdx_idx(int prc_id, int fd);
 int tgg_get_bwfdx_authorized(int prc_id, int fd);
@@ -57,7 +67,8 @@ int tgg_set_bwfdx_port(int prc_id, int fd, ushort port);
 int tgg_set_bwfdx_seckey(int prc_id, int fd, const char* seckey);
 int tgg_set_bwfdx_workerkey(int prc_id, int fd, const char* workerkey);
 
-int tgg_add_bwfdx_load(int prc_id, int fd);
+int tgg_get_bwfdx_load(int64_t fdid);
+int tgg_add_bwfdx_load(int fdid);
 
 // 重置进程对应的所有fd状态，子进程宕机的情况，父进程要对这些fd进行重置，防止后续的cli继续使用这些无效的fd
 void tgg_init_bwfdx_prc(int prc_id);
@@ -100,6 +111,9 @@ int tgg_dequeue_cliprc(int core_id, tgg_read_data** data);
 
 int tgg_enqueue_trans(tgg_bw_data* data);
 int tgg_dequeue_trans(tgg_bw_data** data);
+int tgg_enqueue_bwfdx(tgg_bwfdx_data* data);
+int tgg_dequeue_bwfdx(tgg_bwfdx_data** data);
+
 int tgg_enqueue_bwrcv(int prc_id, tgg_bw_data* data);
 int tgg_dequeue_bwrcv(int prc_id, tgg_bw_data** data);
 
@@ -113,10 +127,13 @@ int tgg_dequeue_bwsnd(int queue_id, tgg_bw_data** data);
 void init_core(const char* dumpfile);
 
 void* dpdk_rte_malloc(int size);
+void dpdk_rte_free(void* pdata);
 
 
 int high_freq_malloc(struct rte_mempool* pool, void** data, int size);
 void high_freq_free(struct rte_mempool* pool, void* data, int size);
+void print_mem_statistics();
+
 
 // bw侧接口
 void tgg_new_bw_session(int prc_id, int fd, int cmd, 
@@ -129,8 +146,11 @@ void tgg_close_bw_session(int prc_id, int fd);
 int tgg_bind_session(const char* uid, int cid);
 // cid和uid解绑
 int tgg_unbind_session(int cid);
+// 连接建立
+int tgg_init_session(int core_id, int fd, int idx);
+
 // 连接断开
-int tgg_free_session(int core_id, int fd);
+int tgg_free_session(int core_id, int fd, int cid);
 // 加入组
 int tgg_join_group(const char* gid, int cid);
 // 退出组

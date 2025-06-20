@@ -114,6 +114,7 @@ int main(int argc, char *argv[])
 	// init_bwserver();
 	tgg_gw_process(NULL);
 
+	print_mem_statistics();
 	// 主进程结束，开始销毁资源
 	uninit_bwtrans();
 	// uninit_bwserver();
