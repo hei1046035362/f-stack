@@ -7,6 +7,9 @@ void tgg_master_uninit();
 void tgg_secondary_init();
 void tgg_secondary_uninit();
 
+void tgg_gwrcv_secondary_init();
+void tgg_unregister_rcu();
+
 void tgg_cliprc_init();
 void tgg_cliprc_uninit();
 

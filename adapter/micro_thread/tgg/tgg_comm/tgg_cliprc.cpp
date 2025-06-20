@@ -6,6 +6,7 @@
 #include "tgg_comm/WsConsumer.h"
 #include "tgg_comm/tgg_bw_cache.h"
 #include "comm/common.hpp"
+#include "tgg_transport.h"
 #include <chrono>
 extern struct rte_mempool* g_mempool_read;
 extern int g_run;
@@ -40,9 +41,60 @@ static  pthread_t s_bwtrans_thread;
 
 extern struct rte_mempool* g_mempool_bwrcv;
 #define MAX_CALC_LOAD_BALANCE_TRY 3
+
+
+static void add_bwfdx(std::vector<int64_t>& vec_bwfdx, int64_t bwfdx)
+{
+    if(bwfdx <= 0) {
+        LOG_ERROR("add bwfdx to cliprc failed, invalid bwfdx[%ld].", bwfdx);
+        return;
+    }
+    vec_bwfdx.push_back(bwfdx);
+    LOG_INFO("added bwfdx[%ld] to cliprc.", bwfdx);
+}
+
+#include <functional>
+static void delete_bwfdx(std::vector<int64_t>& vec_bwfdx, int64_t bwfdx)
+{
+    if(bwfdx <= 0) {
+        LOG_ERROR("delete bwfdx for cliprc failed, invalid bwfdx[%ld].", bwfdx);
+        return;
+    }
+    auto it = std::find(vec_bwfdx.begin(), vec_bwfdx.end(), std::cref(bwfdx));
+    if (it != vec_bwfdx.end()) {
+        std::swap(*it, vec_bwfdx.back()); // 交换目标与末尾元素
+        vec_bwfdx.pop_back();             // 删除末尾
+    }
+    LOG_INFO("delete bwfdx[%ld] for cliprc.", bwfdx);
+}
+
+static int s_enqueued_to_server_count = 0;
+
 static void* deal_trans(void*)
 {
+    std::vector<int64_t> vec_bwfdx;
+    tgg_getall_bwfdx(vec_bwfdx);
     while(g_run) {
+        // 取可用的bw
+        tgg_bwfdx_data* bwfdxdata = NULL;
+        if(!tgg_dequeue_bwfdx(&bwfdxdata)) {
+            switch(bwfdxdata->cmd) {
+                case BWFDX_CMD_ADD:
+                    add_bwfdx(vec_bwfdx, bwfdxdata->bwfdx);
+                    break;
+                case BWFDX_CMD_DELETE:
+                    delete_bwfdx(vec_bwfdx, bwfdxdata->bwfdx);
+                    break;
+                case BWFDX_CMD_UPDATEALL:
+                    tgg_getall_bwfdx(vec_bwfdx);
+                    break;
+                default:
+                    LOG_INFO("invalid cmd[%d].", bwfdxdata->cmd);
+                    break;
+            }
+            dpdk_rte_free(bwfdxdata);
+        }
+        // 取数据
         tgg_bw_data* bdata = NULL;
         if (tgg_dequeue_trans(&bdata) < 0) {
             usleep(10);
@@ -66,10 +118,19 @@ static void* deal_trans(void*)
         }
 #endif
         int bwfdx = tgg_get_cli_bwfdx(bdata->coreid, bdata->fd);
-        if(bwfdx && tgg_get_bwfdx_status((bwfdx & 0xff), bwfdx >> 8)) {
+        if(bwfdx > 0 && tgg_get_bwfdx_status(GET_COREID_FDID_MASK(bwfdx), GET_FD_FDID_MASK(bwfdx))) {
             // 已经绑定服务端，正常透传
             bdata->bwfdx = bwfdx;
-            tgg_enqueue_bwsnd( (bwfdx & 0xff), bdata);
+            if(tgg_enqueue_bwsnd( GET_COREID_FDID_MASK(bwfdx), bdata) < 0) {
+                // TODO 判断进程是否还在，不在了的话要做些什么操作
+                // 关闭连接，清理
+                LOG_ERROR("enque bwsnd failed, bwfdx:%d.", bwfdx);
+                if(bdata->fd_opt&FD_CLOSE) {
+                    Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_WRITE|FD_CLOSE, 0);
+                }
+                clean_bw_data(bdata);
+            }
+            s_enqueued_to_server_count++;
         } else {
             // 重新绑定或首次绑定，先绑定再透传
             int index = MAX_CALC_LOAD_BALANCE_TRY;
@@ -77,13 +138,13 @@ static void* deal_trans(void*)
                 // 随机取一个可用的服务端连接
                 // int pos = bdata->fd % tgg_get_bwfdx_count();
                 // bwfdx = tgg_get_bwfdx_bypos(pos);
-                bwfdx = tgg_get_load_balance();
+                bwfdx = tgg_get_load_balance(vec_bwfdx);
                 if(bwfdx == -1) {
                     LOG_ERROR("get load balance failed.");
                     usleep(10);
                     continue;
                 }
-                if(bwfdx > 0 && tgg_get_bwfdx_status((bwfdx & 0xff), bwfdx >> 8)) {
+                if(bwfdx > 0 && tgg_get_bwfdx_status(GET_COREID_FDID_MASK(bwfdx), GET_FD_FDID_MASK(bwfdx))) {
                     break;
                 }
             }
@@ -93,22 +154,29 @@ static void* deal_trans(void*)
             }
             if (bwfdx <= 0) {// 入队列失败之后，清理数据，否则上行队列会满，而无法接收新数据
                 LOG_ERROR("get bwfdx failed.");
+                if(bdata->fd_opt&FD_CLOSE) {
+                    Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_WRITE|FD_CLOSE, 0);
+                }
                 clean_bw_data(bdata);
             } else {
                 // 客户端连接绑定到服务端连接
                 tgg_set_cli_bwfdx(bdata->coreid, bdata->fd, bwfdx);
                 // 负载++
-                tgg_add_bwfdx_load(bwfdx & 0xff, bwfdx >> 8);
+                tgg_add_bwfdx_load(bwfdx);
                 bdata->bwfdx = bwfdx;
                 if (tgg_enqueue_bwsnd( (bwfdx & 0xff), bdata) < 0) {
                     // TODO 判断进程是否还在，不在了的话要做些什么操作
                     LOG_ERROR("enque bwsnd failed, bwfdx:%d.", bwfdx);
+                    if(bdata->fd_opt&FD_CLOSE) {
+                        Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_WRITE|FD_CLOSE, 0);
+                    }
                     clean_bw_data(bdata);
                 }
+                s_enqueued_to_server_count++;
             }
         }
     }
-    LOG_INFO("Trans thread ended.");
+    LOG_WARNING("Trans thread ended, enqueue count:%d.", s_enqueued_to_server_count);
     return 0;
 }
 

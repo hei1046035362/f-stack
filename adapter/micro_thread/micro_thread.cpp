@@ -405,7 +405,7 @@ bool ThreadPool::InitialPool(int max_num)
         thread = new MicroThread();
         if ((NULL == thread) || (false == thread->Initial()))
         {
-            MTLOG_ERROR("init pool, thread %p init failed", thread);
+            MTLOG_ERROR("init pool, thread %p init failed, index:%u", thread, i);
             if (thread)  delete thread;
             continue;
         }

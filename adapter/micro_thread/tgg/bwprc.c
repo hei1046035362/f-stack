@@ -66,10 +66,12 @@ static void main_bw_proc(int prc_id)
     }
 
         // write操作的协程
-    stCoRoutine_t *write_co = NULL;
-    co_create( &write_co, NULL, write_routine, (void*)&prc_id);
-    co_resume( write_co );
-
+    // for(int i = 0; i < TggConfigure::getInstance()->get_bwsvr_co_count() ; i++)
+    // {
+        stCoRoutine_t *write_co = NULL;
+        co_create( &write_co, NULL, write_routine, (void*)&prc_id);
+        co_resume( write_co );
+    // }
     stCoRoutine_t *accept_co = NULL;
     co_create( &accept_co, NULL, accept_routine, 0 );
     co_resume( accept_co );
@@ -174,7 +176,9 @@ int main(int argc, char *argv[])
     }
     LOG_INFO("--------bwprc started [pid:%d][prc_id:%d]---------", getpid(), g_prc_id);
     main_bw_proc(g_prc_id);
-
+    
+    print_queue_counts();
+    print_mem_statistics();
 	// TODO 进程退出时要回收资源
 	tgg_process_uninit();
 	LOG_INFO("-----------main end----------");
