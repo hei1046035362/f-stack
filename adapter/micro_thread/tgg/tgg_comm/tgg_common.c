@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <iostream>
 #include "comm/log.hpp"
+#include "mt_api.h"
 
 extern int g_fd_limit;
 extern struct rte_memzone* g_fd_zones[MAX_LCORE_COUNT];
@@ -719,6 +720,9 @@ int tgg_dequeue_bwsnd(int queue_id, tgg_bw_data** data)
 
 int tgg_enqueue_trans(tgg_bw_data* data)
 {
+	if(data->fd <= 0) {
+		LOG_ERROR("invalid data fd:%d.", data->fd);
+	}
 	return rte_ring_enqueue(g_ring_trans, data);
 }
 
@@ -765,7 +769,7 @@ void clean_bw_data(tgg_bw_data* bdata)
         bdata->data = NULL;
     }
     memset(bdata, 0, sizeof(tgg_bw_data));
-    rte_mempool_put(g_mempool_bwrcv, bdata);
+    high_freq_free(g_mempool_bwrcv, bdata, sizeof(tgg_bw_data));
 }
 
 void clean_read_data(tgg_read_data* rdata)
@@ -787,7 +791,7 @@ void clean_write_data(tgg_write_data* wdata)
         wdata->data = NULL;
     }
     memset(wdata, 0, sizeof(tgg_write_data));
-    rte_mempool_put(g_mempool_write, wdata);
+    high_freq_free(g_mempool_write, wdata, sizeof(tgg_write_data));
 }
 
 void clean_fdidlist(tgg_fd_id_list* fdiddata)
@@ -811,7 +815,7 @@ void clean_fdidlist(tgg_fd_id_list* fdiddata)
 tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& mapfdidx, int fdopt)
 {
 	tgg_write_data* wdata = NULL;
-	int ret = rte_mempool_get(g_mempool_write, (void**)&wdata);
+	int ret = high_freq_malloc(g_mempool_write, (void**)&wdata, sizeof(tgg_write_data));
     // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
 	if (ret < 0) {
 		LOG_ERROR("get mem from write pool failed,code:%d.", ret);
@@ -856,7 +860,7 @@ tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& m
 	} else {
 		wdata->data = NULL;
 	}
-		wdata->data_len = sdata.size();
+	wdata->data_len = sdata.size();
 	wdata->fd_opt = fdopt;
 	return wdata;
 
@@ -864,7 +868,7 @@ add_data_failed:
 	LOG_ERROR("malloc mem failed.");
 	clean_fdidlist(wdata->lst_fd);
 	memset(wdata, 0, sizeof(tgg_write_data));
-	rte_mempool_put(g_mempool_write, wdata);
+	high_freq_free(g_mempool_write, wdata, sizeof(tgg_write_data));
 	return NULL;
 }
 
@@ -907,96 +911,38 @@ int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx
 	return enqueue_data_batch_fd(core_id, data, mapfdidx, fdopt);
 }
 
-tgg_bw_data* format_send_server_data(int core_id, int fd, const std::string& sdata, int fdopt)
-{
-	if(fd <= 0) {
-		LOG_ERROR("invalid fd:%d.", fd);
-		return NULL;
-	}
-	tgg_bw_data* bwdata = NULL;
-	int ret = rte_mempool_get(g_mempool_bwrcv, (void**)&bwdata);
-        // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
-	if (ret < 0) {
-		LOG_ERROR("get mem from bwrcv pool failed,code:%d.", ret);
-		return NULL;
-	}
-	if(sdata.size() > 0) {
-		ret = high_freq_malloc(g_mempool_bwrcv_data, &bwdata->data, sdata.size());
-		if (ret < 0) {
-			rte_mempool_put(g_mempool_bwrcv, (void*)bwdata);
-			LOG_ERROR("get mem from bwrcv data pool failed,code:%d.", ret);
-			return NULL;
-		}
-		// bwdata->data = dpdk_rte_malloc(sdata.size());
-		memcpy(bwdata->data, sdata.c_str(), sdata.size());
-	} else {
-		bwdata->data = NULL;
-	}
-	bwdata->data_len = sdata.size();
-	bwdata->fd_opt = fdopt;
-	bwdata->fd = fd;
-	bwdata->coreid = core_id;
-    bwdata->peer_ip = (unsigned int)tgg_get_cli_ip(core_id, fd);
-    bwdata->peer_port = (unsigned int)tgg_get_cli_port(core_id, fd);
-    bwdata->idx = (unsigned int)tgg_get_cli_idx(core_id, fd);
-	return bwdata;
-}
 
-int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
-{
-	tgg_bw_data* bwdata = format_send_server_data(core_id, fd, data, fdopt);
-	if (!bwdata) {
-		LOG_ERROR("Format bw server data failed.");
-		return -1;
-	}
-	int maxtry = 10;// 入队列可能会失败最多尝试10次
-	while (tgg_enqueue_trans(bwdata) < 0 && maxtry-- > 0 ) {
-		usleep(10);
-	}
-	static int loop_times_sndserver = 0;
-	// TODO 前期调试要看是否经常出现重试
-	if (maxtry < 9) {
-		++loop_times_sndserver;
-		if(loop_times_sndserver % 100 == 0) {
-			LOG_ERROR("loop times:%d.", loop_times_sndserver);
-		}
-	}
-	if (maxtry <= 0) {
-		clean_bw_data(bwdata);
-		LOG_ERROR("Enqueue bw server data failed.");
-		return -1;
-	}
-	return 0;
-}
-
-int enqueue_data_send_server(int core_id, int fd, const std::string& data, int fdopt)
-{
-	tgg_bw_data* bwdata = format_send_server_data(core_id, fd, data, fdopt);
-	if (!bwdata) {
-		LOG_ERROR("Format bw server data failed.");
-		return -1;
-	}
-	int maxtry = 10;// 入队列可能会失败最多尝试10次
-	int queue_id = fd % TggConfigure::getInstance()->get_bwsvr_count();
-	while (tgg_enqueue_bwsnd(queue_id, bwdata) < 0 && maxtry-- > 0 ) {
-		usleep(10);
-	}
-	static int loop_times_sndserver = 0;
-	// TODO 前期调试要看是否经常出现重试
-	if (maxtry < 9) {
-		++loop_times_sndserver;
-		if(loop_times_sndserver % 100 == 0) {
-			LOG_ERROR("loop times:%d.", loop_times_sndserver);
-		}
-	}
-	if (maxtry <= 0) {
-		clean_bw_data(bwdata);
-		RTE_LOG(ERR, USER1, "[%s][%d] Enqueue bw server data failed.", 
-			__FILE__, __LINE__);
-		return -1;
-	}
-	return 0;
-}
+// int enqueue_data_send_server(int core_id, int fd, const std::string& data, int fdopt)
+// {
+// 	tgg_bw_data* bwdata = format_send_server_data(core_id, fd, data, fdopt);
+// 	if (!bwdata) {
+// 		LOG_ERROR("Format bw server data failed.");
+// 		return -1;
+// 	}
+// 	int maxtry = 10;// 入队列可能会失败最多尝试10次
+// 	int queue_id = fd % TggConfigure::getInstance()->get_bwsvr_count();
+// 	int ret = tgg_enqueue_bwsnd(queue_id, bwdata);
+// 	while ( ret < 0 && maxtry > 0 ) {
+// 		usleep(10);
+// 		ret = tgg_enqueue_bwsnd(queue_id, bwdata);
+// 		maxtry--;
+// 	}
+// 	static int loop_times_sndserver = 0;
+// 	// TODO 前期调试要看是否经常出现重试
+// 	if (maxtry < 10) {
+// 		++loop_times_sndserver;
+// 		if(loop_times_sndserver % 100 == 0) {
+// 			LOG_ERROR("loop times:%d.", loop_times_sndserver);
+// 		}
+// 	}
+// 	if (ret < 0) {
+// 		clean_bw_data(bwdata);
+// 		RTE_LOG(ERR, USER1, "[%s][%d] Enqueue bw server data failed.", 
+// 			__FILE__, __LINE__);
+// 		return -1;
+// 	}
+// 	return 0;
+// }
 
 
 #include <sys/prctl.h>
@@ -1043,14 +989,14 @@ void dpdk_rte_free(void* pdata)
 	// 		可以用链表管理起来，然后注册rte_service给master进程去管理，也可以放到定时任务管理
 }
 
-static int s_hi_freq_malloc;
+static std::map<std::string, int> s_hi_freq_malloc;
 int high_freq_malloc(struct rte_mempool* pool, void** data, int size)
 {
 	if(size <= 0) {
 		LOG_INFO("invalid size[%d] to malloc.", size);
 		return -1;
 	}
-	s_hi_freq_malloc ++;
+	s_hi_freq_malloc[pool->name]++;
 	if(size > COMMON_PACKET_LEN) {
 		LOG_INFO("recieved an large packet, size:%d", size);
 		return rte_mempool_get(g_mempool_large_data, data);
@@ -1059,14 +1005,14 @@ int high_freq_malloc(struct rte_mempool* pool, void** data, int size)
 	}
 }
 
-static int s_hi_freq_free;
+static std::map<std::string, int> s_hi_freq_free;
 void high_freq_free(struct rte_mempool* pool, void* data, int size)
 {
 	if(size <= 0) {
 		LOG_INFO("invalid size[%d] to free.", size);
 		return ;
 	}
-	s_hi_freq_free++;
+	s_hi_freq_free[pool->name]++;
 	if(size > COMMON_PACKET_LEN) {
 		LOG_INFO("free an large packet, size:%d", size);
 		rte_mempool_put(g_mempool_large_data, data);
@@ -1079,6 +1025,10 @@ void print_mem_statistics()
 {
 	LOG_WARNING("malloc times: %d", s_malloc_count);
 	LOG_WARNING("free times: %d", s_free_count);
-	LOG_WARNING("hi_malloc times: %d", s_hi_freq_malloc);
-	LOG_WARNING("hi_free times: %d", s_hi_freq_free);
+	for(auto iter : s_hi_freq_malloc) {
+		LOG_WARNING("pool[%s] hi_malloc times: %d", iter.first.c_str(), iter.second);	
+	}
+	for(auto iter : s_hi_freq_free) {
+		LOG_WARNING("pool[%s] hi_free times: %d", iter.first.c_str(), iter.second);	
+	}
 }

@@ -5,12 +5,15 @@
 #include <sys/wait.h>
 #include <sys/prctl.h>
 #include "tgg_comm/tgg_common.h"
-#include "tgg_comm/tgg_bwserver.h"
+#include "tgg_comm/tgg_bwserver_fstack.h"
 #include "dpdk_init.h"
 #include "comm/Encrypt.hpp"
 #include "comm/common.hpp"
 #include "tgg_comm/tgg_conf.h"
 #include "comm/log.hpp"
+#include "mt_incl.h"
+#include "mt_api.h"
+#include "micro_thread.h"
 
 int g_run = 1;
 static const char* s_dump_file = "/var/corefiles/";//tgg_gw_bwprc_core
@@ -33,55 +36,6 @@ void signal_handler(int signum)
     LOG_WARNING("signal num:%d.", signum);
 }
 
-static uint64_t s_last_update_time = 0;
-// 定时器回调函数
-void update_heart_beat() {
-    uint64_t now = get_system_ms();
-    if(now - s_last_update_time > BW_PRC_HEART_BEAT) {
-        // printf("update heart beat for [PID:%d][prc_id:%d]\n", getpid(), g_prc_id);
-        s_last_update_time = now;
-        tgg_update_bwprc(g_prc_id, now);
-    }
-}
-
-int local_eventloop_fun(void* arg) {
-    if (!g_run)
-        return -1;// 终止coroutine的eventloop
-    update_heart_beat();
-    return 0;
-}
-
-static void main_bw_proc(int prc_id)
-{
-    // 启动之前，先清理数据，防止上次异常退出导致资源没有正常清理
-    tgg_init_bwfdx_prc(prc_id);
-
-    for(int i = 0; i < TggConfigure::getInstance()->get_bwsvr_co_count() ; i++)
-    {
-            // read操作的协程
-        task_t * task = (task_t*)calloc( 1,sizeof(task_t) );
-        task->fd = -1;
-        co_create( &(task->co),NULL,read_routine,task );
-        co_resume( task->co );
-    }
-
-        // write操作的协程
-    for(int i = 0; i < TggConfigure::getInstance()->get_bwsvr_co_count() ; i++)
-    {
-        stCoRoutine_t *write_co = NULL;
-        co_create( &write_co, NULL, write_routine, (void*)&prc_id);
-        co_resume( write_co );
-    }
-    stCoRoutine_t *accept_co = NULL;
-    co_create( &accept_co, NULL, accept_routine, 0 );
-    co_resume( accept_co );
-
-    // 协程启动完后，把进程的状态设置为正在运行
-    tgg_set_bw_prcstatus(prc_id, 1);
-
-    // 开始协程循环
-    co_eventloop( co_get_epoll_ct(), local_eventloop_fun,0 );
-}
 
 void tgg_sig_init()
 {
@@ -113,27 +67,27 @@ void tgg_process_uninit()
 
 static void prc_dpdk_eal_init(int argc, char **argv)
 {
-	char c_flag[] = "-c1";
-	char n_flag[] = "-n4";
-	char mp_flag[] = "--proc-type=secondary";
-	char log_flag[] = "--log-level=6";
-	char *argp[argc + 4];
-	// uint16_t nb_ports;
+	// char c_flag[] = "-c1";
+	// char n_flag[] = "-n4";
+	// char mp_flag[] = "--proc-type=secondary";
+	// char log_flag[] = "--log-level=6";
+	// char *argp[argc + 4];
+	// // uint16_t nb_ports;
 
-	argp[0] = argv[0];
-	argp[1] = c_flag;
-	argp[2] = n_flag;
-	argp[3] = mp_flag;
-	argp[4] = log_flag;
+	// argp[0] = argv[0];
+	// argp[1] = c_flag;
+	// argp[2] = n_flag;
+	// argp[3] = mp_flag;
+	// argp[4] = log_flag;
 
-	for (int i = 1; i < argc; i++)
-		argp[i + 4] = argv[i];
+	// for (int i = 1; i < argc; i++)
+	// 	argp[i + 4] = argv[i];
 
-	argc += 4;
+	// argc += 4;
 
-	int ret = rte_eal_init(argc, argp);
-	if (ret < 0)
-		rte_panic("Cannot init EAL\n");
+	// int ret = rte_eal_init(argc, argp);
+	// if (ret < 0)
+	// 	rte_panic("Cannot init EAL\n");
     tgg_bwprc_init(TggConfigure::getInstance()->get_bwsvr_count());
 }
 
@@ -152,22 +106,22 @@ int main(int argc, char *argv[])
     }
     LOG_INFO("-----------bwprc start----------");
 	tgg_process_init();
+
+
+    // unsigned int port = TggConfigure::getInstance()->get_bwsvr_bw_port();
+    // const std::string& ip = TggConfigure::getInstance()->get_bwsvr_bw_addr();
+	// g_listen_fd = create_tcp_socket( port, ip.c_str(), true );
+    // listen(g_listen_fd, 1024);
+    // if(g_listen_fd == -1){
+    //     LOG_ERROR("Port %d is in use.", port);
+    //     return -1;
+    // }
+    // LOG_INFO("listen %d %s:%d,total server count:%d.",g_listen_fd, ip.c_str(), port, TggConfigure::getInstance()->get_bwsvr_count());
+
+    // set_non_block( g_listen_fd );
+
+    mt_init_frame(argc, argv);
     prc_dpdk_eal_init(argc, argv);
-
-
-    unsigned int port = TggConfigure::getInstance()->get_bwsvr_bw_port();
-    const std::string& ip = TggConfigure::getInstance()->get_bwsvr_bw_addr();
-	g_listen_fd = create_tcp_socket( port, ip.c_str(), true );
-    listen(g_listen_fd, 1024);
-    if(g_listen_fd == -1){
-        LOG_ERROR("Port %d is in use.", port);
-        return -1;
-    }
-    LOG_INFO("listen %d %s:%d,total server count:%d.",g_listen_fd, ip.c_str(), port, TggConfigure::getInstance()->get_bwsvr_count());
-
-    set_non_block( g_listen_fd );
-
-
     g_prc_id = tgg_get_valid_bwprc(TggConfigure::getInstance()->get_bwsvr_count(), get_system_ms());
     if(g_prc_id < 0) {
         close(g_listen_fd);
@@ -180,7 +134,9 @@ int main(int argc, char *argv[])
     print_queue_counts();
     print_mem_statistics();
 	// TODO 进程退出时要回收资源
+    mt_uninit_frame();
 	tgg_process_uninit();
+    AsyncLogger::getInstance().shutdown();
 	LOG_INFO("-----------main end----------");
     AsyncLogger::getInstance().shutdown();
 	return 0;

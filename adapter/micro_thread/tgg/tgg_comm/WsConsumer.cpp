@@ -14,6 +14,90 @@
 #include "comm/log.hpp"
 #include "mt_api.h"
 
+extern struct rte_mempool* g_mempool_bwrcv;
+extern struct rte_mempool* g_mempool_bwrcv_data;
+
+tgg_bw_data* format_send_server_data(int core_id, int fd, const std::string& sdata, int fdopt)
+{
+    if(fd <= 0) {
+        LOG_ERROR("invalid fd:%d.", fd);
+        return NULL;
+    }
+    tgg_bw_data* bwdata = NULL;
+    int ret = high_freq_malloc(g_mempool_bwrcv, (void**)&bwdata, sizeof(tgg_bw_data));
+        // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
+    if (ret < 0) {
+        LOG_ERROR("get mem from bwrcv pool failed,code:%d.", ret);
+        return NULL;
+    }
+    if(sdata.size() > 0) {
+        ret = high_freq_malloc(g_mempool_bwrcv_data, &bwdata->data, sdata.size());
+        if (ret < 0) {
+            high_freq_free(g_mempool_bwrcv, (void*)bwdata, sizeof(tgg_bw_data));
+            LOG_ERROR("get mem from bwrcv data pool failed,code:%d.", ret);
+            return NULL;
+        }
+        // bwdata->data = dpdk_rte_malloc(sdata.size());
+        memcpy(bwdata->data, sdata.c_str(), sdata.size());
+    } else {
+        bwdata->data = NULL;
+    }
+    bwdata->data_len = sdata.size();
+    bwdata->fd_opt = fdopt;
+    bwdata->fd = fd;
+    bwdata->coreid = core_id;
+    bwdata->peer_ip = (unsigned int)tgg_get_cli_ip(core_id, fd);
+    bwdata->peer_port = (unsigned int)tgg_get_cli_port(core_id, fd);
+    bwdata->idx = (unsigned int)tgg_get_cli_idx(core_id, fd);
+    return bwdata;
+}
+
+int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
+{
+    tgg_bw_data* bwdata = format_send_server_data(core_id, fd, data, fdopt);
+    if (!bwdata) {
+        LOG_ERROR("Format bw server data failed.");
+        return -1;
+    }
+    int maxtry = 10;// 入队列可能会失败最多尝试10次
+    int ret = tgg_enqueue_trans(bwdata);
+    while (ret < 0 && maxtry > 0 ) {
+        NS_MICRO_THREAD::mt_sleep(10);
+        ret = tgg_enqueue_trans(bwdata);
+        maxtry--;
+    }
+    static int loop_times_sndserver = 0;
+    // TODO 前期调试要看是否经常出现重试
+    if (maxtry < 10) {
+        if(loop_times_sndserver++ % 100 == 0) {
+            LOG_ERROR("loop times:%d.", loop_times_sndserver);
+        }
+    }
+    if (ret < 0) {
+        clean_bw_data(bwdata);
+        LOG_ERROR("Enqueue bw server data failed.");
+        return -1;
+    }
+    return 0;
+}
+
+static int s_enqueued_to_server_count = 0;
+int WsConsumer::_Send2Server(const std::string& data, int fd_opt)
+{
+    if(tgg_get_bwfdx_count() <= 0) {
+        LOG_ERROR("Send data to server Failed: no bw found.");
+        return NO_BW_AVALIABLE;
+    }
+    if (enqueue_data_trans(this->core_id, this->fd, data, fd_opt) < 0) {// 函数内部会循环尝试发送10次
+        LOG_ERROR("Send data to server Failed,[core:%d][fd:%d] current count:%d.",
+         core_id, fd, s_enqueued_to_server_count);
+        return SEND_FAILED;
+    }
+    s_enqueued_to_server_count++;
+    LOG_DEBUG("send to server:%s.", bin2hex(data).c_str());
+    return SEND_SUCCESS;
+}
+
 int WsConsumer::ConsumerData(void* data)
 {
     tgg_read_data* rdata = (tgg_read_data*)data;
@@ -70,7 +154,7 @@ void WsConsumer::OnClose()
     // std::string data = "\x88\x02\x03\xe8\x00\x00";// 关闭websocket
     // OnSend(data, FD_WRITE|FD_CLOSE);
     _status = FD_STATUS_CLOSING;
-    Send2Server(this->core_id, this->fd, "", FD_CLOSE);
+    _Send2Server("", FD_CLOSE);
     SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     // SendData("", FD_CLOSE);// 关闭fd，这里理论上没有关闭成功也没事，对端也不会再发心跳了，定时器会监控到并强制关闭
 }
@@ -81,7 +165,7 @@ void WsConsumer::OnConnect()
     // int cid = (this->core_id  | this->_idx << 8);
     // tgg_set_cli_cid(this->core_id, this->fd, cid);
     // this->_cid = cid;
-    if(Send2Server(this->core_id, this->fd, "", FD_NEW) == NO_BW_AVALIABLE) {
+    if(_Send2Server("", FD_NEW) == NO_BW_AVALIABLE) {
         SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     }
 }
@@ -194,7 +278,7 @@ void WsConsumer::OnHandShake(const std::string& response, struct HttpRequest& re
     std::string result = data.dump();
     LOG_INFO("OnHandShake:%s.", result.c_str());
     // 通知服务端websocket 握手完成
-    if (Send2Server(this->core_id, this->fd, result, FD_HANDLESHAKE) == NO_BW_AVALIABLE) {
+    if (_Send2Server(result, FD_HANDLESHAKE) == NO_BW_AVALIABLE) {
         SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     }
 }
@@ -221,7 +305,7 @@ void WsConsumer::OnMessage(const std::string& msg)
         LOG_ERROR("cli[coreid:%d fd:%d] status[%d] is not handleshaked, msg[%s] droped.", this->core_id, this->fd, cli_status, msg.c_str());
         return;
     }
-    if(Send2Server(this->core_id, this->fd, msg, FD_WRITE) == NO_BW_AVALIABLE) {
+    if(_Send2Server(msg, FD_WRITE) == NO_BW_AVALIABLE) {
         SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     }
 }

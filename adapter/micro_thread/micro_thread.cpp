@@ -400,6 +400,7 @@ unsigned int ThreadPool::default_stack_size = DEFAULT_STACK_SIZE;   ///< 128k st
 bool ThreadPool::InitialPool(int max_num)
 {
     MicroThread *thread = NULL;
+    MTLOG_ERROR("thread size:%d", sizeof(MicroThread));
     for (unsigned int i = 0; i < default_thread_num; i++)
     {
         thread = new MicroThread();
@@ -477,9 +478,9 @@ MicroThread* ThreadPool::AllocThread()
     _total_num++;
     _use_num++;
     if(_use_num >(int) default_thread_num){
-        if(((int) default_thread_num * 2 )< _max_num){
+        if(((int) default_thread_num + DEFAULT_THREAD_NUM ) < _max_num){
             last_default_thread_num = default_thread_num;
-            default_thread_num = default_thread_num * 2;
+            default_thread_num += DEFAULT_THREAD_NUM;
         }
     }
 
@@ -495,17 +496,17 @@ void ThreadPool::FreeThread(MicroThread* thread)
     thread->SetFlag(MicroThread::FREE_LIST);
 
     unsigned int free_num = _freelist.size();
-    if ((free_num > default_thread_num) && (free_num > 1))
+    if ((free_num > DEFAULT_THREAD_NUM*2) && (free_num > 1))
     {
-        thread = _freelist.front();
-        _freelist.pop();
-        thread->Destroy();
-        delete thread;
-        _total_num--;
-        if(default_thread_num / 2 >= DEFAULT_THREAD_NUM){
-            last_default_thread_num = default_thread_num;
-            default_thread_num = default_thread_num / 2;
+        for(int i = 0; i < DEFAULT_THREAD_NUM; i ++) {
+            thread = _freelist.front();
+            _freelist.pop();
+            thread->Destroy();
+            delete thread;
+            _total_num--;
         }
+        last_default_thread_num = default_thread_num;
+        default_thread_num -= DEFAULT_THREAD_NUM;
     }
 }
 
@@ -896,7 +897,7 @@ void MtFrame::NotifyThread(MicroThread* thread)
     {
         this->RemoveIoWait(thread);
         if(cur_thread == this->DaemonThread()){
-            // ���ﲻֱ���еĻ�,���ǲ���ʱ,�ᵼ��Ŀ���̵߳ȴ�����ʱ
+            // ÕâÀï²»Ö±½ÓÇÐµÄ»°,»¹ÊÇ²»¼°Ê±,»áµ¼ÖÂÄ¿±êÏß³ÌµÈ´ýµ½³¬Ê±
             if(cur_thread->SaveContext() == 0){
                 this->SetActiveThread(thread);
                 thread->SetState(MicroThread::RUNNING);
