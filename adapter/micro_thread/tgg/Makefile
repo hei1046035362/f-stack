@@ -87,12 +87,6 @@ BWSERVER_OBJ = bwprc.o dpdk_init.o cmd/CmdProcessor.o tgg_comm/tgg_bw_cache.o co
 				comm/Serialize.o tgg_comm/tgg_conf.o tgg_comm/tgg_bwserver.o \
 				comm/RWIni.o tgg_comm/tgg_transport.o comm/common.o comm/Websocket.o
 
-# BWSERVER_OBJ = bwprc_fstack.o dpdk_init.o cmd/CmdProcessor.o tgg_comm/tgg_bw_cache.o comm/log.o\
-# 				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
-# 				tgg_comm/tgg_lock.o comm/Encrypt.o \
-# 				comm/Serialize.o tgg_comm/tgg_conf.o tgg_comm/tgg_bwserver_fstack.o \
-# 				comm/RWIni.o tgg_comm/tgg_transport.o comm/common.o comm/Websocket.o
-
 REGISTER_OBJ = register.o dpdk_init.o tgg_comm/tgg_bw_cache.o comm/log.o\
 				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
 				tgg_comm/tgg_lock.o \
@@ -100,7 +94,7 @@ REGISTER_OBJ = register.o dpdk_init.o tgg_comm/tgg_bw_cache.o comm/log.o\
 				comm/RWIni.o comm/common.o
 
 # 日志是否写入文件，如果要输出到控制台，屏蔽下面这一行
-# C_ARGS += -DLOG_TO_FILE
+C_ARGS += -DLOG_TO_FILE
 
 gwrcv: $(MASTER_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
@@ -109,11 +103,6 @@ gwrcv: $(MASTER_OBJ)
 gwcliprc: $(CLIPRC_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
 	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl -lz -lssl $(FF_LIBS) -L$(FF_PATH)/adapter/micro_thread -lmt $(CRESET)
-
-# mt_api的进程不能绑定同一个网口的相同队列，也就是端口只能复用，不支持多个端口
-# gwbwprc: $(BWSERVER_OBJ)
-# 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
-# 	@$(CC) -O -gdwarf-2 -o $@ $^  -ldl -lz -lssl $(FF_LIBS) -L$(FF_PATH)/adapter/micro_thread -lmt $(CRESET)
 
 gwbwprc: $(BWSERVER_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
