@@ -222,7 +222,7 @@ public:
 class KqueueProxy
 {
     public:
-        static const int DEFAULT_MAX_FD_NUM = 100000;
+        static const int DEFAULT_MAX_FD_NUM = 200000;
 
     private:
         int                       _kqfd;

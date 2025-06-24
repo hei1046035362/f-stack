@@ -183,7 +183,7 @@ std::map<int, int> map_msgtype;// 客户端上行透传 消息类型映射
 #define CORK_BATCH_THRESHOLD 4   // 达到4个包时自动触发发送
 
 // 高性能写入函数（解决火焰图瓶颈）
-ssize_t turbo_write(int fd, const void* data, size_t len) {
+size_t turbo_write(int fd, const void* data, size_t len) {
     static __thread int cork_count = 0;  // CORK状态计数
     
     // 1. 空数据直接返回
@@ -196,7 +196,7 @@ ssize_t turbo_write(int fd, const void* data, size_t len) {
     }
     cork_count++;
     
-    ssize_t total_sent = 0;
+    size_t total_sent = 0;
     while (total_sent < len) {
         ssize_t sent = 0;
         
@@ -272,7 +272,8 @@ static int write_data()
             return -1;
         }
         if(!bdata) {
-            clean_bw_data(bdata);
+            LOG_ERROR("deque an NULL data.");
+            // clean_bw_data(bdata);
             return -1;
         }
         s_dequeued_server_count++;
@@ -285,9 +286,9 @@ static int write_data()
         // char *buffer = malloc(data->data_len);
         // memcpy(buffer, data->data, data->data_len);
         // cli对应的bwfd已经改变或者 bwfdx已关闭，丢弃
-        if(prc_id != g_prc_id || bdata->bwfdx != bwfdx || !tgg_get_bwfdx_status((bwfdx & 0xff), fd)) {
+        if(prc_id != g_prc_id || !tgg_get_bwfdx_status((bwfdx & 0xff), fd) || bdata->fd <= 0) {
             LOG_ERROR("deal bw write data failed:prc_id[%d] bwdatafdx:bwfdx[%d:%d] status:[%d].", 
-                prc_id, bdata->bwfdx, bwfdx, tgg_get_bwfdx_status((bwfdx & 0xff), fd));
+                prc_id, bdata->bwfdx, fd, tgg_get_bwfdx_status((bwfdx & 0xff), fd));
             clean_bw_data(bdata);
             continue;
         }
@@ -339,6 +340,7 @@ static int write_data()
         if(-1 == ret) {
             LOG_ERROR("trans to server failed, client_ip[%d] client_port[%d].",
                 header.client_ip, header.client_port);
+            clean_bw_data(bdata);
             return -1;
             // if (errno == EAGAIN) {
             //     struct pollfd pfd = { .fd = fd, .events = POLLOUT };

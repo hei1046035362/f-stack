@@ -396,7 +396,7 @@ send_client_end:
 		high_freq_free(g_mempool_write_data, wdata->data, wdata->data_len);
 	}
 	memset(wdata, 0, sizeof(tgg_write_data));
-	rte_mempool_put(g_mempool_write, wdata);	
+	high_freq_free(g_mempool_write, wdata, sizeof(tgg_write_data));
 }
 
 static void tgg_send(void *arg)
