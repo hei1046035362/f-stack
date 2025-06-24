@@ -176,7 +176,6 @@ static void* deal_trans(void*)
             }
         }
     }
-    LOG_WARNING("Trans thread ended, enqueue count:%d.", s_enqueued_to_server_count);
     return 0;
 }
 
@@ -192,4 +191,5 @@ void uninit_bwtrans()
     if (pthread_join(s_bwtrans_thread, &retval) < 0) {
         LOG_ERROR("join thread failed.");
     }
+    LOG_WARNING("Trans thread ended, enqueue count:%d.", s_enqueued_to_server_count);
 }

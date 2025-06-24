@@ -172,8 +172,8 @@ int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, in
 int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx, int fdopt);
 
 // 发送给服务端
-tgg_bw_data* format_send_server_data(int core_id, int fd, const std::string& sdata, int fdopt);
-int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt);
-int enqueue_data_send_server(int core_id, int fd, const std::string& data, int fdopt);
+// tgg_bw_data* format_send_server_data(int core_id, int fd, const std::string& sdata, int fdopt);
+// int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt);
+// int enqueue_data_send_server(int core_id, int fd, const std::string& data, int fdopt);
 
 #endif  // _TGG_COMMON_H_

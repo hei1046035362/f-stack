@@ -112,11 +112,11 @@ int main(int argc, char *argv[])
 	// 启动透传线程
 	init_bwtrans();
 	// init_bwserver();
-	tgg_gw_process(NULL);
+	// tgg_gw_process(NULL);
 
-	print_mem_statistics();
 	// 主进程结束，开始销毁资源
 	uninit_bwtrans();
+	print_mem_statistics();
 	// uninit_bwserver();
 	// TODO 进程退出时要回收资源
 	tgg_process_uninit();
