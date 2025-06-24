@@ -362,20 +362,20 @@ struct rte_memzone* init_rcu_zone(const char* rcu_zone_name, int size)
     return rcu_zone;
 }
 
-static void init_rcu(struct rte_rcu_qsbr *rcu, struct rte_hash *hash)
-{
-    if(rte_rcu_qsbr_init(rcu, RTE_MAX_LCORE)) {
-        rte_exit(EXIT_FAILURE, "Failed to init RCU, init qsbr failed:%s.\n", rte_strerror(rte_errno));
-    }
+// static void init_rcu(struct rte_rcu_qsbr *rcu, struct rte_hash *hash)
+// {
+//     if(rte_rcu_qsbr_init(rcu, RTE_MAX_LCORE)) {
+//         rte_exit(EXIT_FAILURE, "Failed to init RCU, init qsbr failed:%s.\n", rte_strerror(rte_errno));
+//     }
 
-    struct rte_hash_rcu_config rcu_cfg = {
-        .v = rcu,                // 传递 RCU 对象
-        .mode = RTE_HASH_QSBR_MODE_SYNC  // 同步模式
-    };
-    if (rte_hash_rcu_qsbr_add(hash, &rcu_cfg) != 0) { 
-        rte_exit(EXIT_FAILURE, "Failed to add RCU to hash,error:%s\n", rte_strerror(rte_errno));
-    }
-}
+//     struct rte_hash_rcu_config rcu_cfg = {
+//         .v = rcu,                // 传递 RCU 对象
+//         .mode = RTE_HASH_QSBR_MODE_SYNC  // 同步模式
+//     };
+//     if (rte_hash_rcu_qsbr_add(hash, &rcu_cfg) != 0) { 
+//         rte_exit(EXIT_FAILURE, "Failed to add RCU to hash,error:%s\n", rte_strerror(rte_errno));
+//     }
+// }
 
 void tgg_master_init()
 {

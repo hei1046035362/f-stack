@@ -124,19 +124,3 @@ void BatchSend2ClientByfds(std::list<int64_t> fds, const std::string& data, int 
         }
     }
 }
-static int s_enqueued_to_server_count = 0;
-int Send2Server(int core_id, int fd, const std::string& data, int fd_opt)
-{
-    if(tgg_get_bwfdx_count() <= 0) {
-        LOG_ERROR("Send data to server Failed: no bw found.");
-        return NO_BW_AVALIABLE;
-    }
-    if (enqueue_data_trans(core_id, fd, data, fd_opt) < 0) {// 函数内部会循环尝试发送10次
-        LOG_ERROR("Send data to server Failed,[core:%d][fd:%d] current count:%d.",
-         core_id, fd, s_enqueued_to_server_count);
-        return SEND_FAILED;
-    }
-    s_enqueued_to_server_count++;
-    LOG_DEBUG("send to server:%s.", bin2hex(data).c_str());
-    return SEND_SUCCESS;
-}

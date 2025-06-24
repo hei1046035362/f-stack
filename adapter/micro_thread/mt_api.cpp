@@ -582,6 +582,7 @@ bool mt_init_frame(int argc, char * const argv[])
 
 void mt_uninit_frame(void)
 {
+    MtFrame::Instance()->Destroy();
     ff_release();
 }
 
