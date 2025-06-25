@@ -95,11 +95,12 @@ static void* deal_trans(void*)
             dpdk_rte_free(bwfdxdata);
         }
         // 取数据
-        tgg_bw_data* bdata = NULL;
-        if (tgg_dequeue_trans(&bdata) < 0) {
+        tgg_trans_data* tdata = NULL;
+        if (tgg_dequeue_trans(&tdata) < 0) {
             usleep(10);
             continue;
         }
+
 #if 0
         int idx = tgg_get_cli_idx(bdata->coreid, bdata->fd);
         if(bdata->data_len > 3 && !strncmp((char*)bdata->data, "GET", 3)) {// GET请求消息
@@ -117,6 +118,15 @@ static void* deal_trans(void*)
             }
         }
 #endif
+        tgg_bw_data* bdata = get_bwdata_from_transdata(tdata);
+        clean_trans_data(tdata);
+        if(!bdata) {
+            LOG_ERROR("get bwdata from trans failed.");
+            continue;            
+        }
+        if(bdata->fd <= 0) {
+            LOG_ERROR("trans error,invalid fd:%d", bdata->fd);
+        }
         int bwfdx = tgg_get_cli_bwfdx(bdata->coreid, bdata->fd);
         if(bwfdx > 0 && tgg_get_bwfdx_status(GET_COREID_FDID_MASK(bwfdx), GET_FD_FDID_MASK(bwfdx))) {
             // 已经绑定服务端，正常透传

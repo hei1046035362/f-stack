@@ -267,10 +267,10 @@ static void tgg_recv(void *arg)
 		tgg_close_cli(g_core_id, cli_fd);
 		return;
 	}
+	char buf[4 * 1024] = {0};
 	while (g_run_status) {
-		char buf[64 * 1024] = {0};
 		// 1、接收数据  mt_recv在没有数据包的情况下会阻塞，让出cpu给其他的action执行
-		ret = mt_recv(cli_fd, (void *)buf, 64 * 1024, 0, s_fd_timeout);
+		ret = mt_recv(cli_fd, (void *)buf, 4 * 1024, 0, s_fd_timeout);
 		if(ret == -1 && errno == ETIME) {
 			LOG_ERROR("client heart beat timeout, idx:%d.", idx);
 			break;

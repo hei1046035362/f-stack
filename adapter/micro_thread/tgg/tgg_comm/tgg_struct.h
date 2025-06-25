@@ -184,6 +184,9 @@ typedef struct st_write_data {
     void* data;        // 携带的数据
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_write_data;
 
+// trans 数据结构
+typedef struct st_read_data tgg_trans_data;
+
 // bw数据处理传输结构
 typedef struct st_read_data tgg_bw_data;
 

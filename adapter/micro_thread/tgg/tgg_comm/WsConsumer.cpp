@@ -16,54 +16,57 @@
 
 extern struct rte_mempool* g_mempool_bwrcv;
 extern struct rte_mempool* g_mempool_bwrcv_data;
+extern struct rte_mempool* g_mempool_trans;
+extern struct rte_mempool* g_mempool_trans_data;
 
-tgg_bw_data* format_send_server_data(int core_id, int fd, const std::string& sdata, int fdopt)
+
+tgg_trans_data* format_send_server_data(int core_id, int fd, const std::string& sdata, int fdopt)
 {
     if(fd <= 0) {
         LOG_ERROR("invalid fd:%d.", fd);
         return NULL;
     }
-    tgg_bw_data* bwdata = NULL;
-    int ret = high_freq_malloc(g_mempool_bwrcv, (void**)&bwdata, sizeof(tgg_bw_data));
+    tgg_trans_data* tdata = NULL;
+    int ret = high_freq_malloc(g_mempool_trans, (void**)&tdata, sizeof(tgg_bw_data));
         // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
     if (ret < 0) {
         LOG_ERROR("get mem from bwrcv pool failed,code:%d.", ret);
         return NULL;
     }
     if(sdata.size() > 0) {
-        ret = high_freq_malloc(g_mempool_bwrcv_data, &bwdata->data, sdata.size());
+        ret = high_freq_malloc(g_mempool_trans_data, &tdata->data, sdata.size());
         if (ret < 0) {
-            high_freq_free(g_mempool_bwrcv, (void*)bwdata, sizeof(tgg_bw_data));
+            high_freq_free(g_mempool_trans, (void*)tdata, sizeof(tgg_trans_data));
             LOG_ERROR("get mem from bwrcv data pool failed,code:%d.", ret);
             return NULL;
         }
         // bwdata->data = dpdk_rte_malloc(sdata.size());
-        memcpy(bwdata->data, sdata.c_str(), sdata.size());
+        memcpy(tdata->data, sdata.c_str(), sdata.size());
     } else {
-        bwdata->data = NULL;
+        tdata->data = NULL;
     }
-    bwdata->data_len = sdata.size();
-    bwdata->fd_opt = fdopt;
-    bwdata->fd = fd;
-    bwdata->coreid = core_id;
-    bwdata->peer_ip = (unsigned int)tgg_get_cli_ip(core_id, fd);
-    bwdata->peer_port = (unsigned int)tgg_get_cli_port(core_id, fd);
-    bwdata->idx = (unsigned int)tgg_get_cli_idx(core_id, fd);
-    return bwdata;
+    tdata->data_len = sdata.size();
+    tdata->fd_opt = fdopt;
+    tdata->fd = fd;
+    tdata->coreid = core_id;
+    tdata->peer_ip = (unsigned int)tgg_get_cli_ip(core_id, fd);
+    tdata->peer_port = (unsigned int)tgg_get_cli_port(core_id, fd);
+    tdata->idx = (unsigned int)tgg_get_cli_idx(core_id, fd);
+    return tdata;
 }
 
 int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
 {
-    tgg_bw_data* bwdata = format_send_server_data(core_id, fd, data, fdopt);
-    if (!bwdata) {
+    tgg_trans_data* tdata = format_send_server_data(core_id, fd, data, fdopt);
+    if (!tdata) {
         LOG_ERROR("Format bw server data failed.");
         return -1;
     }
     int maxtry = 10;// 入队列可能会失败最多尝试10次
-    int ret = tgg_enqueue_trans(bwdata);
+    int ret = tgg_enqueue_trans(tdata);
     while (ret < 0 && maxtry > 0 ) {
         NS_MICRO_THREAD::mt_sleep(10);
-        ret = tgg_enqueue_trans(bwdata);
+        ret = tgg_enqueue_trans(tdata);
         maxtry--;
     }
     static int loop_times_sndserver = 0;
@@ -74,7 +77,7 @@ int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
         }
     }
     if (ret < 0) {
-        clean_bw_data(bwdata);
+        clean_trans_data(tdata);
         LOG_ERROR("Enqueue bw server data failed.");
         return -1;
     }
