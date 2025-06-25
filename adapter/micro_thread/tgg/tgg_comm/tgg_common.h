@@ -120,6 +120,8 @@ int tgg_dequeue_bwrcv(int prc_id, tgg_bw_data** data);
 int tgg_enqueue_write(int core_id, tgg_write_data* data);
 int tgg_dequeue_write(int core_id, tgg_write_data** data);
 
+tgg_bw_data* get_bwdata_from_transdata(tgg_trans_data* tdata);
+
 int tgg_enqueue_bwsnd(int queue_id, tgg_bw_data* data);
 int tgg_dequeue_bwsnd(int queue_id, tgg_bw_data** data);
 
@@ -160,6 +162,7 @@ int tgg_exit_group(const char* gid, int cid);
 int get_valid_idx();
 
 // 清理队列
+void clean_trans_data(tgg_trans_data* bdata);
 void clean_bw_data(tgg_bw_data* bdata);
 void clean_read_data(tgg_read_data* rdata);
 void clean_write_data(tgg_write_data* wdata);
