@@ -29,9 +29,11 @@ extern struct rte_ring* g_ring_bwfdx;
 extern struct rte_ring* g_ring_bwsnds[MAX_LCORE_COUNT];
 
 extern struct rte_mempool* g_mempool_read;
+extern struct rte_mempool* g_mempool_trans;
 extern struct rte_mempool* g_mempool_write;
 extern struct rte_mempool* g_mempool_bwrcv;
 extern struct rte_mempool* g_mempool_read_data;
+extern struct rte_mempool* g_mempool_trans_data;
 extern struct rte_mempool* g_mempool_write_data;
 extern struct rte_mempool* g_mempool_bwrcv_data;
 extern struct rte_mempool* g_mempool_large_data;
@@ -698,6 +700,26 @@ int tgg_dequeue_write(int core_id, tgg_write_data** data)
 	return rte_ring_dequeue(g_ring_writes[core_id], (void**)data);
 }
 
+tgg_bw_data* get_bwdata_from_transdata(tgg_trans_data* tdata)
+{
+	tgg_bw_data* bdata = NULL;
+    int ret = high_freq_malloc(g_mempool_bwrcv, (void**)&bdata, sizeof(tgg_trans_data));
+    if(ret < 0) {
+		LOG_ERROR("malloc bw data from trans failed, fd:%d.", tdata->fd);
+    	return NULL;
+    }
+    memcpy(bdata, tdata, sizeof(tgg_trans_data));
+    if (tdata->data) {
+        ret = high_freq_malloc(g_mempool_bwrcv_data, (void**)&bdata->data, tdata->data_len);
+        if(ret < 0) {
+			LOG_ERROR("malloc bw data content from trans failed, fd:%d.", tdata->fd);
+        	high_freq_free(g_mempool_bwrcv, bdata, sizeof(tgg_trans_data));
+        	return NULL;
+        }
+        memcpy(bdata->data, tdata->data, tdata->data_len);
+    }
+    return bdata;
+}
 int tgg_enqueue_bwsnd(int queue_id, tgg_bw_data* data)
 {
 	if(data->fd <= 0) {
@@ -718,7 +740,7 @@ int tgg_dequeue_bwsnd(int queue_id, tgg_bw_data** data)
 	return rte_ring_dequeue(g_ring_bwsnds[queue_id], (void**)data);
 }
 
-int tgg_enqueue_trans(tgg_bw_data* data)
+int tgg_enqueue_trans(tgg_trans_data* data)
 {
 	if(data->fd <= 0) {
 		LOG_ERROR("invalid data fd:%d.", data->fd);
@@ -726,7 +748,7 @@ int tgg_enqueue_trans(tgg_bw_data* data)
 	return rte_ring_enqueue(g_ring_trans, data);
 }
 
-int tgg_dequeue_trans(tgg_bw_data** data)
+int tgg_dequeue_trans(tgg_trans_data** data)
 {
 	if (rte_ring_empty(g_ring_trans)) {
 		return -ENOENT;
@@ -760,6 +782,17 @@ int tgg_dequeue_bwrcv(int prc_id, tgg_bw_data** data)
 	return rte_ring_dequeue(g_ring_bwrcvs[prc_id], (void**)data);
 }
 
+
+void clean_trans_data(tgg_trans_data* bdata)
+{
+    if (bdata->data) {
+    	memset(bdata->data, 0, bdata->data_len);
+        high_freq_free(g_mempool_trans_data, bdata->data, bdata->data_len);
+        bdata->data = NULL;
+    }
+    memset(bdata, 0, sizeof(tgg_trans_data));
+    high_freq_free(g_mempool_trans, bdata, sizeof(tgg_trans_data));
+}
 
 void clean_bw_data(tgg_bw_data* bdata)
 {

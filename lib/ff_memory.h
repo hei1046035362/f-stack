@@ -33,15 +33,15 @@ extern "C" {
 
 #define MEMPOOL_CACHE_SIZE 256
 
-#define DISPATCH_RING_SIZE 2048
+#define DISPATCH_RING_SIZE 8192
 
-#define MSG_RING_SIZE 32
+#define MSG_RING_SIZE 512
 
 /*
  * Configurable number of RX/TX ring descriptors
  */
-#define RX_QUEUE_SIZE 512
-#define TX_QUEUE_SIZE 512
+#define RX_QUEUE_SIZE 4096
+#define TX_QUEUE_SIZE 4096
 
 /*
  * Try to avoid TX buffering if we have at least MAX_TX_BURST packets to send.

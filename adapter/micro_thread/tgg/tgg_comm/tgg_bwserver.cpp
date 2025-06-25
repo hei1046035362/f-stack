@@ -287,8 +287,13 @@ static int write_data()
         // memcpy(buffer, data->data, data->data_len);
         // cli对应的bwfd已经改变或者 bwfdx已关闭，丢弃
         if(prc_id != g_prc_id || !tgg_get_bwfdx_status((bwfdx & 0xff), fd) || bdata->fd <= 0) {
-            LOG_ERROR("deal bw write data failed:prc_id[%d] bwdatafdx:bwfdx[%d:%d] status:[%d].", 
-                prc_id, bdata->bwfdx, fd, tgg_get_bwfdx_status((bwfdx & 0xff), fd));
+            LOG_ERROR("deal bw write data failed:prc_id[%d] bwdatafdx:bwfdx[%d:%d]," 
+                "cli_fd:%d, idx:%d, status:[%d].", 
+                prc_id, bdata->bwfdx, fd,
+                bdata->fd, bdata->idx, tgg_get_bwfdx_status((bwfdx & 0xff), fd));
+            if(!bdata->data) {
+                LOG_ERROR("write data:%s", bdata->data);
+            }
             clean_bw_data(bdata);
             continue;
         }
@@ -321,10 +326,17 @@ static int write_data()
             .gateway_port = TggConfigure::getInstance()->get_gateway_port(),
             .ext_len = 0// TODO 暂时不知道上行数据是否能用上
         };
+        if(bdata->fd_opt & FD_CLOSE) {// 要在发送给bw之前先回给客户端，否则客户端收到的消息可能不及时，write会导致协程切换
+            // 这里发送给客户端和清理hash表信息的顺序待商榷
+            Send2Client(cid, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
+            tgg_free_session(bdata->coreid, bdata->fd, cid);
+            LOG_INFO("catched an close cmd, cid:%d.", cid);
+        }
         std::string sdata;
         if(bdata->data_len > 0) {
             sdata = std::move(std::string((char*)bdata->data, bdata->data_len));
         }
+        clean_bw_data(bdata);// 在调用write之前清理数据，防止协程切换导致的地址变化
         BwPackageHandler::encode(result, &header, sdata);
 
         // printf("co[%d] do write.\n", co_index);
@@ -340,20 +352,13 @@ static int write_data()
         if(-1 == ret) {
             LOG_ERROR("trans to server failed, client_ip[%d] client_port[%d].",
                 header.client_ip, header.client_port);
-            clean_bw_data(bdata);
+            // clean_bw_data(bdata);
             return -1;
             // if (errno == EAGAIN) {
             //     struct pollfd pfd = { .fd = fd, .events = POLLOUT };
             //     co_poll(co_get_epoll_ct(), &pfd, 1, 1000); // 协程友好等待
             // }
         }
-        if(bdata->fd_opt & FD_CLOSE) {
-            // 这里发送给客户端和清理hash表信息的顺序待商榷
-            Send2Client(cid, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
-            tgg_free_session(bdata->coreid, bdata->fd, cid);
-            LOG_INFO("catched an close cmd, cid:%d.", cid);
-        }
-        clean_bw_data(bdata);
         // printf("co[%d] finished dequeue.\n", co_index);
     }
     return 0;
@@ -377,11 +382,6 @@ void print_queue_counts()
 
 void *read_routine( void *arg )
 {
-    map_msgtype[FD_NEW] = GatewayProtocal::CMD_ON_CONNECT;
-    map_msgtype[FD_HANDLESHAKE] = GatewayProtocal::CMD_ON_WEBSOCKET_CONNECT;
-    map_msgtype[FD_WRITE] = GatewayProtocal::CMD_ON_MESSAGE;
-    map_msgtype[FD_CLOSE] = GatewayProtocal::CMD_ON_CLOSE;
-
     co_enable_hook_sys();
 
     task_t *co = (task_t*)arg;
