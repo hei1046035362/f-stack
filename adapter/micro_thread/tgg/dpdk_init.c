@@ -95,11 +95,13 @@ struct rte_ring* g_ring_bwsnds[MAX_LCORE_COUNT] = {NULL};// BW下行
 /// 三个内存池
 // 内存池名称
 const char* s_pool_read_name = "tgg_pool_read_name";// 客户端上行 和 上行prc共用
+const char* s_pool_trans_name = "tgg_pool_trans_name";// 客户端上行透传
 const char* s_pool_write_name = "tgg_pool_write_name";// 客户端下行
 const char* s_pool_bwrcv_name = "tgg_pool_bwrcv_name";// 客户端上行透传 和 bw上行共用
 
 // 网络数据实际使用缓存
 const char* s_pool_read_data_name = "tgg_pl_rdata";// 客户端上行 和 上行prc共用
+const char* s_pool_trans_data_name = "tgg_pl_tdata";// 客户端下行
 const char* s_pool_write_data_name = "tgg_pl_wdata";// 客户端下行
 const char* s_pool_bwrcv_data_name = "tgg_pl_bwdata";// 客户端上行透传 和 bw上行共用
 const char* s_pool_large_data_name = "tgg_pl_large_data";// 客户端上行透传 和 bw上行共用
@@ -107,18 +109,21 @@ const char* s_pool_clifdlist_data_name = "tgg_pl_fdlst_data";// 下行发送fd�
 
 // 内存池大小 TODO 大小待调试
 static uint32_t s_mempool_size = 1024*64;// 尽量设置成2^n
-static uint32_t s_write_mempool_size = 1024*512;// 尽量设置成2^n
+static uint32_t s_write_mempool_size = 1024*256;// 尽量设置成2^n
 // 每个内存池单个内存块儿的大小
 static uint32_t s_mempool_read_cache = sizeof(struct st_read_data);// 单个缓存的大小待定
+static uint32_t s_mempool_trans_cache = sizeof(tgg_trans_data);// 单个缓存的大小待定
 static uint32_t s_mempool_write_cache = sizeof(struct st_write_data);// 单个缓存的大小待定
 static uint32_t s_mempool_bwrcv_cache = sizeof(tgg_bw_data);// 单个缓存的大小待定
 // 内存池
 // 队列存储的数据结构
 struct rte_mempool* g_mempool_read = NULL;
+struct rte_mempool* g_mempool_trans = NULL;
 struct rte_mempool* g_mempool_write = NULL;
 struct rte_mempool* g_mempool_bwrcv = NULL;
 
 struct rte_mempool* g_mempool_read_data = NULL;
+struct rte_mempool* g_mempool_trans_data = NULL;
 struct rte_mempool* g_mempool_write_data = NULL;
 struct rte_mempool* g_mempool_bwrcv_data = NULL;
 
@@ -441,8 +446,9 @@ void tgg_master_init()
 	g_ring_bwfdx = make_ring(s_bwfdx_ring_name, s_ring_size);
 
 	g_mempool_read = make_mempool(s_pool_read_name, s_mempool_size, s_mempool_read_cache);
+	g_mempool_trans = make_mempool(s_pool_trans_name, s_mempool_size, s_mempool_trans_cache);
 	g_mempool_write = make_mempool(s_pool_write_name, s_write_mempool_size, s_mempool_write_cache);
-	g_mempool_bwrcv = make_mempool(s_pool_bwrcv_name, s_mempool_size, s_mempool_bwrcv_cache);
+	g_mempool_bwrcv = make_mempool(s_pool_bwrcv_name, s_write_mempool_size, s_mempool_bwrcv_cache);
 	g_gid_hash = init_hash(s_gid_hash_name, g_fd_limit, TGG_GID_LEN);
 	g_uid_hash = init_hash(s_uid_hash_name, g_fd_limit, TGG_UID_LEN);
 	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, sizeof(int64_t));
@@ -479,7 +485,8 @@ void tgg_master_init()
 	// init_rcu(g_bwwkkey_rcu, g_bwwkkey_hash);
 
 	g_mempool_read_data = make_mempool(s_pool_read_data_name, s_mempool_size, COMMON_PACKET_LEN);
-	g_mempool_write_data = make_mempool(s_pool_write_data_name, s_mempool_size, COMMON_PACKET_LEN);
+	g_mempool_trans_data = make_mempool(s_pool_trans_data_name, s_mempool_size, COMMON_PACKET_LEN);
+	g_mempool_write_data = make_mempool(s_pool_write_data_name, s_write_mempool_size, COMMON_PACKET_LEN);
 	g_mempool_bwrcv_data = make_mempool(s_pool_bwrcv_data_name, s_write_mempool_size, COMMON_PACKET_LEN);
 	g_mempool_large_data = make_mempool(s_pool_large_data_name, s_large_mempool_size, MAX_PACKET_LEN);
 	g_mempool_clifdlist_data = make_mempool(s_pool_clifdlist_data_name, s_clifdlist_mempool_size, sizeof(tgg_fd_id_list));
@@ -518,6 +525,8 @@ void tgg_master_uninit()
 
 	rte_mempool_free(g_mempool_read);
 	g_mempool_read = NULL;
+	rte_mempool_free(g_mempool_trans);
+	g_mempool_trans = NULL;
 	rte_mempool_free(g_mempool_write);
 	g_mempool_write = NULL;
 	rte_mempool_free(g_mempool_bwrcv);
@@ -525,6 +534,8 @@ void tgg_master_uninit()
 
 	rte_mempool_free(g_mempool_read_data);
 	g_mempool_read_data = NULL;
+	rte_mempool_free(g_mempool_trans_data);
+	g_mempool_trans_data = NULL;
 	rte_mempool_free(g_mempool_write_data);
 	g_mempool_write_data = NULL;
 	rte_mempool_free(g_mempool_bwrcv_data);
@@ -615,9 +626,11 @@ void tgg_secondary_init()
 	g_ring_trans = find_ring(s_trans_ring_name);
 	g_ring_bwfdx = find_ring(s_bwfdx_ring_name);
 	g_mempool_read = find_mempool(s_pool_read_name);
+	g_mempool_trans = find_mempool(s_pool_trans_name);
 	g_mempool_write = find_mempool(s_pool_write_name);
 	g_mempool_bwrcv = find_mempool(s_pool_bwrcv_name);
 	g_mempool_read_data = find_mempool(s_pool_read_data_name);
+	g_mempool_trans_data = find_mempool(s_pool_trans_data_name);
 	g_mempool_write_data = find_mempool(s_pool_write_data_name);
 	g_mempool_bwrcv_data = find_mempool(s_pool_bwrcv_data_name);
 	g_mempool_large_data = find_mempool(s_pool_large_data_name);
