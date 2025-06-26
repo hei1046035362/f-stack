@@ -718,7 +718,19 @@ int CmdJoinGroup::ExecCmd()
         RTE_LOG(INFO, USER1, "[%s][%d] get fdid by cid[%d] failed.", __FILE__, __LINE__, cid);
         return -1;
     }
-    tgg_join_group(group.c_str(), cid);
+    std::vector<std::string> vec_group;
+    if(group[0] == '[' && group[group.size()-1] == ']') {// 是数组
+        group[0] = ' ';// 首位的中括号换成空格
+        group[group.size()-1] = ' ';
+        group.erase(std::remove(group.begin(), group.end(), '\"'), group.end());// 去掉 "
+        group.erase(std::remove(group.begin(), group.end(), ' '), group.end()); // 去掉空格
+        split_string(group, ',', vec_group);
+    } else {
+        vec_group.push_back(group);
+    }
+    for(auto group_unit : vec_group) {
+        tgg_join_group(group_unit.c_str(), cid);
+    }
     LOG_DEBUG("JoinGroup: cmd executed cid[%d] gid[%s].", cid, group.c_str());
     return 0;
 }
@@ -737,7 +749,19 @@ int CmdLeaveGroup::ExecCmd()
         LOG_ERROR("get fdid by cid[%d] failed.", cid);
         return -1;
     }
-    tgg_exit_group(group.c_str(), cid);
+    std::vector<std::string> vec_group;
+    if(group[0] == '[' && group[group.size()-1] == ']') {// 是数组
+        group[0] = ' ';// 首位的中括号换成空格
+        group[group.size()-1] = ' ';
+        group.erase(std::remove(group.begin(), group.end(), '\"'), group.end());// 去掉 "
+        group.erase(std::remove(group.begin(), group.end(), ' '), group.end()); // 去掉空格
+        split_string(group, ',', vec_group);
+    } else {
+        vec_group.push_back(group);
+    }
+    for(auto group_unit : vec_group) {
+        tgg_exit_group(group_unit.c_str(), cid);
+    }
     LOG_DEBUG("LeaveGroup: cmd executed cid[%d] gid[%s].", cid, group.c_str());
     return 0;
 }
@@ -751,8 +775,20 @@ int CmdUnGroup::ExecCmd()
         return -1;
     }
 
-    tgg_del_gid_cidgid(group.c_str());// 这里顺序不能动，得先删除hash<cid,gid>中的部分，才能删除hash<gid,list<fdid>>
-    tgg_del_gid(group.c_str());
+    std::vector<std::string> vec_group;
+    if(group[0] == '[' && group[group.size()-1] == ']') {// 是数组
+        group[0] = ' ';// 首位的中括号换成空格
+        group[group.size()-1] = ' ';
+        group.erase(std::remove(group.begin(), group.end(), '\"'), group.end());// 去掉 "
+        group.erase(std::remove(group.begin(), group.end(), ' '), group.end()); // 去掉空格
+        split_string(group, ',', vec_group);
+    } else {
+        vec_group.push_back(group);
+    }
+    for(auto group_unit : vec_group) {
+        tgg_del_gid_cidgid(group_unit.c_str());// 这里顺序不能动，得先删除hash<cid,gid>中的部分，才能删除hash<gid,list<fdid>>
+        tgg_del_gid(group_unit.c_str());
+    }
     LOG_DEBUG("UnGroup: cmd executed gid[%s].", group.c_str());
     return 0;
 }

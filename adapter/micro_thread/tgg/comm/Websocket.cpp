@@ -50,6 +50,7 @@ void parse_http_request(const std::string &raw_request, HttpRequest& req) {
         size_t colon_pos = line.find(':');
         if (colon_pos != std::string::npos) {
             std::string key = line.substr(0, colon_pos);
+            std::transform(key.begin(), key.end(), key.begin(), ::tolower);
             std::string value = line.substr(colon_pos + 2); // 跳过": "
             value.erase(std::remove(value.begin(), value.end(), '\r'), value.end());
             req.headers[key] = value;
@@ -73,8 +74,8 @@ void parse_http_request(const std::string &raw_request, HttpRequest& req) {
     }
 
     // 新增：解析 Cookies（需在请求头解析完成后添加）
-    if (req.headers.find("Cookie") != req.headers.end()) {
-        std::string cookieStr = req.headers["Cookie"];
+    if (req.headers.find("cookie") != req.headers.end()) {
+        std::string cookieStr = req.headers["cookie"];
         std::istringstream cookieStream(cookieStr);
         std::string cookiePair;
 
@@ -102,19 +103,24 @@ void parse_http_request(const std::string &raw_request, HttpRequest& req) {
 
 bool is_valid_websocket_handshake(const HttpRequest &req) {
     // 检查必需的头字段
-    if (req.headers.find("Upgrade") == req.headers.end() ||
-        req.headers.find("Connection") == req.headers.end() ||
-        req.headers.find("Sec-WebSocket-Key") == req.headers.end()) {
+    if (req.headers.find("upgrade") == req.headers.end() ||
+        req.headers.find("connection") == req.headers.end() ||
+        req.headers.find("sec-websocket-key") == req.headers.end()) {
+        LOG_ERROR("lack of nessesary key in request header: upgrade, connection, sec-websocket-key");
         return false;
     }
 
     // 验证协议升级字段
-    std::string upgrade = req.headers.at("Upgrade");
-    std::string connection = req.headers.at("Connection");
+    std::string upgrade = req.headers.at("upgrade");
+    std::string connection = req.headers.at("connection");
     std::transform(upgrade.begin(), upgrade.end(), upgrade.begin(), ::tolower);
     std::transform(connection.begin(), connection.end(), connection.begin(), ::tolower);
+    if(upgrade == "websocket" && connection.find("upgrade") != std::string::npos) {
+       return true;
+    }
+    LOG_ERROR("invalid upgrade[%s] or connection[%s] in headers", upgrade.c_str(), connection.c_str());
+    return false;
 
-    return (upgrade == "websocket" && connection.find("upgrade") != std::string::npos);
 }
 
 // 生成websocket连接的唯一键
@@ -140,7 +146,7 @@ std::string Websocket::_HandleHandshake(const std::string& request, HttpRequest&
         std::cerr << "Invalid WebSocket handshake" << request << std::endl;
         return "";
     }
-    std::string accept_key = _GenerateAcceptKey(req.headers["Sec-WebSocket-Key"]);
+    std::string accept_key = _GenerateAcceptKey(req.headers["sec-websocket-key"]);
 
         // 构建握手响应
     std::ostringstream response;
@@ -267,7 +273,7 @@ Websocket::_GetWsFrame(unsigned char *in_buffer, size_t buf_len,
             if (buf_len < 4)
                 return INCOMPLETE_DATA;
             memcpy(&tmp16, in_buffer + pos, 2);
-            payload_len = big_endian() ? ntohs(tmp16) : tmp16;
+            payload_len = ntohs(tmp16);
             pos += 2;
         } else if (length_field == 127) { /* msglen is 64bit */
             int i;
