@@ -157,6 +157,8 @@ static void main_register_proc()
     co_create( &read_co, NULL, register_read_routine, &wdata);
     co_resume( read_co );
 
+    wdata.bw_ip = TggConfigure::getInstance()->get_bwsvr_bw_addr().c_str();
+    wdata.bw_port = TggConfigure::getInstance()->get_bwsvr_bw_port();
     // write操作的协程
     stCoRoutine_t *write_co = NULL;
     co_create( &write_co, NULL, register_write_routine, &wdata);

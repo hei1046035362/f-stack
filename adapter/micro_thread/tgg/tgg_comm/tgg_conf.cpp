@@ -161,11 +161,11 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     }
 
     // 收包进程数要等于cli处理线程数
-    if(lcore_count != ccore_count) {
-        RTE_LOG(ERR, USER1, "[%s][%d] lcore count[%d] not equal to ccore count:[%d].",
-         __FILE__, __LINE__, lcore_count, ccore_count);
-        return -1;
-    }
+    // if(lcore_count != ccore_count) {
+    //     RTE_LOG(ERR, USER1, "[%s][%d] lcore count[%d] not equal to ccore count:[%d].",
+    //      __FILE__, __LINE__, lcore_count, ccore_count);
+    //     return -1;
+    // }
 
     // redis cluster ip
     std::string redis_ips = pTgg_Ini.getValue("redis", "addrs");
