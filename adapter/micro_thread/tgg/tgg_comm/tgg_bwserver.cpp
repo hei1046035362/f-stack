@@ -334,6 +334,7 @@ static int write_data()
         }
         std::string sdata;
         if(bdata->data_len > 0) {
+            LOG_INFO("send to bw data:%s", (char*)bdata->data);
             sdata = std::move(std::string((char*)bdata->data, bdata->data_len));
         }
         clean_bw_data(bdata);// 在调用write之前清理数据，防止协程切换导致的地址变化

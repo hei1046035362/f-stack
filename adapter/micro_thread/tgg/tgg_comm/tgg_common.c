@@ -100,6 +100,7 @@ int get_valid_idx(int core_id)
 			return -1;
 		}
 		if(tgg_check_idx_exist(core_id, s_cur_cli_idx) < 0) {
+			s_cur_cli_idx++;
 			break;
 		}
 		s_cur_cli_idx++;
