@@ -7,6 +7,8 @@ typedef struct register_write_st {
     unsigned short port;
     const char* seckey;
     uint64_t ping_interval;
+    const char* bw_ip;
+    unsigned short bw_port;
 } register_routine_data;
 
 

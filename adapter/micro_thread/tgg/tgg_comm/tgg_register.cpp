@@ -155,21 +155,23 @@ void *register_write_routine( void *arg )
 {
     co_enable_hook_sys();
     register_routine_data* wdata = (register_routine_data*)arg;
+    uint64_t last_update_time = get_system_ms();
     // 拼接本机ip端口信息
-    std::string con_str = wdata->ip;
+    std::string con_str = wdata->bw_ip;
     con_str += ":";
-    con_str += std::to_string(wdata->port);
+    con_str += std::to_string(wdata->bw_port);
     // 拼接注册消息体
     std::string data = "{\"event\":\"gateway_connect\", \"address\":\"";
     data += con_str;
     data += "\", \"secret_key\":\"";
     data += wdata->seckey;
-    data += "\"}";
+    data += "\", \"timestamp\": ";
+    data += std::to_string(last_update_time);
+    data += "}\n";
     // 发送注册消息到注册中心
     write(wdata->fd, data.c_str(), data.length());
     // 心跳包
     std::string ping_data = "{\"event\":\"ping\"}";
-    uint64_t last_update_time = get_system_ms();
     while(g_run) {
         uint64_t now = get_system_ms();
         if(now - last_update_time > wdata->ping_interval) {

@@ -409,7 +409,6 @@ static void tgg_send(void *arg)
 	    	continue;
 	    }
 	    if (!wdata) {
-			mt_sleep(10);
 	    	continue;
 	    }
 
