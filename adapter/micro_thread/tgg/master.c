@@ -283,7 +283,7 @@ static void tgg_recv(void *arg)
 		g_tgg_stats.recv++;
 		if (ret < 0) {
 			// 接收出现错误
-			LOG_ERROR("recv from client error:%d, idx:%d.", idx, ret);
+			LOG_ERROR("recv from client ret:%d error:%d, idx:%d.", ret, strerror(errno), idx);
 			break;
 		}
 		if (!ret) {
