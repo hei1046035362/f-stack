@@ -183,7 +183,7 @@ int CmdGatewayClientConnect::ExecCmd()
 int CmdSendToOne::ExecCmd()
 {
     int cid = jdata["connection_id"];
-    int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
+    int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string body = std::move(hex2bin(jdata["body"].get<std::string>()));
     // TODO 目前只支持ws发送
     LOG_DEBUG("SendToOne: cmd executed cid[%d] data:%s.",
@@ -194,7 +194,7 @@ int CmdSendToOne::ExecCmd()
 
 int CmdSendToGroup::ExecCmd()
 {
-    int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
+    int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string body = hex2bin(jdata["body"].get<std::string>());
     // 要排除的cid
     std::set<std::string> setExeptCid;
@@ -261,7 +261,7 @@ int CmdKick::ExecCmd()
 {
     int cid = jdata["connection_id"];
     // std::string body = jdata["body"].get<std::string>();
-    int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
+    int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     // Send2Client(cid, body, FD_WRITE, !raw);
     Send2Client(cid, "kick", FD_WRITE|FD_CLOSE, !raw);
     int64_t fdidcid = tgg_get_fdbycid(cid);
@@ -274,7 +274,7 @@ int CmdDestroy::ExecCmd()
 {
     int cid = jdata["connection_id"];
     // std::string data = "";// 关闭websocket
-    int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
+    int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     Send2Client(cid, "destroy", FD_WRITE|FD_CLOSE, !raw);// TODO 是否要立即销毁，不发送ws的关闭帧(去掉FD_WRITE就行)了
     int64_t fdidcid = tgg_get_fdbycid(cid);
     tgg_free_session(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), cid);
@@ -285,7 +285,7 @@ int CmdDestroy::ExecCmd()
 
 int CmdSendToALL::ExecCmd()
 {
-    int raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
+    int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string body = hex2bin(jdata["body"].get<std::string>());
     // if(!raw) {
     // }
@@ -682,7 +682,7 @@ int CmdUnBindUid::ExecCmd()
 
 int CmdSendToUid::ExecCmd()
 {
-    bool raw = jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
+    bool raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string body = jdata["body"];
     std::list<int64_t> lst_fds;
     nlohmann::json juid = nlohmann::json::parse(jdata["ext_data"].get<std::string>());
@@ -928,7 +928,13 @@ static int json_parse_body(unsigned char flag, nlohmann::json& jdata)//const std
     //                                           0x32 -> ":"                 0x7b -> "{"
     if(body.length() > 4 && body.substr(2, 2) != "3a" && body.substr(0, 2) != "7b") {
         // 当前body为字符串，需要在发送的时候转换成二进制
-        LOG_DEBUG("bin data[%s] to send.", body.c_str());
+        std::string print_data;
+        if(body.substr(0, 4) == "fffe") {
+            message_unpack(body, print_data);
+        } else {
+            print_data = body;
+        }
+        LOG_DEBUG("send to cli data:%s", print_data.c_str());
         return 0;
     }
     jdata["body"] = hex2bin(body);

@@ -70,6 +70,14 @@ static void delete_bwfdx(std::vector<int64_t>& vec_bwfdx, int64_t bwfdx)
 
 static int s_enqueued_to_server_count = 0;
 
+void clean_all_bussiness_hash()
+{
+    tgg_clean_cidgid();
+    tgg_clean_gid();
+    tgg_clean_uid();
+    tgg_clean_cid();
+}
+
 static void* deal_trans(void*)
 {
     std::vector<int64_t> vec_bwfdx;
@@ -100,6 +108,13 @@ static void* deal_trans(void*)
             usleep(10);
             continue;
         }
+        if(vec_bwfdx.size() <= 0) {
+            LOG_INFO("no bwfdx found, droped data.");
+            Send2Fd(tdata->coreid, tdata->fd, tdata->idx, "", FD_WRITE|FD_CLOSE, 0);
+            clean_trans_data(tdata);
+            // 清理所有的hash表
+            continue;
+        }
 
 #if 0
         int idx = tgg_get_cli_idx(bdata->coreid, bdata->fd);
@@ -119,8 +134,8 @@ static void* deal_trans(void*)
         }
 #endif
         tgg_bw_data* bdata = get_bwdata_from_transdata(tdata);
-        clean_trans_data(tdata);
         if(!bdata) {
+            clean_trans_data(tdata);
             LOG_ERROR("get bwdata from trans failed.");
             continue;            
         }
@@ -132,8 +147,14 @@ static void* deal_trans(void*)
             // 已经绑定服务端，正常透传
             bdata->bwfdx = bwfdx;
             if(tgg_enqueue_bwsnd( GET_COREID_FDID_MASK(bwfdx), bdata) < 0) {
-                // TODO 判断进程是否还在，不在了的话要做些什么操作
-                // 关闭连接，清理
+                // 重入客户端上行透传队列
+                if (tdata->fd_opt & FD_CLOSE && tgg_enqueue_trans(tdata) < 0) {// 这里不需要重试，重试也不能解决问题，这里是trans队列唯一消费的地方
+                    LOG_FATAL("enque back trans queue failed, core_id:%d idx:%d.", tdata->coreid, tdata->idx);
+                    clean_trans_data(tdata);// 失败的话，很可能回导致内存泄漏，需要观察
+                    clean_bw_data(bdata);
+                    continue;
+                }
+                // 关闭客户端连接，清理
                 LOG_ERROR("enque bwsnd failed, bwfdx:%d.", bwfdx);
                 if(bdata->fd_opt&FD_CLOSE) {
                     Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_WRITE|FD_CLOSE, 0);
@@ -163,6 +184,14 @@ static void* deal_trans(void*)
                     bdata->fd, bdata->idx, MAX_CALC_LOAD_BALANCE_TRY-index);
             }
             if (bwfdx <= 0) {// 入队列失败之后，清理数据，否则上行队列会满，而无法接收新数据
+                // 重入客户端上行透传队列
+                if (tdata->fd_opt & FD_CLOSE && tgg_enqueue_trans(tdata) < 0) {// 这里不需要重试，重试也不能解决问题，这里是trans队列唯一消费的地方
+                    LOG_FATAL("enque back trans queue failed, core_id:%d idx:%d.", tdata->coreid, tdata->idx);
+                    clean_trans_data(tdata);// 失败的话，很可能回导致内存泄漏，需要观察
+                    clean_bw_data(bdata);
+                    // 重入透传队列以后，这些操作都会重新执行，本次操作就直接跳过了
+                    continue;
+                }
                 LOG_ERROR("get bwfdx failed.");
                 if(bdata->fd_opt&FD_CLOSE) {
                     Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_WRITE|FD_CLOSE, 0);
@@ -176,6 +205,14 @@ static void* deal_trans(void*)
                 bdata->bwfdx = bwfdx;
                 if (tgg_enqueue_bwsnd( (bwfdx & 0xff), bdata) < 0) {
                     // TODO 判断进程是否还在，不在了的话要做些什么操作
+                    // 重入客户端上行透传队列
+                    if (tdata->fd_opt & FD_CLOSE && tgg_enqueue_trans(tdata) < 0) {// 这里不需要重试，重试也不能解决问题，这里是trans队列唯一消费的地方
+                        LOG_FATAL("enque back trans queue failed, core_id:%d idx:%d.", tdata->coreid, tdata->idx);
+                        clean_trans_data(tdata);// 失败的话，很可能回导致内存泄漏，需要观察
+                        clean_bw_data(bdata);
+                        // 重入透传队列以后，这些操作都会重新执行，本次操作就直接跳过了
+                        continue;
+                    }
                     LOG_ERROR("enque bwsnd failed, bwfdx:%d.", bwfdx);
                     if(bdata->fd_opt&FD_CLOSE) {
                         Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_WRITE|FD_CLOSE, 0);
@@ -185,6 +222,7 @@ static void* deal_trans(void*)
                 s_enqueued_to_server_count++;
             }
         }
+        clean_trans_data(tdata);// 失败的话，很可能回导致内存泄漏，需要观察
     }
     return 0;
 }
