@@ -63,6 +63,9 @@ int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
         return -1;
     }
     int maxtry = 10;// 入队列可能会失败最多尝试10次
+    if(tdata->fd_opt & FD_CLOSE) {
+        maxtry = 1000;// 关闭命令必须要发送过去，但是又不能造成死循环，所以这里直接把失败尝试次数提高
+    }
     int ret = tgg_enqueue_trans(tdata);
     while (ret < 0 && maxtry > 0 ) {
         NS_MICRO_THREAD::mt_sleep(10);
@@ -180,8 +183,8 @@ static bool tgg_request_valid_check(const HttpRequest &req, std::string& token, 
     std::map<std::string, std::string>::const_iterator ittoken = req.query.find("token");
     std::map<std::string, std::string>::const_iterator itproperties = req.query.find("client_properties");
     if (itproperties == req.query.end() ||
-        req.query.find("authorization") == req.query.end() ||
         ittoken == req.query.end()) {
+        LOG_ERROR("token[%s] or properties[%s] can be empty.", ittoken->second.c_str(), itproperties->second.c_str());
         return false;
     }
     // token 是否能解析出来

@@ -37,17 +37,20 @@ int tgg_del_fd4gid(const char* gid, int64_t fdidcid);
 int tgg_get_fdsbygid(const char* gid, std::list<int64_t>& lst_fd);
 // 获取所有在线的分组
 int tgg_get_allonlinegids(std::list<std::string>& lst_gid);
+void tgg_clean_gid();
 
 /// 增删查  uid  hash<uid, list<fdid> >
 int tgg_add_uid(const char* uid, int64_t fdidcid);
 int tgg_del_uid(const char* uid);
 int tgg_del_fd4uid(const char* uid, int64_t fdidcid);
+void tgg_clean_uid();
 // 返回格式  list<string(fdid:uid)>
 int tgg_get_fdsbyuid(const char* uid, std::list<int64_t>& lst_fd);
 
 /// 增删查  cid hash<cid, fdid>
 int tgg_add_cid(int64_t cid, int64_t fdidcid);
 int tgg_del_cid(int64_t cid);
+void tgg_clean_cid();
 int64_t tgg_get_fdbycid(int64_t cid);
 int tgg_get_allonlinecids(std::list<int64_t>& lst_cids);
 int tgg_get_allfds(std::list<int64_t>& lst_fds);
@@ -56,6 +59,7 @@ int tgg_get_allfds(std::list<int64_t>& lst_fds);
 /// 增删查  cid->gid映射 hash<cid, list<gid> >
 int tgg_add_cidgid(int64_t cid, const char* gid);
 int tgg_del_cid_cidgid(int64_t cid);
+void tgg_clean_cidgid();
 int tgg_get_gidsbycid(int64_t cid, std::list<std::string>& lst_gid);
 // 删除指定cid下的gid   单个用户退出群组使用
 int tgg_del_gid_cidgid(int64_t cid, const char* gid);
