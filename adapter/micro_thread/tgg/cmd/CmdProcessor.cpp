@@ -930,7 +930,8 @@ static int json_parse_body(unsigned char flag, nlohmann::json& jdata)//const std
         // 当前body为字符串，需要在发送的时候转换成二进制
         std::string print_data;
         if(body.substr(0, 4) == "fffe") {
-            message_unpack(body, print_data);
+            std::string bin_data = hex2bin(body);
+            message_unpack(bin_data, print_data);
         } else {
             print_data = body;
         }
