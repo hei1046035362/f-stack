@@ -1017,6 +1017,10 @@ void tgg_iter_del_bwfdx(int prc_id)
 
     // 阶段2：批量删除并同步RCU
     for (auto del_key : keys_to_delete) {
+        // 先删除对应的workerkey
+        std::string workerkey = tgg_get_bwfdx_workerkey(prc_id, del_key >> 8);
+        tgg_del_bwwkkey(workerkey.c_str());
+
         int pos = rte_hash_del_key_with_hash(g_bwfdx_hash, &del_key, rte_hash_crc(&del_key, sizeof(int64_t), 0));
         // int pos = rte_hash_del_key(g_bwfdx_hash, &del_key);
         if (pos >= 0) {

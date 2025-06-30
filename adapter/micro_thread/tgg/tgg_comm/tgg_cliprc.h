@@ -54,7 +54,7 @@ private:
 void tgg_process_read(int lcore_idx);
 
 // 透传处理线程
-int init_bwtrans();
+void init_bwtrans();
 void uninit_bwtrans();
 
 // // 线程函数，这里简单打印一个线程编号

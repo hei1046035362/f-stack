@@ -36,7 +36,7 @@ void tgg_process_read(int lcore_idx)
 
 
 // extern int g_run;
-static  pthread_t s_bwtrans_thread;
+// static  pthread_t s_bwtrans_thread;
 #include <unistd.h>
 
 extern struct rte_mempool* g_mempool_bwrcv;
@@ -81,7 +81,9 @@ void clean_all_bussiness_hash()
 static void* deal_trans(void*)
 {
     std::vector<int64_t> vec_bwfdx;
-    tgg_getall_bwfdx(vec_bwfdx);
+    vec_bwfdx.reserve(5000);// 防止频繁分配赋值内存，预先分配5000个
+    tgg_getall_bwfdx(vec_bwfdx);// 一开始就获取所有的在线的bwfdx，防止因重启而丢失数据
+    bool clean_hash_flag = false;// 是否要清理所有的业务hash表
     while(g_run) {
         // 取可用的bw
         tgg_bwfdx_data* bwfdxdata = NULL;
@@ -102,6 +104,16 @@ static void* deal_trans(void*)
             }
             dpdk_rte_free(bwfdxdata);
         }
+        // 当没有bw连接时，清理所有的业务型(cid, uid, gid, cidgid)hash表
+        if(vec_bwfdx.size() <= 0) {// 防止gwbwprc内存泄漏,没有bwfdx时，证明客户端连接都失效的，可以放心清理，然后让其重连
+            if(clean_hash_flag) {
+                clean_all_bussiness_hash();
+                clean_hash_flag = false;
+            }
+        } else if(!clean_hash_flag) {
+            clean_hash_flag = true;
+        }
+
         // 取数据
         tgg_trans_data* tdata = NULL;
         if (tgg_dequeue_trans(&tdata) < 0) {
@@ -109,13 +121,12 @@ static void* deal_trans(void*)
             continue;
         }
         if(vec_bwfdx.size() <= 0) {
+            // 防止满队列，死锁 没有bwfdx时，所有连接全部关闭，所有数据全部丢弃
             LOG_INFO("no bwfdx found, droped data.");
             Send2Fd(tdata->coreid, tdata->fd, tdata->idx, "", FD_WRITE|FD_CLOSE, 0);
             clean_trans_data(tdata);
-            // 清理所有的hash表
             continue;
         }
-
 #if 0
         int idx = tgg_get_cli_idx(bdata->coreid, bdata->fd);
         if(bdata->data_len > 3 && !strncmp((char*)bdata->data, "GET", 3)) {// GET请求消息
@@ -227,17 +238,18 @@ static void* deal_trans(void*)
     return 0;
 }
 
-int init_bwtrans()
+void init_bwtrans()
 {
     LOG_INFO("Trans thread started.");
-    return pthread_create(&s_bwtrans_thread, NULL, &deal_trans, NULL);
+    // return pthread_create(&s_bwtrans_thread, NULL, &deal_trans, NULL);
+    deal_trans(NULL);
 }
 
 void uninit_bwtrans()
 {
-    void* retval = NULL;
-    if (pthread_join(s_bwtrans_thread, &retval) < 0) {
-        LOG_ERROR("join thread failed.");
-    }
+    // void* retval = NULL;
+    // if (pthread_join(s_bwtrans_thread, &retval) < 0) {
+    //     LOG_ERROR("join thread failed.");
+    // }
     LOG_WARNING("Trans thread ended, enqueue count:%d.", s_enqueued_to_server_count);
 }
