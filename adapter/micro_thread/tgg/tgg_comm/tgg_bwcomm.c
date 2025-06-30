@@ -18,6 +18,7 @@
 #include "tgg_comm/tgg_bw_cache.h"
 #include "tgg_comm/tgg_common.h"
 #include "comm/log.hpp"
+#include "comm/common.hpp"
 
 #ifndef MAX_FD_COUNT
 #define MAX_FD_COUNT 100000
@@ -34,7 +35,7 @@ int get_connection_info(int fd, char* ip_str, unsigned int* ip, unsigned short* 
      // 获取IP地址信息
      struct sockaddr_in remote_addr;
      socklen_t addrlen = sizeof(remote_addr);
-     if (getsockname(fd, (struct sockaddr *)&remote_addr, &addrlen) == -1) {
+     if (getpeername(fd, (struct sockaddr *)&remote_addr, &addrlen) == -1) {
          perror("getsockname");
          // close(fd);
          return -1;
@@ -467,7 +468,7 @@ int message_unpack(const std::string& packedData, std::string& result)
     jdata["seq"] = seq;
     jdata["version"] = version;
     jdata["compressFormat"] = compressFormat;
-    jdata["body"] = body;
+    jdata["body"] = bin2hex(body);
     result = jdata.dump();
 
     return 0;

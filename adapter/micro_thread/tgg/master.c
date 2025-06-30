@@ -322,8 +322,8 @@ static void tgg_recv(void *arg)
 	}
 	LOG_DEBUG("wait client[%d] close...", cli_fd);
 	// 等待连接在缓存中的数据被消费完才能关闭
-	int index = 1000;// TODO 防止因process宕机丢包导致无法停止的问题，10s这个时间待商榷
-	while(tgg_get_cli_idx(g_core_id, cli_fd) != TGG_FD_CLOSING && index > 0) {
+	int index = 1000*60;// 最长等待1分钟，关闭包会在trans队列中可能多次enqueue back，尽可能让数据包走正常流程关闭
+	while(tgg_get_cli_idx(g_core_id, cli_fd) != TGG_FD_CLOSING && index > 0 && g_run_status) {
 	    mt_sleep(10);
 	    index--;
 	}
@@ -362,7 +362,7 @@ static void tgg_do_send(tgg_write_data* wdata)
 					// 主动断开连接
 					LOG_INFO("closing connection affected.");
 				} else if (ret < 0) {
-					LOG_ERROR("send data to client fd[%d] idx[%d] error, ret[%d]", cli_fd, wdata->idx, ret);
+					LOG_ERROR("send data to client fd[%d] idx[%d] error, ret[%d]", cli_fd, idx, ret);
 				} else {
 					g_tgg_stats.en_read_stats.enqueue++;
 				}

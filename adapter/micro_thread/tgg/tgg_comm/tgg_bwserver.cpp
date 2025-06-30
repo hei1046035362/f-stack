@@ -336,7 +336,7 @@ static int write_data()
         if(bdata->data_len > 0) {
             sdata = std::move(std::string((char*)bdata->data, bdata->data_len));
             std::string print_data;
-            if(bdata->data_len > 4 && sdata.substr(0, 4) == "fffe") {
+            if(bdata->data_len > 4 && *((unsigned short*)bdata->data) == 0xfeff) {
                 message_unpack(sdata, print_data);
             } else {
                 print_data = sdata;
@@ -411,7 +411,7 @@ void *read_routine( void *arg )
             close(fd);
             return 0;
         }
-        LOG_INFO("accept new connection ip[%s], port[%u].", ip_str, port);
+        LOG_INFO("accept new connection ip[%s], port[%u].", ip_str, ntohs(port));
         char recv_buffer[ MAX_PACKET_SIZE ];
         // std::vector<char> recv_buffer;
         unsigned int pos = 0;
@@ -458,7 +458,7 @@ void *read_routine( void *arg )
                         .data_len = pack_len,
                         .data = recv_buffer + parsed_pos,
                         .peer_ip = ip,// 下行的ip 端口 暂时没有用到
-                        .peer_port = port,
+                        .peer_port = ntohs(port),
                         // .cid = 0// 下行没有cid
                     };
                     tgg_process_bwrcv_data(&bwdata);
@@ -482,10 +482,10 @@ void *read_routine( void *arg )
             {
                 continue;
             }
-            LOG_ERROR("bw[ip:%s,port%d] is closing, ret:%d.", ip_str, ntohs(port), ret);
+            LOG_WARNING("bw[ip:%s,port:%d] is closing, ret:%d, error:[%d]%s.", ip_str, ntohs(port), ret, errno, strerror(errno));
             tgg_close_bw_session(g_prc_id, fd);
             close( fd );
-            LOG_ERROR("bw[ip:%s,port%d] closed.", ip_str, ntohs(port));
+            LOG_WARNING("bw[ip:%s,port:%d] closed.", ip_str, ntohs(port));
             break;
         }
 
