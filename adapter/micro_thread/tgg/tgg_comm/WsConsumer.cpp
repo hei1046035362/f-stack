@@ -90,10 +90,11 @@ int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
 static int s_enqueued_to_server_count = 0;
 int WsConsumer::_Send2Server(const std::string& data, int fd_opt)
 {
-    if(tgg_get_bwfdx_count() <= 0) {
-        LOG_ERROR("Send data to server Failed: no bw found.");
-        return NO_BW_AVALIABLE;
-    }
+    // 在透传中判断，这里不需要去管业务侧是否在线，只管上传
+    // if(tgg_get_bwfdx_count() <= 0) {
+    //     LOG_ERROR("Send data to server Failed: no bw found.");
+    //     return NO_BW_AVALIABLE;
+    // }
     if (enqueue_data_trans(this->core_id, this->fd, data, fd_opt) < 0) {// 函数内部会循环尝试发送10次
         LOG_ERROR("Send data to server Failed,[core:%d][fd:%d] current count:%d.",
          core_id, fd, s_enqueued_to_server_count);
@@ -293,9 +294,10 @@ void WsConsumer::OnPing(const std::string& response)
 {
     std::string result = std::move(EncodeWebsocketMessage(PONG_FRAME, response));
     OnSend(result, FD_WRITE);
+    // 暂时只响应，不主动发送，节省流量
     // 不单独开线程去发送ping了，收到ping之后发送完pong后即刻发送ping，在Onpong中检测是否超时
-    std::string ping = std::move(EncodeWebsocketMessage(PING_FRAME, response));
-    OnSend(ping, FD_WRITE);
+    // std::string ping = std::move(EncodeWebsocketMessage(PING_FRAME, response));
+    // OnSend(ping, FD_WRITE);
 }
 
 void WsConsumer::OnPong(const std::string& response)
