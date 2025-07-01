@@ -22,16 +22,16 @@ typedef struct  st_lock_cache {
 
 } tgg_lock;
 
-rte_rwlock_t* get_bwfdxhsh_lock();
-rte_rwlock_t* get_bwwkkeyhsh_lock();
-rte_rwlock_t* get_idxhsh_lock();
-rte_rwlock_t* get_gidfd_lock();
-rte_rwlock_t* get_uidfd_lock();
-rte_rwlock_t* get_cidfd_lock();
-rte_rwlock_t* get_cidgid_lock();
-rte_spinlock_t* get_cli_lock();
-rte_spinlock_t* get_bwfdx_lock();
-rte_atomic32_t* get_idx_lock();
-rte_spinlock_t* get_bwprc_lock();
+rte_rwlock_t* get_bwfdxhsh_lock();// 暂未使用，后续要根据联调、压测结果决定是否会用到  getallkey和add、del会否冲突，待定
+rte_rwlock_t* get_bwwkkeyhsh_lock();// 未使用
+rte_rwlock_t* get_idxhsh_lock();// 未使用
+rte_rwlock_t* get_gidfd_lock();// 未使用
+rte_rwlock_t* get_uidfd_lock();// 未使用
+rte_rwlock_t* get_cidfd_lock();// 未使用
+rte_rwlock_t* get_cidgid_lock();// 未使用
+rte_spinlock_t* get_cli_lock();// 暂未使用，后续要根据联调、压测结果决定是否会用到
+rte_spinlock_t* get_bwfdx_lock();// 未使用
+rte_atomic32_t* get_idx_lock();// 未使用
+rte_spinlock_t* get_bwprc_lock();// 有用
 
 #endif // _TGG_LOCK_STRUCT_H_

@@ -38,51 +38,9 @@ void iter_del_idlist(void* iddata)
     iter_del_list<tgg_list_id>((tgg_list_id*)iddata);
 }
 
-#if 0
-// key为 const char*
-// 针对key-value的hash
-static int tgg_hash_add_key_value(const rte_hash* hash, const char* key, int fdid)
-{
-    if (strlen(key) != 20) {
-        RTE_LOG(ERR, USER1, "[%s][%d]add key failed,check if key[%s] is correct.\n", __FILE__, __LINE__, key);
-        return -EINVAL; 
-    }
-    if (!key || strlen(key) <= 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d]add key[%s] failed, invalid data.\n", __FILE__, __LINE__, key);
-        return -EINVAL; 
-    }
-    int* value = NULL;
-    int ret = rte_hash_lookup_with_hash(hash, key, rte_hash_crc(key, strlen(key), 0));
-    if (ret < 0) {
-        value = (int*)dpdk_rte_malloc(sizeof(int));
-        if(!value) {
-            RTE_LOG(ERR, USER1, "[%s][%d]add key[%s] failed:%d.\n", __FILE__, __LINE__, key, ret);
-            return -1;
-        }
-        *value = fdid;
-        int ret = rte_hash_add_key_with_hash_data(hash, key, rte_hash_crc(key, strlen(key), 0), value);
-        if (ret < 0) {
-            RTE_LOG(ERR, USER1, "[%s][%d]add key[%s] failed:%d.\n", __FILE__, __LINE__, key, ret);
-            dpdk_rte_free(value);
-            return ret;
-        }
-    } else {
-        ret = rte_hash_lookup_with_hash_data(hash, key, rte_hash_crc(key, strlen(key), 0), (void**)&value);
-        if (ret < 0) {
-            RTE_LOG(ERR, USER1, "[%s][%d]Get key[%s] data failed:%d\n", __FILE__, __LINE__, key, ret);
-            return -1;
-        }
-        *value = fdid;
-    }
-
-    return 0;
-}
-#endif
-
 // 针对key-list的hash
 static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int key_len, int64_t fdidcid)
 {
-    // int ret = rte_hash_lookup_with_hash(hash, key, rte_hash_crc(key, key_len, 0));
     tgg_fd_list* pdata = NULL;
     int ret = rte_hash_lookup_with_hash_data(hash, key, rte_hash_crc(key, key_len, 0), (void**)&pdata);
     if (ret < 0 || !pdata) {// 首次插入
@@ -108,12 +66,6 @@ static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int 
             return ret;
         }
     } else {// 已存在节点
-        // TODO 要加进程锁
-        // tgg_fd_list* value = NULL;
-        // if (ret < 0) {
-        //     LOG_ERROR("Get key[%s] data failed:%d", key, ret);
-        //     return -1;
-        // }
         WriteLock lock(&(pdata->lock));
         tgg_fd_list* fddata = pdata->next;
         while (fddata) {
@@ -138,11 +90,6 @@ static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int 
 // 获取hash value/list
 static void* tgg_hash_get_value(const rte_hash* hash, const char* key, int key_len)
 {
-    // int ret = rte_hash_lookup_with_hash(hash, key, rte_hash_crc(key, key_len, 0));
-    // if (ret < 0) {
-    //     RTE_LOG(ERR, USER1, "[%s][%d]Get key[%s] data failed,hash key not exist:%d\n", __FILE__, __LINE__, key, ret);
-    //     return NULL;
-    // }
     void* pdata = NULL;
     int ret = rte_hash_lookup_with_hash_data(hash, key, rte_hash_crc(key, key_len, 0), &pdata);
     if (ret < 0) {
@@ -181,11 +128,6 @@ static int tgg_hash_del_key(const rte_hash* hash, rte_rcu_qsbr *rcu, const char*
 // 删除hash value为list中的单个元素,list节点中的值为fd和idx两个元素
 static int tgg_hash_del_fdlst4key(const rte_hash* hash, rte_rcu_qsbr *rcu, const char* key, int key_len, int64_t fdidcid)
 {
-    // int ret = rte_hash_lookup_with_hash(hash, key, rte_hash_crc(key, key_len, 0));
-    // if (ret < 0) {
-    //     RTE_LOG(ERR, USER1, "[%s][%d]Get key[%s] data failed,hash key not exist:%d\n", __FILE__, __LINE__, key, ret);
-    //     return -1;
-    // }
     tgg_fd_list* value = NULL;
     int ret = rte_hash_lookup_with_hash_data(hash, key, rte_hash_crc(key, key_len, 0), (void**)&value);
     if (ret < 0 || !value) {
@@ -255,11 +197,6 @@ static int tgg_hash_get_allkeys(const rte_hash* hash, std::list<std::string>& ls
 // 获取hash value/list
 static void* tgg_hash_get_intkey_value(const rte_hash* hash, int64_t key)
 {
-    // int ret = rte_hash_lookup_with_hash(hash, &key, rte_hash_crc(&key, sizeof(int), 0));
-    // if (ret < 0) {
-    //     LOG_DEBUG("Get key[%d] data failed,hash key not exist:%d", key, ret);
-    //     return NULL;
-    // }
     void* pdata = NULL;
     int ret = rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(int64_t), 0), &pdata);
     if (ret < 0) {
@@ -290,7 +227,7 @@ static int tgg_hash_del_intkey(const rte_hash* hash, rte_rcu_qsbr *rcu, int64_t 
         fp((void*)pdata);
     } else {
         LOG_ERROR("Del key[%d] data failed:%d", key, ret);
-        return -EINVAL;
+        return ret;
     }
     return 0;
 }
@@ -298,11 +235,6 @@ static int tgg_hash_del_intkey(const rte_hash* hash, rte_rcu_qsbr *rcu, int64_t 
 // 删除hash value为list中的单个元素,list节点中的值为char[]
 static int tgg_hash_del_idlst4intkey(const rte_hash* hash, rte_rcu_qsbr *rcu, int64_t key, const char* id)
 {
-    // int ret = rte_hash_lookup_with_hash(hash, &key, rte_hash_crc(&key, sizeof(int), 0));
-    // if (ret < 0) {
-    //     LOG_ERROR("Get key[%d] data failed,hash key not exist:%d", key, ret);
-    //     return -1;
-    // }
     tgg_list_id* value = NULL;
     int ret = rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(int64_t), 0), (void**)&value);
     if (ret < 0) {
@@ -439,13 +371,11 @@ int tgg_del_fd4gid(const char* gid, int64_t fdidcid)
 {
     LOG_DEBUG("del fdidcid[%lld] for gid[%s].", fdidcid, gid);
     APROPRIAT_HASH_KEY(gid, TGG_GID_LEN);
-    // WriteLock lock(get_gidfd_lock());
     return tgg_hash_del_fdlst4key(g_gid_hash, g_gid_rcu, _key, TGG_GID_LEN, fdidcid);
 }
 
 int tgg_get_allonlinegids(std::list<std::string>& lst_gid)
 {
-    // WriteLock lock(get_gidfd_lock());
     return tgg_hash_get_allkeys(g_gid_hash, lst_gid);
 }
 
@@ -454,7 +384,6 @@ int tgg_add_uid(const char* uid, int64_t fdidcid)
 {
     LOG_DEBUG("add uid[%s] fdidcid[%lld].", uid, fdidcid);
     APROPRIAT_HASH_KEY(uid, TGG_UID_LEN);
-    // WriteLock lock(get_uidfd_lock());
     return tgg_hash_add_keywithfdlst(g_uid_hash, _key, TGG_UID_LEN, fdidcid);
 }
 
@@ -462,7 +391,6 @@ int tgg_del_uid(const char* uid)
 {
     LOG_DEBUG("iter del fdidcid for uid[%s].", uid);
     APROPRIAT_HASH_KEY(uid, TGG_UID_LEN);
-    // WriteLock lock(get_uidfd_lock());
     return tgg_hash_del_key(g_uid_hash, g_uid_rcu, _key, TGG_UID_LEN, iter_del_fdlist);
 }
 
@@ -526,7 +454,6 @@ int tgg_get_fdsbyuid(const char* uid, std::list<int64_t>& lst_fd)
 int tgg_add_cid(int64_t cid, int64_t fdidcid)
 {
     LOG_DEBUG("add cid[%d] fdidcid[%lld].", cid, fdidcid);
-    // WriteLock lock(get_cidfd_lock());
     int64_t* value = (int64_t*)dpdk_rte_malloc(sizeof(int64_t));
     if(!value) {
         LOG_ERROR("[%s][%d]add key[%d] failed.", cid);
@@ -547,7 +474,6 @@ static void free_ciddata(void* data)
 int tgg_del_cid(int64_t cid)
 {
     LOG_DEBUG("del fdidcid for cid[%d].", cid);
-    // WriteLock lock(get_cidfd_lock());
     return tgg_hash_del_intkey(g_cid_hash, g_cid_rcu, cid, free_ciddata);
 }
 
@@ -584,7 +510,6 @@ void tgg_clean_cid()
 
 int64_t tgg_get_fdbycid(int64_t cid)
 {
-    // ReadLock lock(get_cidfd_lock());
     int64_t* value = (int64_t*)tgg_hash_get_intkey_value(g_cid_hash, cid);
     if(!value) {
         return -1;
@@ -594,39 +519,8 @@ int64_t tgg_get_fdbycid(int64_t cid)
 
 int tgg_get_allonlinecids(std::list<int64_t>& lst_cids)
 {
-    // WriteLock lock(get_cidfd_lock());
     return tgg_hash_get_all_intkeys(g_cid_hash, lst_cids);
 }
-
-// // 删除某个进程的所有pid，单个进程异常退出时调用
-// void tgg_clean_allcids_bypid(int coreid)
-// {
-//     std::list<int> keys_to_delete; // 预存待删键
-//     int key_count = 0;
-
-//     // 阶段1：遍历并标记待删键
-//     uint32_t iter = 0;
-//     int *key, *value;
-//     while (rte_hash_iterate(g_cid_hash, (const void**)&key, (void**)&value, &iter) >= 0) {
-//         if ((*key & 0xFF) == prc_id) {
-//             keys_to_delete.push_back(*key);
-//             // if (key_count >= 1024) break; // 防溢出
-//         }
-//     }
-
-//     // 阶段2：批量删除并同步RCU
-//     for (auto del_key : keys_to_delete) {
-//         int pos = rte_hash_del_key(g_bwfdx_hash, &del_key);
-//         if (pos >= 0) {
-//             rte_hash_free_key_with_position(g_bwfdx_hash, pos); // 标记释放位置
-//             rte_rcu_qsbr_synchronize(g_bwfdx_rcu, RTE_QSBR_THRID_INVALID);// 等待所有读者退出
-//             free_ciddata(value);
-//         } else {
-//             LOG_ERROR("delete key[%d] error:%d.", del_key, pos);
-//         }
-//     }
-//     return ;
-// }
 
 int tgg_get_allfds(std::list<int64_t>& lst_fds)
 {
@@ -814,7 +708,6 @@ void tgg_del_gid_cidgid(const char* gid)
 void tgg_iterprint_gidsbyuid(const char* uid)
 {
     std::list<std::string> lst_fd;
-    // ReadLock lock(get_cidgid_lock());
     char* key = NULL;
     tgg_gid_list* value = NULL;
     uint32_t next = 0;
@@ -849,18 +742,10 @@ void tgg_iterprint_gidsbyuid(const char* uid)
 
 int tgg_add_idx(int coreid, int64_t idx)
 {
-    // ReadLock lock(get_idxhsh_lock());
-    // 只添加key  且不需要value时，不需要先查找
-    // int ret = rte_hash_lookup_with_hash(g_idx_hash, &idx, rte_hash_crc(&idx, sizeof(int), 0));
-    // if (ret < 0) {// 首次插入
-        return rte_hash_add_key_with_hash(g_idx_hash[coreid], &idx, rte_hash_crc(&idx, sizeof(int64_t), 0));
-    // }
-    // RTE_LOG(ERR, USER1, "[%s][%d] idx: %d already exist.\n", __FILE__, __LINE__, idx);
-    // return -1;
+    return rte_hash_add_key_with_hash(g_idx_hash[coreid], &idx, rte_hash_crc(&idx, sizeof(int64_t), 0));
 }
 int tgg_del_idx(int coreid, int64_t idx)
 {
-    // ReadLock lock(get_idxhsh_lock());
     int ret = rte_hash_del_key_with_hash(g_idx_hash[coreid], &idx, rte_hash_crc(&idx, sizeof(int64_t), 0));
     if (ret >= 0) {
         // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
@@ -886,20 +771,13 @@ int tgg_add_bwfdx(int64_t bwfdx)
         LOG_ERROR("invlude bwfdx[%d].", bwfdx);
         return -1;
     }
-    // ReadLock lock(get_bwfdxhsh_lock());
-    // TODO  不查询直接插入，根据返回码判断插入成功、失败、已存在等
-    // int ret = rte_hash_lookup_with_hash(g_bwfdx_hash, &bwfdx, rte_hash_crc(&bwfdx, sizeof(int), 0));
-    // if (ret < 0) {// 首次插入
-    WriteLock lock(get_bwfdxhsh_lock());
+    // WriteLock lock(get_bwfdxhsh_lock());
     return rte_hash_add_key_with_hash(g_bwfdx_hash, &bwfdx, rte_hash_crc(&bwfdx, sizeof(int64_t), 0));
-    // }
-    // RTE_LOG(ERR, USER1, "[%s][%d] bwfdx: %d already exist.\n", __FILE__, __LINE__, bwfdx);
-    // return -1;
 }
 
 int tgg_del_bwfdx(int64_t bwfdx)
 {
-    WriteLock lock(get_bwfdxhsh_lock());
+    // WriteLock lock(get_bwfdxhsh_lock());
     int ret = rte_hash_del_key_with_hash(g_bwfdx_hash, &bwfdx, rte_hash_crc(&bwfdx, sizeof(int64_t), 0));
     if (ret < 0) {
         LOG_ERROR("Del bwfdx[%d] data failed:%d.", bwfdx, ret);
@@ -920,13 +798,11 @@ int tgg_check_bwfdx_exist(int64_t bwfdx)
 
 int tgg_get_bwfdx_count()
 {
-    // ReadLock lock(get_bwfdxhsh_lock());
     return rte_hash_count(g_bwfdx_hash);
 }
 
 int tgg_get_bwfdx_bypos(int pos)
 {
-    // ReadLock lock(get_bwfdxhsh_lock());
     int64_t* key = NULL;
     if (rte_hash_get_key_with_position(g_bwfdx_hash, pos, (void**)(&key)) < 0)
         return -1;
@@ -940,7 +816,7 @@ void tgg_getall_bwfdx(std::vector<int64_t>& vec_bwfdx)
     uint32_t index = 0;
     int ret;
     vec_bwfdx.clear();
-    ReadLock lock(get_bwfdxhsh_lock());
+    // ReadLock lock(get_bwfdxhsh_lock());
     while ((ret = rte_hash_iterate(g_bwfdx_hash, (const void**)&key, (void**)&value, &index)) >= 0) {
         vec_bwfdx.push_back(*(int64_t *)key);
     }
@@ -955,51 +831,6 @@ int tgg_get_load_balance(std::vector<int64_t>& vec_bwfdx)
     }
     LOG_ERROR("Get load balance failed, no bwfdx found.");
     return -1;
-    #if 0
-    // 假设负载是一个简单的整数，表示负载量
-    int min_load = 0, cur_load = 0;
-    int64_t bwfdx = -1, cur_bwfdx = -1;
-    void *key;
-    void *value;
-    uint32_t index = 0;
-    int ret;
-    // ReadLock lock(get_bwfdxhsh_lock());
-    // 遍历哈希表，找到负载最小的 fd
-    ret = rte_hash_iterate(g_bwfdx_hash, (const void**)&key, (void**)&value, &index);
-    if (ret < 0) {
-        if (ret == -ENOENT) {
-            // 哈希表为空，返回错误或采取相应措施
-            LOG_ERROR("Hash table is empty.");
-            return -1;
-        } else {
-            // 其他错误
-            LOG_ERROR("rte_hash_iterate");
-            return -1;
-        }
-    }
-    bwfdx = *(int64_t *)key;
-    min_load = tgg_get_bwfdx_load(bwfdx);
-
-    while ((ret = rte_hash_iterate(g_bwfdx_hash, (const void**)&key, (void**)&value, &index)) >= 0) {
-        cur_bwfdx = *(int64_t *)key;
-        cur_load = tgg_get_bwfdx_load(cur_bwfdx);
-        if (cur_load < min_load) {
-            bwfdx = cur_bwfdx;
-            min_load = cur_load;
-        }
-    }
-
-    // 找到最小负载的 fd 后，可以对其进行相应操作，例如将新的请求发送到该 fd
-    if (bwfdx != -1) {
-        // 这里不更新负载，外面可能会失败
-        LOG_INFO("Assigning new request to fd %d with load %d", bwfdx, min_load);
-        return bwfdx;
-    } else {
-        LOG_ERROR("No valid fd found, ret:%d.", ret);
-        return -1;
-    }
-    #endif
-
 }
 
 void tgg_iter_del_bwfdx(int prc_id)
@@ -1022,13 +853,10 @@ void tgg_iter_del_bwfdx(int prc_id)
         tgg_del_bwwkkey(workerkey.c_str());
 
         int pos = rte_hash_del_key_with_hash(g_bwfdx_hash, &del_key, rte_hash_crc(&del_key, sizeof(int64_t), 0));
-        // int pos = rte_hash_del_key(g_bwfdx_hash, &del_key);
         if (pos >= 0) {
-        //     LOG_INFO("delete bwfdx[%d].", del_key);
             if(rte_hash_free_key_with_position(g_bwfdx_hash, pos) < 0 ) { // 标记释放位置
                 LOG_ERROR("remove key[%d] pos:%d failed.", del_key, pos);
             }
-        //     rte_rcu_qsbr_synchronize(g_bwfdx_rcu, RTE_QSBR_THRID_INVALID);// 等待所有读者退出
             LOG_INFO("delete bwfdx[%d] for prc_id[%d].", del_key, prc_id);
         } else {
             LOG_ERROR("delete key[%d] error:%d.", del_key, pos);
@@ -1040,21 +868,13 @@ int tgg_add_bwwkkey(const char* bwwkkey)
 {
     LOG_DEBUG("add bw worker key[%s].", bwwkkey);
     APROPRIAT_HASH_KEY(bwwkkey, TGG_BWWKKEY_LEN);
-    // ReadLock lock(get_bwwkkeyhsh_lock());
-    // TODO  不查询直接插入，根据返回码判断插入成功、失败、已存在等
-    // int ret = rte_hash_lookup_with_hash(g_bwfdx_hash, &bwfdx, rte_hash_crc(&bwfdx, sizeof(int), 0));
-    // if (ret < 0) {// 首次插入
-        return rte_hash_add_key_with_hash(g_bwwkkey_hash, _key, rte_hash_crc(_key, TGG_BWWKKEY_LEN, 0));
-    // }
-    // RTE_LOG(ERR, USER1, "[%s][%d] bwfdx: %d already exist.\n", __FILE__, __LINE__, bwfdx);
-    // return -1;
+    return rte_hash_add_key_with_hash(g_bwwkkey_hash, _key, rte_hash_crc(_key, TGG_BWWKKEY_LEN, 0));
 }
 
 int tgg_del_bwwkkey(const char* bwwkkey)
 {
     LOG_DEBUG("del bw worker key[%s].", bwwkkey);
     APROPRIAT_HASH_KEY(bwwkkey, TGG_BWWKKEY_LEN);
-    // ReadLock lock(get_bwwkkeyhsh_lock());
     int ret = rte_hash_del_key_with_hash(g_bwwkkey_hash, _key, rte_hash_crc(_key, TGG_BWWKKEY_LEN, 0));
     if (ret >= 0) {
         // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
@@ -1074,6 +894,5 @@ int tgg_del_bwwkkey(const char* bwwkkey)
 int tgg_check_bwwkkey_exist(const char* bwwkkey)
 {
     APROPRIAT_HASH_KEY(bwwkkey, TGG_BWWKKEY_LEN);
-    // ReadLock lock(get_bwwkkeyhsh_lock());
     return rte_hash_lookup_with_hash(g_bwwkkey_hash, _key, rte_hash_crc(_key, TGG_BWWKKEY_LEN, 0));
 }

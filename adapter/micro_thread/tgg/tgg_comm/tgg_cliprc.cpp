@@ -7,36 +7,10 @@
 #include "tgg_comm/tgg_bw_cache.h"
 #include "comm/common.hpp"
 #include "tgg_transport.h"
+#include <vector>
 #include <chrono>
-extern struct rte_mempool* g_mempool_read;
 extern int g_run;
 
-
-void tgg_process_read(int lcore_idx)
-{
-    while (g_run) {
-        tgg_read_data* rdata = NULL;
-        if (tgg_dequeue_cliprc(lcore_idx, &rdata) < 0) {
-            // 队列空
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            //usleep(10);
-            continue;
-        }
-        if (!rdata) {
-            continue;
-        }
-
-        WsConsumer cons;
-        cons.ConsumerData(rdata);
-
-        clean_read_data(rdata);
-    }
-    LOG_INFO("cliprc thread exit, handle lcore_idx:%d", lcore_idx);
-}
-
-
-// extern int g_run;
-// static  pthread_t s_bwtrans_thread;
 #include <unistd.h>
 
 extern struct rte_mempool* g_mempool_bwrcv;
@@ -127,23 +101,7 @@ static void* deal_trans(void*)
             clean_trans_data(tdata);
             continue;
         }
-#if 0
-        int idx = tgg_get_cli_idx(bdata->coreid, bdata->fd);
-        if(bdata->data_len > 3 && !strncmp((char*)bdata->data, "GET", 3)) {// GET请求消息
-            LOG_DEBUG("fd:%d idx:%d trans data:%s.", bdata->fd, 
-                idx, (char*)(bdata->data));
-        } else {// 其他消息
-            if(bdata->data_len == 0) {
-                LOG_DEBUG("fd:%d idx:%d trans without data.", bdata->fd, idx);
-            } else {
-                std::string hex = bin2hex(std::string((char*)(bdata->data), bdata->data_len));
-                // if(!strncmp(hex.c_str(), "fffe", 4)) {
-                    
-                // }
-                LOG_DEBUG("fd:%d idx:%d trans data:%s.", bdata->fd, idx, hex.c_str());
-            }
-        }
-#endif
+
         tgg_bw_data* bdata = get_bwdata_from_transdata(tdata);
         if(!bdata) {
             clean_trans_data(tdata);
@@ -241,15 +199,10 @@ static void* deal_trans(void*)
 void init_bwtrans()
 {
     LOG_INFO("Trans thread started.");
-    // return pthread_create(&s_bwtrans_thread, NULL, &deal_trans, NULL);
     deal_trans(NULL);
 }
 
 void uninit_bwtrans()
 {
-    // void* retval = NULL;
-    // if (pthread_join(s_bwtrans_thread, &retval) < 0) {
-    //     LOG_ERROR("join thread failed.");
-    // }
     LOG_WARNING("Trans thread ended, enqueue count:%d.", s_enqueued_to_server_count);
 }
