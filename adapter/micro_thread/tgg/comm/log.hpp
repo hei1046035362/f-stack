@@ -38,6 +38,7 @@ public:
     // 日志记录函数（支持可变参数）
     void log(LogLevel level, const char* file, int line, const char* format, ...);
 
+    LogLevel getloglevel() {return currentLevel_;}
 private:
     AsyncLogger() = default;
     ~AsyncLogger() {

@@ -333,10 +333,6 @@ Websocket::_GetWsFrame(unsigned char *in_buffer, size_t buf_len,
         return opcode;
 }
 
-void Websocket::CleanBuffer()
-{
-    clean_ws_buffer(this->core_id, this->fd);
-}
 static int check_if_http_end(const char* data, int len)
 {
     if(len < 4) {
@@ -355,47 +351,11 @@ static int check_if_http_end(const char* data, int len)
     }
     return 0;
 }
-
+// websocket的解析逻辑，只有毁掉函数和返回值是自定义的，其余都是ai提供的解析代码，目前(2025/07/01)验证结果是正常的
 // return  -1 缓存失败，要关闭连接并删除源数据data 0 缓存数据，本次不处理  1 消息处理完成，需要清理缓存
+// 缓存区域换成环形缓冲区了，连接建立时创建，关闭时销毁，不再每次缓冲数据时分配
 int Websocket::ReadData(void* data, int len)
 {
-    // if (handshake != AUTH_TYPE_HANDLESHAKED) {
-        // int read_len = 0;
-        // int buf_len = check_if_http_end((const char*)data, len);
-        // int reserve_len = ringbuf_size(core_id, fd);
-        // if(reserve_len <= 0 && buf_len == len && len > 0){ // 没找到http结尾字符，直接缓存并返回
-        // } else{// http包后面粘了下一个包，粘了的部分要缓存起来
-        //     int write_len = ringbuf_write(core_id, fd, (char*)data, len);
-        //     if(write_len < len) {
-        //         // 唤醒缓冲区剩余长度不够了
-        //         LOG_ERROR("free length is not enough.");
-        //         return -1;
-        //     }
-        //     return 0;
-        // } 
-        // std::string read_data;
-        // if(reserve_len > 0) {
-        //     if (ringbuf_read(core_id, fd, read_data, reserve_len + buf_len, 1) <= 0) {
-        //         LOG_ERROR("read ringbuf failed.");
-        //         return -1;
-        //     }
-        // } else {
-        //     read_data.append(static_cast<const char*>((char*)data), len);
-        // }
-    //     HttpRequest req;
-    //     std::string response = _HandleHandshake(read_data, req);
-    //     if (response.empty()) {
-    //         return -1;
-    //     }
-    //     OnHandShake(response.c_str(), req);
-    //     return 1;
-    // }
-    // int write_len = ringbuf_write(core_id, fd, (char*)data, len);
-    // if(write_len < len) {
-    //     // 缓冲区剩余长度不够了
-    //     LOG_ERROR("free length is not enough.");
-    //     return -1;
-    // }
     int buffer_len = ringbuf_size(core_id, fd);
     if(buffer_len < 0) {
         // 缓冲区没有数据
@@ -474,26 +434,17 @@ int Websocket::ReadData(void* data, int len)
                 // return 0;
                 break;
             case CLOSING_FRAME:
-                // if(msg_len > 0) {// close帧有时候会附带数据
-                //     OnMessage(std::string((char*)payload, msg_len));
-                // }
                 OnClose();
                 return 1;
                 break;
             case ERROR_FRAME:
                 LOG_ERROR("error frame.");
-                // OnClose();
-                return -1;
+                return -1;// 返回 -1外部会关闭
                 break;
             case PING_FRAME:
                 OnPing(std::string((char*)payload, msg_len));
                 break;
             case PONG_FRAME:
-                // /* ping or pong frame */
-                // std::string ping_response = encode_websocket_message(PING_FRAME, std::string(payload, msg_len));
-                // std::vec
-                // EnqueueData(ping_response, );
-                //     // TODO 更新fd的定时器
                 OnPong(std::string((char*)payload, msg_len));
                 break;
             default:

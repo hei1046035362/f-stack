@@ -20,19 +20,15 @@ extern struct rte_memzone* g_fd_bw_zones[MAX_LCORE_COUNT];
 extern int g_bwfdx_limit;
 extern struct rte_memzone* g_bwfdx_zones[MAX_LCORE_COUNT];
 extern struct rte_memzone* g_bwprc_zone;
-extern struct rte_ring* g_ring_read;
-extern struct rte_ring* g_ring_cliprcs[MAX_LCORE_COUNT];// 客户端上行
 extern struct rte_ring* g_ring_writes[MAX_LCORE_COUNT];
 extern struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT];
 extern struct rte_ring* g_ring_trans;
 extern struct rte_ring* g_ring_bwfdx;
 extern struct rte_ring* g_ring_bwsnds[MAX_LCORE_COUNT];
 
-extern struct rte_mempool* g_mempool_read;
 extern struct rte_mempool* g_mempool_trans;
 extern struct rte_mempool* g_mempool_write;
 extern struct rte_mempool* g_mempool_bwrcv;
-extern struct rte_mempool* g_mempool_read_data;
 extern struct rte_mempool* g_mempool_trans_data;
 extern struct rte_mempool* g_mempool_write_data;
 extern struct rte_mempool* g_mempool_bwrcv_data;
@@ -83,15 +79,10 @@ static int s_cur_cli_idx = 1;
 int get_valid_idx(int core_id)
 {
 	int looptimes = 2;
-	// int current_id_atomic = 0;
 	while (1) {
 		// TODO  后续要考虑自增id超过uint32_max了怎么处理，
-		// rte_atomic32_inc(get_idx_lock());
-		// current_id_atomic = rte_atomic32_read(get_idx_lock());
 		if(s_cur_cli_idx >= g_fd_limit) {
 			s_cur_cli_idx = 1;
-			// rte_atomic32_init(get_idx_lock());
-			// rte_atomic32_inc(get_idx_lock());// idx要从1开始  0(ready)和-1(closed)已经被用作其他功能了
 			looptimes--;
 		}
 		if(looptimes <= 0) {
@@ -456,21 +447,7 @@ void tgg_close_bw_session(int prc_id, int fd)
 
 int tgg_clean_bwfdx(int prc_id, int fd)
 {
-	// SpinLock lock(get_bwfdx_lock());
-	// tgg_bw_info* bw = &((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd];
 	memset(&(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd]), 0, sizeof(tgg_bw_info));
-	// bw->idx = get_valid_idx();
-	// if(bw->idx < 0) {
-	// 	return -1;
-	// }
-	// if (tgg_add_idx(bw->idx) < 0) {
-	// 	return -1;
-	// }
-	// bw->authorized = 0;
-	// bw->ip = 0;
-	// bw->port = 0;
-	// bw->status = 0;
-	// bw->cmd = 0;
 	return 0;
 }
 
@@ -640,17 +617,6 @@ std::string get_whole_buffer(int core_id, int fd)
     return buffer;
 }
 
-void clean_ws_buffer(int core_id, int fd)
-{
-    // tgg_ws_data* wsdata = &((&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data);
-    // if (!wsdata->data) {// 没有数据
-    //     return;
-    // }
-    // // 释放内存
-    // memset(wsdata->data, 0, );
-    // wsdata->len = 0;
-    // wsdata->pos = 0;
-}
 void release_ws_buffer(int core_id, int fd)
 {
     tgg_ws_data* wsdata = &((&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data);
@@ -660,32 +626,6 @@ void release_ws_buffer(int core_id, int fd)
     // 释放内存
     dpdk_rte_free(wsdata->data);
     memset(wsdata, 0, sizeof(tgg_ws_data));
-}
-
-int tgg_enqueue_read(tgg_read_data* data)
-{
-	return rte_ring_enqueue(g_ring_read, data);
-}
-
-int tgg_dequeue_read(tgg_read_data** data)
-{
-	if (rte_ring_empty(g_ring_read)) {
-		return -ENOENT;
-	}
-	return rte_ring_dequeue(g_ring_read, (void**)data);
-}
-
-int tgg_enqueue_cliprc(int core_id, tgg_read_data* data)
-{
-	return rte_ring_enqueue(g_ring_cliprcs[core_id], data);
-}
-
-int tgg_dequeue_cliprc(int core_id, tgg_read_data** data)
-{
-	if (rte_ring_empty(g_ring_cliprcs[core_id])) {
-		return -ENOENT;
-	}
-	return rte_ring_dequeue(g_ring_cliprcs[core_id], (void**)data);
 }
 
 int tgg_enqueue_write(int core_id, tgg_write_data* data)
@@ -804,17 +744,6 @@ void clean_bw_data(tgg_bw_data* bdata)
     }
     memset(bdata, 0, sizeof(tgg_bw_data));
     high_freq_free(g_mempool_bwrcv, bdata, sizeof(tgg_bw_data));
-}
-
-void clean_read_data(tgg_read_data* rdata)
-{
-    if (rdata->data) {
-    	// memset(rdata->data, 0, rdata->data_len);
-        // high_freq_free(g_mempool_read_data, rdata->data, rdata->data_len);
-        rdata->data = NULL;
-    }
-    memset(rdata, 0, sizeof(tgg_read_data));
-    // rte_mempool_put(g_mempool_read, rdata);
 }
 
 void clean_write_data(tgg_write_data* wdata)
@@ -944,39 +873,6 @@ int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx
 	mapfdidx[fd] = idx;
 	return enqueue_data_batch_fd(core_id, data, mapfdidx, fdopt);
 }
-
-
-// int enqueue_data_send_server(int core_id, int fd, const std::string& data, int fdopt)
-// {
-// 	tgg_bw_data* bwdata = format_send_server_data(core_id, fd, data, fdopt);
-// 	if (!bwdata) {
-// 		LOG_ERROR("Format bw server data failed.");
-// 		return -1;
-// 	}
-// 	int maxtry = 10;// 入队列可能会失败最多尝试10次
-// 	int queue_id = fd % TggConfigure::getInstance()->get_bwsvr_count();
-// 	int ret = tgg_enqueue_bwsnd(queue_id, bwdata);
-// 	while ( ret < 0 && maxtry > 0 ) {
-// 		usleep(10);
-// 		ret = tgg_enqueue_bwsnd(queue_id, bwdata);
-// 		maxtry--;
-// 	}
-// 	static int loop_times_sndserver = 0;
-// 	// TODO 前期调试要看是否经常出现重试
-// 	if (maxtry < 10) {
-// 		++loop_times_sndserver;
-// 		if(loop_times_sndserver % 100 == 0) {
-// 			LOG_ERROR("loop times:%d.", loop_times_sndserver);
-// 		}
-// 	}
-// 	if (ret < 0) {
-// 		clean_bw_data(bwdata);
-// 		RTE_LOG(ERR, USER1, "[%s][%d] Enqueue bw server data failed.", 
-// 			__FILE__, __LINE__);
-// 		return -1;
-// 	}
-// 	return 0;
-// }
 
 
 #include <sys/prctl.h>
