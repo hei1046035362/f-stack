@@ -65,26 +65,13 @@ static int get_remote_info(int sockfd, uint32_t& ip, ushort& port)
 
 int CmdWorkerConnect::ExecCmd()
 {
-    // int idx = tgg_get_bw_idx(this->prc_id, this->fd);
-    // if(idx < 0) {
-    //     RTE_LOG(ERR, USER1, "[%s][%d] Get idx[%d] for fd[%d] Failed.\n", __FILE__, __LINE__, fd, idx);
-    //     return -1;
-    // }
-    // TODO Seckey是配置文件中的，不是跟连接绑定的？  抓包看seckey都是空的
     std::string bwSeckey = TggConfigure::getInstance()->get_secret_key();// tgg_get_bwfdx_seckey(this->prc_id, this->fd);
-    // if(bwSeckey.empty()) {
-    //     RTE_LOG(ERR, USER1, "[%s][%d] Get secret_key for fd[%d] Failed.\n", __FILE__, __LINE__, fd);
-    //     close(this->fd);
-    //     return -1;
-    // }
     try {
-        // printf("jdata:%s\n", jdata.dump(4).c_str());
         nlohmann::json worker_info = nlohmann::json::parse(std::string(jdata["body"]));
         if (worker_info["secret_key"].get<std::string>() != bwSeckey) {
             LOG_ERROR("Gateway: Worker key[%s] does not match conn key[%s].", 
                 worker_info["secretKey"].get<std::string>().c_str(), bwSeckey.c_str());
             close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
-            //tgg_close_bw_session(this->prc_id, this->fd);
             return -1;
         }
         uint32_t remote_ip; 
@@ -114,17 +101,6 @@ int CmdWorkerConnect::ExecCmd()
         }
         LOG_DEBUG("WorkerConnect: added bw[prc:%d,fd:%d] success, total bw count:%d.", 
             prc_id, fd, tgg_get_bwfdx_count());
-
-
-        /// 1、考虑负载均衡  
-        /// 2、要新增一个hash用来确定worker_key的唯一性
-        /// 3、客户端绑定woker还没
-        /// 4、进程退出要解绑的资源， woker对应的资源销毁，客户端连接绑定到新的woker
-
-
-
-
-
     } catch (const nlohmann::json::exception& e) {
     // 捕获其他任何未预料到的异常
         LOG_ERROR("Exception catched:%s.", e.what());
@@ -137,18 +113,7 @@ int CmdWorkerConnect::ExecCmd()
 
 int CmdGatewayClientConnect::ExecCmd()
 {
-    // int idx = tgg_get_bw_idx(this->prc_id, this->fd);
-    // if(idx < 0) {
-    //     RTE_LOG(ERR, USER1, "[%s][%d] Get idx[%d] for fd[%d] Failed.\n", __FILE__, __LINE__, fd, idx);
-    //     return -1;
-    // }
-    // TODO Seckey是配置文件中的，不是跟连接绑定的？  抓包看seckey都是空的
     std::string bwSeckey = tgg_get_bwfdx_seckey(this->prc_id, this->fd);
-    // if(bwSeckey.empty()) {
-    //     RTE_LOG(ERR, USER1, "[%s][%d] Get secret_key for fd[%d] Failed.\n", __FILE__, __LINE__, fd);
-    //     close(this->fd);
-    //     return -1;
-    // }
     try {
         uint32_t remote_ip; 
         ushort remote_port;
@@ -225,9 +190,6 @@ int CmdSendToGroup::ExecCmd()
                     itFd++;
                     continue;
                 }
-                // int coreid = GET_COREID_FDCID_MASK(fdidcid);
-                // int fd = GET_FD_FDCID_MASK(fdidcid);
-
                 int cid = GET_CID_FDCID_MASK(fdidcid);
                 if(cid <= 0) {
                     LOG_WARNING("cid for fdidcid[%lld] gid[%s] not exist.", 
@@ -243,7 +205,6 @@ int CmdSendToGroup::ExecCmd()
                 }
                 itFd++;
             }
-            //std::cout << element << std::endl;
         }
         if(lstAllFds.size() > 0) {
             BatchSend2ClientByfds(lstAllFds, body, FD_WRITE, !raw);
@@ -273,7 +234,6 @@ int CmdKick::ExecCmd()
 int CmdDestroy::ExecCmd()
 {
     int cid = jdata["connection_id"];
-    // std::string data = "";// 关闭websocket
     int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     Send2Client(cid, "destroy", FD_WRITE|FD_CLOSE, !raw);// TODO 是否要立即销毁，不发送ws的关闭帧(去掉FD_WRITE就行)了
     int64_t fdidcid = tgg_get_fdbycid(cid);
@@ -334,11 +294,6 @@ void CmdSelect::FormatResult(const std::list<int64_t>& lst_fd, int mask, nlohman
         int coreid = GET_COREID_FDCID_MASK(*itFd);
         int fd = GET_FD_FDCID_MASK(*itFd);
         int cid = GET_CID_FDCID_MASK(*itFd);
-        // if(cid <= 0) {
-        //     LOG_WARNING("cid for fd[%d] not exist.", fd);
-        //     itFd++;
-        //     continue;
-        // }
         std::string scid = std::to_string(cid);
         if(!result.contains(scid)) {
             result[scid] = nlohmann::json::object();

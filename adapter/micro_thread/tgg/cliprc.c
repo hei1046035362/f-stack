@@ -1,7 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-// #include "mt_incl.h"
-// #include "micro_thread.h"
 #include <rte_mempool.h>
 #include <rte_malloc.h>
 #include <sys/wait.h>
@@ -10,7 +8,6 @@
 #include "dpdk_init.h"
 #include "tgg_comm/WsConsumer.h"
 #include "comm/Encrypt.hpp"
-// #include "bwserver.h"
 #include "tgg_comm/tgg_bw_cache.h"
 #include "tgg_comm/tgg_bwcomm.h"
 #include "tgg_comm/tgg_conf.h"
@@ -33,12 +30,6 @@ void signal_handler(int signum)
 	}
 }
 
-void tgg_gw_process(void* data)
-{
-	ThreadArray threads(TggConfigure::getInstance()->get_lcore_pos(), TggConfigure::getInstance()->get_ccore_pos());
-	threads.startThreads(tgg_process_read);
-}
-
 void tgg_sig_init()
 {
 	if (signal(SIGINT, signal_handler) == SIG_ERR) {
@@ -56,7 +47,6 @@ void tgg_process_init()
 {
 	tgg_sig_init();// 信号处理初始化
 	tgg_cliprc_init();// dpdk相关初始化
-	// tgg_iterprint_gidsbyuid();// 打印redis中获取的数据
 	initOpenSSL();// 初始化ssl加解密环境
 	init_endians();// 大小端判断初始化
 }
@@ -111,8 +101,6 @@ int main(int argc, char *argv[])
 	tgg_process_init();
 	// 启动透传线程
 	init_bwtrans();
-	// init_bwserver();
-	// tgg_gw_process(NULL);
 
 	// 主进程结束，开始销毁资源
 	uninit_bwtrans();

@@ -69,22 +69,18 @@ const char* s_lock_zone_name = "tgg_lock_zone";
 
 /// 五组队列
 // 队列名
-const char* s_read_ring_name = "tgg_read_ring";
 const char* s_trans_ring_name = "tgg_trans_ring";
 const char* s_bwfdx_ring_name = "tgg_bwfdx_ring";
 const char* write_ring_name_prev = "tgg_write_ring";
-const char* cliprc_ring_name_prev = "tgg_cliprc_ring";
 const char* bwrcv_ring_name_prev = "tgg_bwrcv_ring";
 const char* bwsnd_ring_name_prev = "tgg_bwsnd_ring";
 // 队列长度
 static uint32_t s_ring_size = 1024*8;  // 缓冲队列的长度，得是2的幂
 static uint32_t s_write_ring_size = 1024*256;  // 缓冲队列的长度，得是2的幂
 // 队列对象
-struct rte_ring* g_ring_read = NULL;// lcore cli上行  暂时不用了
 struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT] = {NULL};// BW上行  暂时不用
 
 // 当前实际使用的队列
-struct rte_ring* g_ring_cliprcs[MAX_LCORE_COUNT] = {NULL};// 客户端上行
 struct rte_ring* g_ring_writes[MAX_LCORE_COUNT] = {NULL};// 客户端下行
 struct rte_ring* g_ring_trans = NULL;// 上行透传
 struct rte_ring* g_ring_bwfdx = NULL;// bwprc 接收到新的/删除旧的 fd时 要通知透传线程
@@ -94,7 +90,6 @@ struct rte_ring* g_ring_bwsnds[MAX_LCORE_COUNT] = {NULL};// BW下行
 
 /// 三个内存池
 // 内存池名称
-const char* s_pool_read_name = "tgg_pool_read_name";// 客户端上行 和 上行prc共用
 const char* s_pool_trans_name = "tgg_pool_trans_name";// 客户端上行透传
 const char* s_pool_write_name = "tgg_pool_write_name";// 客户端下行
 const char* s_pool_bwrcv_name = "tgg_pool_bwrcv_name";// 客户端上行透传 和 bw上行共用
@@ -117,7 +112,6 @@ static uint32_t s_mempool_write_cache = sizeof(struct st_write_data);// 单个�
 static uint32_t s_mempool_bwrcv_cache = sizeof(tgg_bw_data);// 单个缓存的大小待定
 // 内存池
 // 队列存储的数据结构
-struct rte_mempool* g_mempool_read = NULL;
 struct rte_mempool* g_mempool_trans = NULL;
 struct rte_mempool* g_mempool_write = NULL;
 struct rte_mempool* g_mempool_bwrcv = NULL;
@@ -408,12 +402,6 @@ void tgg_master_init()
 			tgg_set_cli_cid(i, j, -1);
 		}
 
-
-		// cli 处理队列
-		char cliprc_ring_name[RTE_RING_NAMESIZE] = {0};
-		sprintf(cliprc_ring_name, "%s_%d", cliprc_ring_name_prev, i);
-		g_ring_cliprcs[i] = make_ring(cliprc_ring_name, s_ring_size);
-
 		// cli 发送队列
 		char write_ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(write_ring_name, "%s_%d", write_ring_name_prev, i);
@@ -439,13 +427,10 @@ void tgg_master_init()
 		sprintf(bwsnd_ring_name, "%s_%d", bwsnd_ring_name_prev, i);
 		g_ring_bwsnds[i] = make_ring(bwsnd_ring_name, s_write_ring_size);
 	}
-	// cli 接收队列
-	g_ring_read = make_ring(s_read_ring_name, s_ring_size);
 	// cli上行透传
 	g_ring_trans = make_ring(s_trans_ring_name, s_ring_size);
 	g_ring_bwfdx = make_ring(s_bwfdx_ring_name, s_ring_size);
 
-	g_mempool_read = make_mempool(s_pool_read_name, s_mempool_size, s_mempool_read_cache);
 	g_mempool_trans = make_mempool(s_pool_trans_name, s_mempool_size, s_mempool_trans_cache);
 	g_mempool_write = make_mempool(s_pool_write_name, s_write_mempool_size, s_mempool_write_cache);
 	g_mempool_bwrcv = make_mempool(s_pool_bwrcv_name, s_write_mempool_size, s_mempool_bwrcv_cache);
@@ -508,10 +493,9 @@ void tgg_master_uninit()
 
 		rte_ring_free(g_ring_writes[i]);
 		g_ring_writes[i] = NULL;
-		rte_ring_free(g_ring_cliprcs[i]);
-		g_ring_writes[i] = NULL;
+
 		rte_ring_free(g_ring_bwrcvs[i]);
-		g_ring_writes[i] = NULL;
+		g_ring_bwrcvs[i] = NULL;
 	}
 	for (uint32_t i = 0; i < TggConfigure::getInstance()->get_bwsvr_count(); i++) {
 		rte_memzone_free(g_bwfdx_zones[i]);
@@ -523,8 +507,6 @@ void tgg_master_uninit()
 	rte_memzone_free(g_lock_zone);
 	g_lock_zone = NULL;
 
-	rte_mempool_free(g_mempool_read);
-	g_mempool_read = NULL;
 	rte_mempool_free(g_mempool_trans);
 	g_mempool_trans = NULL;
 	rte_mempool_free(g_mempool_write);
@@ -547,8 +529,6 @@ void tgg_master_uninit()
 	rte_mempool_free(g_mempool_large_data);
 	g_mempool_large_data = NULL;
 
-	rte_ring_free(g_ring_read);
-	g_ring_read = NULL;
 	rte_ring_free(g_ring_trans);
 	g_ring_trans = NULL;
 	rte_ring_free(g_ring_bwfdx);
@@ -599,10 +579,6 @@ void init_multi_for_secondary()
 		sprintf(ring_name, "%s_%d", write_ring_name_prev, i);
 		g_ring_writes[i] = find_ring(ring_name);
 
-		// char ring_name[RTE_RING_NAMESIZE] = {0};
-		memset(ring_name, 0, RTE_RING_NAMESIZE);
-		sprintf(ring_name, "%s_%d", cliprc_ring_name_prev, i);
-		g_ring_cliprcs[i] = find_ring(ring_name);
 	}
 	for (uint32_t i = 0; i < TggConfigure::getInstance()->get_bwsvr_count(); i++) {
 		// 初始化bwfdx数组的zones
@@ -622,10 +598,8 @@ void tgg_secondary_init()
 	// 100W个FD  32M的空间
 	init_multi_for_secondary();
 	g_lock_zone = find_memzone(s_lock_zone_name);
-	g_ring_read = find_ring(s_read_ring_name);
 	g_ring_trans = find_ring(s_trans_ring_name);
 	g_ring_bwfdx = find_ring(s_bwfdx_ring_name);
-	g_mempool_read = find_mempool(s_pool_read_name);
 	g_mempool_trans = find_mempool(s_pool_trans_name);
 	g_mempool_write = find_mempool(s_pool_write_name);
 	g_mempool_bwrcv = find_mempool(s_pool_bwrcv_name);

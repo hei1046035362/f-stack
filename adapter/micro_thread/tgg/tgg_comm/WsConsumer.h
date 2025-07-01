@@ -12,7 +12,7 @@ public:
 
     WsConsumer() {_status = FD_STATUS_READYFORCONNECT;}
 
-    virtual ~WsConsumer() {}//clean_read_data((tgg_read_data*)data);}
+    virtual ~WsConsumer() {}
 
     int ConsumerData(void* data);
 
@@ -39,7 +39,6 @@ protected:
 
 private:
     void _CleanAndClose();
-    void _CleanData();
     bool _CheckToken(const std::string& token);
 
 

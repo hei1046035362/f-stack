@@ -74,12 +74,6 @@ int tgg_init_session(int core_id, int fd, int idx)
 // 关闭一个客户端连接时要触发的释放内容
 int tgg_free_session(int core_id, int fd, int cid)
 {
-	// 从hash表中清除连接
-	// int idx = tgg_get_cli_idx(core_id, fd);
-	// if(idx <= TGG_FD_CLOSED) {
-	// 	LOG_WARNING("session is already closed.");
-	// 	return 0;
-	// }
 	std::string uid = tgg_get_cli_uid(core_id, fd);
 	int64_t fdidcid = generate_fdidcid(core_id, fd, cid);
 	if(cid > 0) {
@@ -92,9 +86,6 @@ int tgg_free_session(int core_id, int fd, int cid)
 				itgid++;
 			}
 		}
-		// 清理hash<cid,fdx> 没有握手的cid到不了这里来但是也要删除，因此移到了外面去删除
-		// tgg_del_cid(cid);
-		// 清理hash<cid,list<gid>>
 		tgg_del_cid_cidgid(cid);
 	}
 	// 清理hash<uid,list<fdx>>
@@ -113,10 +104,6 @@ int tgg_free_session(int core_id, int fd, int cid)
 int tgg_join_group(const char* gid, int cid)
 {
 	int64_t fdidcid = tgg_get_fdbycid(cid);
-	// int fdid = GET_FDID_FDIDCID_MASK(fdidcid);
-	// int core_id = GET_COREID_FDID_MASK(fdid);
-	// int fd = GET_FD_FDID_MASK(fdid);
-	// int idx = GET_IDX_CID_MASK(cid);//tgg_get_cli_idx(core_id, fd);
 	if (fdidcid <= 0) {
 		LOG_ERROR("join group failed, cid[%d] not found.", cid);
 		return -1;
@@ -138,10 +125,6 @@ int tgg_join_group(const char* gid, int cid)
 int tgg_exit_group(const char* gid, int cid)
 {
 	int64_t fdidcid = tgg_get_fdbycid(cid);
-	// int fdid = GET_FDID_FDIDCID_MASK(fdidcid);
-	// int core_id = GET_COREID_FDID_MASK(fdid);
-	// int fd = GET_FD_FDID_MASK(fdid);
-	// int idx = GET_IDX_CID_MASK(cid);//tgg_get_cli_idx(core_id, fd);
 	if (fdidcid <= 0) {
 		LOG_ERROR("connection invalid, cid[%d] not found.", cid);
 		return -1;

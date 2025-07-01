@@ -40,14 +40,6 @@ void Send2Client(int cid, const std::string& data, int fd_opt, int encode)
     int fd = GET_FD_FDCID_MASK(fdidcid);
     int core_id = GET_COREID_FDCID_MASK(fdidcid);
     int idx = GET_IDX_FDCID_MASK(fdidcid);// 取低24位// tgg_get_cli_idx(core_id, fd);
-    // if(idx <= 0) {
-    //     LOG_ERROR("client[%d] already closed.", cid);
-    //     return;
-    // }
-    // if(tgg_get_cli_authorized(core_id, fd) != AUTH_TYPE_HANDLESHAKED) {
-    //     LOG_ERROR("Send data to client[%d] should check Token at first.", cid);
-    //     return;
-    // }
     Send2Fd(core_id, fd, idx, data, fd_opt, encode);
 }
 
@@ -85,18 +77,6 @@ void BatchSend2ClientByfds(std::list<int64_t> fds, const std::string& data, int 
         std::list<int64_t>::iterator itFd = coreidFds.second.begin();
         while(itFd != coreidFds.second.end()) {
             int idx = GET_IDX_FDCID_MASK(*itFd);// tgg_get_cli_idx(coreidFds.first, *itFd);
-            // if(idx <= 0) {
-            //     // int cid = tgg_get_cli_cid(coreidFds.first, *itFd);
-            //     LOG_ERROR("client[%d] already closed.", cid);
-            //     itFd++;
-            //     continue;
-            // }
-            // if(tgg_get_cli_authorized(coreidFds.first, *itFd) != AUTH_TYPE_HANDLESHAKED) {
-            //     int cid = tgg_get_cli_cid(coreidFds.first, *itFd);
-            //     LOG_ERROR("Send data to client[%d] should check Token at first.", cid);
-            //     itFd++;
-            //     continue;
-            // }
             int fd = GET_FD_FDCID_MASK(*itFd);
             mapFdidx[fd] = idx;
             itFd++;
