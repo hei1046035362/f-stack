@@ -94,6 +94,7 @@ enum FD_STATUS
 #define DEFAULT_WSDATA_LEN 4096   // ws默认缓存是4k，超过4k的连接  10w个连接就是400M，
 #define MAX_WSDATA_LEN 10*1024*1024   // websocket最多缓存10M的数据  暂时不器用，后续如果真的有超过4096的数据包
 
+// websocket的缓存结构，新接入一个客户端连接时会创建
 typedef struct st_ws_data {
     int read_pos;
     int write_pos;    // 偏移量，
@@ -103,22 +104,21 @@ typedef struct st_ws_data {
     void* data;
 } tgg_ws_data;
 
-// 客户端需要保留的信息
+// 客户端需要保留的信息  gwrcv维护和使用
 // TODO:是否要考虑断线重连之后上一个连接的数据包会发送到新的连接中来的问题
 typedef struct st_cli_info {
-    int status;        // 连接是否已关闭                        master 填充
+    int status;        // 连接是否已关闭
     int idx;        // 和fd一起标识唯一连接，(fd可能被重用了,但是处理方仍不知情)
                     // -1 标识关闭中，后续的数据包不再处理，0标识关闭完成并准备就绪
     int authorized; // 连接确认
     tgg_ws_data ws_data;    // 缓存websocket的数据，用于处理分包的情况下
-    // int need_keep;    // 是否为长连接                         process填充
-    // int l4_type;    // 应用层协议类型，http/websocket        process填充
     char ip_str[INET_ADDRSTRLEN];  // ws握手时需要打包发送给bw
     int ip;
     unsigned short port;
     int bwfdx;        // 绑定的bw
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_cli_info;
 
+// 客户单信息中需要gwbwprc维护和使用的部分
 typedef struct st_cli_bw_info {
     int cid;    // client id                             process 填充
     char uid[TGG_UID_LEN];    // user id                             process 填充
@@ -127,7 +127,6 @@ typedef struct st_cli_bw_info {
 
 // BW连接信息
 typedef struct st_bw_info {
-    // int fd;            // BW连接的fd
     int status;        // 连接状态
     int cmd;            // 记录连接类型  bw/gatewayclient
     int idx;        // 暂时不用  和fd共同标识唯一一个连接(fd是可重用的)  bw通信不记录状态，只记录在不在线就行，丢了就丢了
@@ -159,7 +158,7 @@ typedef struct st_read_data {
     // unsigned int cid;
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_read_data;
 
-// list<fd>
+// list<fd>  hash<gid, list<fd>> 这些一个gid/uid有多个fd的hash表的value
 typedef struct st_tgg_fd_list {
     int64_t fdidcid;// 存储在hash表中的是fdidcid，在线程或进程之间传递时是fd
     // int idx;
@@ -167,7 +166,7 @@ typedef struct st_tgg_fd_list {
     struct st_tgg_fd_list* next;
 } tgg_fd_list;
 
-// list<fd,idx>
+// list<fd,idx>  下行数据同一份数据发送给多个客户端时使用
 typedef struct st_tgg_fd_idx_list {
     int fdid;// 存储在hash表中的是fdid，在线程或进程之间传递时是fd
     int idx;
@@ -175,7 +174,7 @@ typedef struct st_tgg_fd_idx_list {
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_fd_id_list;
 
 
-// process回传给master处理
+// 下行发送给客户端，即gwbwprc回传给gwrcv的数据结构
 typedef struct st_write_data {
     tgg_fd_id_list* lst_fd;            // socket fd(可能存在同时发多个fd)
     int fd_opt;        // 对fd的操作类型(写/关闭)
@@ -184,22 +183,27 @@ typedef struct st_write_data {
     void* data;        // 携带的数据
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_write_data;
 
-// trans 数据结构
+// 上行透传发送给 gwcliprc 数据结构
 typedef struct st_read_data tgg_trans_data;
 
-// bw数据处理传输结构
+// gwcliprc传给gwbwprc的数据结构
 typedef struct st_read_data tgg_bw_data;
 
+// gwbwprc需要gwcliprc处理的消息，是以rte_queue的方式传递的,目前是传递bw的fd和进程号，方便gwcliprc做负载均衡
+// 处理的命令
 enum BWFDX_CMD {
     BWFDX_CMD_ADD = 0,
     BWFDX_CMD_DELETE,
     BWFDX_CMD_UPDATEALL
 };
+// 出入队列的数据结构
 typedef struct st_bwfdx_data {
     int bwfdx;
     int cmd;
 } tgg_bwfdx_data;
 
+
+/// 统计入队列数据结构                   ------ 未实际使用
 typedef struct st_en_queue_stats {
     int malloc_st;
     int malloc_data;
@@ -215,12 +219,15 @@ typedef struct st_stats {
     int send;            //  发送数
 } tgg_stats;
 
+
+// 进程监控 gwbwprc的进程
 // 进程信息
 typedef struct st_pid_data {
     pid_t pid;        // 进程id                                    父进程写入
     uint64_t heart_beat;    // 心跳   防止进程无响应，队列无人消费            父进程写入，子进程通过信号通知并重置计数
     int idx;        // 索引   进程索引，标记进程能使用的队列        子进程写入和使用
 } pid_data;
+
 
 // gid hash data
 typedef tgg_fd_list tgg_gid_data;
@@ -240,8 +247,6 @@ typedef tgg_list_id tgg_gid_list;
 // cid hash value
 typedef struct st_tgg_cid_data {
     int fd;
-    // char* uid;
-    // struct st_list_gid* lst_gid;  // 考虑使用时直接从redis获取
 } tgg_cid_data;
 
 

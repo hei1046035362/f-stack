@@ -32,12 +32,6 @@ public:
     static void encode(std::string &result, tgg_bw_protocal* bwdata, 
         const std::string& body, const std::string& extend_data = "")
      {
-        // bwdata->flag = (body.find_first_not_of("0123456789") == std::string::npos);
-        // std::string encode_body = body;
-        // if (!bwdata->flag) {
-        //     // 这里简单模拟序列化，实际可能需要更复杂处理
-        //     encode_body = serialize(body);
-        // }
         bwdata->ext_len = extend_data.length() > 0 ? extend_data.length() : 0;
         bwdata->pack_len = sizeof(tgg_bw_protocal) + bwdata->ext_len + body.size();
 
@@ -48,20 +42,14 @@ public:
         }
         result.replace(sizeof(tgg_bw_protocal) + bwdata->ext_len, body.size(), body);
 
-        // bwdata->local_ip = inet_addr(local_ip.c_str());
-        // bwdata->client_ip = inet_addr(client_ip.c_str());
         if(big_endian()) {
-            // bwdata->local_ip = bwdata->local_ip;// ip拿到的时候就是网络字节序了，不需要再转
-            // bwdata->client_ip = bwdata->client_ip;
             bwdata->pack_len = htonl(bwdata->pack_len);
             bwdata->local_port = htons(bwdata->local_port);// 本地端口是从文件中读取的，需要转换成网络字节序
-            // bwdata->client_port = htons(bwdata->client_port);// 客户端的port是通过fd获取的，本身就是网络字节序
             bwdata->connection_id = htonl(bwdata->connection_id);
             bwdata->gateway_port = htons(bwdata->gateway_port);
             bwdata->ext_len = htonl(bwdata->ext_len);
         }
         std::memcpy(&result[0], bwdata, sizeof(tgg_bw_protocal));
-        // return result;
     }
 
     // 从二进制数据转换为数组，对应decode函数
@@ -76,16 +64,7 @@ public:
         if(body_len > 0) {
             std::string body(bwdata->data + bwdata->ext_len, // body的起始位置
                              body_len); // body的长度
-            // if (bwdata->flag & FLAG_BODY_IS_SCALAR) {
-            //} else 
-            // if(!bwdata->flag) {
-            //     // 这里简单模拟反序列化，实际可能需要更安全可靠的处理
-            //     nlohmann::json jbody = Php_UnSerialize(body);
-            //     bwjdata["body"] = jbody.dump();
-            // } else {
-            // body 有三种类型，php格式的json，普通json，fffe开头的透传数据，这里只存二进制，后续再解析
-                bwjdata["body"] = bin2hex(body);// json无法直接存储二进制数据，后续执行命令的时候再转回来
-            // }
+            bwjdata["body"] = bin2hex(body);// TODO 存内容改为存地址，json无法直接存储二进制数据，后续执行命令的时候再转回来
         } else {
             bwjdata["body"] = "";
         }

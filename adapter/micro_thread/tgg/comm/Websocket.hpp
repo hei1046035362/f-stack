@@ -59,7 +59,6 @@ private:
 
 protected:
 
-    virtual void CleanBuffer();
     // ws握手前调用的发送接口
     void SendONnoAuth(const std::string& data, int fd_opt);
 public:

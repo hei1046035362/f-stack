@@ -94,7 +94,6 @@ void tgg_clean_bwprc(int prc_id);
 // int cache_ws_buffer(int core_id, int fd, void* data, int len, int pos = 0, int iscomplete = 1);
 std::string get_one_frame_buffer(int core_id, int fd, void* data, int len);
 std::string get_whole_buffer(int core_id, int fd);
-void clean_ws_buffer(int core_id, int fd);
 void release_ws_buffer(int core_id, int fd);
 
 // move_pos 是否要移动读指针
@@ -103,11 +102,6 @@ int ringbuf_write(int core_id, int fd, const char* data, int len);
 int ringbuf_size(int core_id, int fd);
 int ringbuf_space(int core_id, int fd);
 const char* ringbuf_memmem(tgg_ws_data* rb, const char* needle, int needle_len);
-
-int tgg_enqueue_read(tgg_read_data* data);
-int tgg_dequeue_read(tgg_read_data** data);
-int tgg_enqueue_cliprc(int core_id, tgg_read_data* data);
-int tgg_dequeue_cliprc(int core_id, tgg_read_data** data);
 
 int tgg_enqueue_trans(tgg_bw_data* data);
 int tgg_dequeue_trans(tgg_bw_data** data);
@@ -164,7 +158,6 @@ int get_valid_idx();
 // 清理队列
 void clean_trans_data(tgg_trans_data* bdata);
 void clean_bw_data(tgg_bw_data* bdata);
-void clean_read_data(tgg_read_data* rdata);
 void clean_write_data(tgg_write_data* wdata);
 void clean_fdidlist(tgg_fd_id_list* fdiddata);
 
@@ -173,10 +166,5 @@ void clean_fdidlist(tgg_fd_id_list* fdiddata);
 tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& mapfdidx, int fdopt);
 int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, int>& mapfdidx, int fdopt);
 int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx, int fdopt);
-
-// 发送给服务端
-// tgg_bw_data* format_send_server_data(int core_id, int fd, const std::string& sdata, int fdopt);
-// int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt);
-// int enqueue_data_send_server(int core_id, int fd, const std::string& data, int fdopt);
 
 #endif  // _TGG_COMMON_H_
