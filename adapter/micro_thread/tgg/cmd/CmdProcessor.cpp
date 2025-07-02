@@ -184,7 +184,7 @@ int CmdSendToGroup::ExecCmd()
             // 根据hash<gid,list<fdidcid>>找到gid对应的fdid列表,根据fdid找到cid
             std::list<int64_t>::iterator itFd = lstFds.begin();
             while (itFd != lstFds.end()) {
-                int fdidcid = *itFd;
+                int64_t fdidcid = *itFd;
                 if(fdidcid < 0) {
                     LOG_WARNING("Invalid fdidcid[%lld] for gid[%s].", fdidcid, element.get<std::string>().c_str());
                     itFd++;
@@ -387,7 +387,7 @@ int CmdSelect::ExecCmd()
                     std::list<int64_t> lst_fds;
                     for (const auto& connection_id : it.value()) {
                         int cid = connection_id;
-                        int fdidcid = tgg_get_fdbycid(cid);
+                        int64_t fdidcid = tgg_get_fdbycid(cid);
                         if (fdidcid > 0) {
                             lst_fds.push_back(fdidcid);
                         }

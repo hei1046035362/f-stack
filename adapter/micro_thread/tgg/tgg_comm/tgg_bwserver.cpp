@@ -192,14 +192,14 @@ static int write_data()
             if(bdata->data) {
                 LOG_ERROR("write data:%s", bdata->data);
             }
-            clean_bw_data(bdata);
+            clean_bw_data(prc_id, bdata);
             continue;
         }
         // TODO cid的加入和删除 最佳的位置是在cliprc中校验之后，然而rte_hash在多线程环境中增加元素会崩溃，
         // 所以暂时放在这里，放在这里也没有问题，因为没有跟bw发送过connect消息的连接，后续也用不上
         if (bdata->fd_opt & FD_NEW) {
             if(tgg_init_session(bdata->coreid, bdata->fd, bdata->idx) < 0) {
-                clean_bw_data(bdata);
+                clean_bw_data(prc_id, bdata);
                 continue;
             }
         }
@@ -208,7 +208,7 @@ static int write_data()
             // 这里发送给客户端和清理hash表信息的顺序待商榷
             Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_CLOSE, 0);// cid 还没有创建的连接直接关闭连接
             LOG_ERROR("invalid cid[%d] for coreid:%d fd[%d] failed.", cid, bdata->coreid, bdata->fd);
-            clean_bw_data(bdata);
+            clean_bw_data(prc_id, bdata);
             continue;
         }
         std::string result;
@@ -243,7 +243,7 @@ static int write_data()
                 LOG_DEBUG("send to bw data:%s", print_data.c_str());
             }
         }
-        clean_bw_data(bdata);// 在调用write之前清理数据，防止协程切换导致的地址变化
+        clean_bw_data(prc_id, bdata);// 在调用write之前清理数据，防止协程切换导致的地址变化
         BwPackageHandler::encode(result, &header, sdata);
 
         // int ret = co_write_complete(fd, result.c_str(), result.length());
@@ -265,7 +265,7 @@ void clean_queue_data()
     // 上次异常退出未处理的数据，先清理掉
     tgg_bw_data* bdata = NULL;
     while(tgg_dequeue_bwsnd(g_prc_id, &bdata) != -ENOENT) {
-        clean_bw_data(bdata);
+        clean_bw_data(g_prc_id, bdata);
     }
     // 初始化数据结构
     tgg_init_bwfdx_prc(g_prc_id);
