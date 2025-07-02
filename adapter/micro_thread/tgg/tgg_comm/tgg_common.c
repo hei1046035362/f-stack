@@ -21,14 +21,13 @@ extern int g_bwfdx_limit;
 extern struct rte_memzone* g_bwfdx_zones[MAX_LCORE_COUNT];
 extern struct rte_memzone* g_bwprc_zone;
 extern struct rte_ring* g_ring_writes[MAX_LCORE_COUNT];
-extern struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT];
 extern struct rte_ring* g_ring_trans;
 extern struct rte_ring* g_ring_bwfdx;
-extern struct rte_ring* g_ring_bwsnds[MAX_LCORE_COUNT];
+extern struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT];
 
 extern struct rte_mempool* g_mempool_trans;
-extern struct rte_mempool* g_mempool_write;
-extern struct rte_mempool* g_mempool_bwrcv;
+extern struct rte_mempool* g_mempool_write[MAX_LCORE_COUNT];
+extern struct rte_mempool* g_mempool_bwrcv[MAX_LCORE_COUNT];
 extern struct rte_mempool* g_mempool_trans_data;
 extern struct rte_mempool* g_mempool_write_data;
 extern struct rte_mempool* g_mempool_bwrcv_data;
@@ -641,10 +640,10 @@ int tgg_dequeue_write(int core_id, tgg_write_data** data)
 	return rte_ring_dequeue(g_ring_writes[core_id], (void**)data);
 }
 
-tgg_bw_data* get_bwdata_from_transdata(tgg_trans_data* tdata)
+tgg_bw_data* get_bwdata_from_transdata(int prc_id, tgg_trans_data* tdata)
 {
 	tgg_bw_data* bdata = NULL;
-    int ret = high_freq_malloc(g_mempool_bwrcv, (void**)&bdata, sizeof(tgg_trans_data));
+    int ret = high_freq_malloc(g_mempool_bwrcv[prc_id], (void**)&bdata, sizeof(tgg_trans_data));
     if(ret < 0) {
 		LOG_ERROR("malloc bw data from trans failed, fd:%d.", tdata->fd);
     	return NULL;
@@ -654,7 +653,7 @@ tgg_bw_data* get_bwdata_from_transdata(tgg_trans_data* tdata)
         ret = high_freq_malloc(g_mempool_bwrcv_data, (void**)&bdata->data, tdata->data_len);
         if(ret < 0) {
 			LOG_ERROR("malloc bw data content from trans failed, fd:%d.", tdata->fd);
-        	high_freq_free(g_mempool_bwrcv, bdata, sizeof(tgg_trans_data));
+        	high_freq_free(g_mempool_bwrcv[prc_id], bdata, sizeof(tgg_trans_data));
         	return NULL;
         }
         memcpy(bdata->data, tdata->data, tdata->data_len);
@@ -666,19 +665,19 @@ int tgg_enqueue_bwsnd(int queue_id, tgg_bw_data* data)
 	if(data->fd <= 0) {
 		LOG_ERROR("invalid data fd:%d.", data->fd);
 	}
-	int ret = rte_ring_enqueue(g_ring_bwsnds[queue_id], data);
+	int ret = rte_ring_enqueue(g_ring_bwrcvs[queue_id], data);
 	if(ret < 0) {
-		LOG_ERROR("enqueue bwsnd ring failed, count:%d", rte_ring_count(g_ring_bwsnds[queue_id]));
+		LOG_ERROR("enqueue bwsnd ring failed, count:%d", rte_ring_count(g_ring_bwrcvs[queue_id]));
 	}
 	return ret;
 }
 
 int tgg_dequeue_bwsnd(int queue_id, tgg_bw_data** data)
 {
-	if (rte_ring_empty(g_ring_bwsnds[queue_id])) {
+	if (rte_ring_empty(g_ring_bwrcvs[queue_id])) {
 		return -ENOENT;
 	}
-	return rte_ring_dequeue(g_ring_bwsnds[queue_id], (void**)data);
+	return rte_ring_dequeue(g_ring_bwrcvs[queue_id], (void**)data);
 }
 
 int tgg_enqueue_trans(tgg_trans_data* data)
@@ -710,20 +709,6 @@ int tgg_dequeue_bwfdx(tgg_bwfdx_data** data)
 	return rte_ring_dequeue(g_ring_bwfdx, (void**)data);
 }
 
-int tgg_enqueue_bwrcv(int prc_id, tgg_bw_data* data)
-{
-	return rte_ring_enqueue(g_ring_bwrcvs[prc_id], data);
-}
-
-int tgg_dequeue_bwrcv(int prc_id, tgg_bw_data** data)
-{
-	if (rte_ring_empty(g_ring_bwrcvs[prc_id])) {
-		return -ENOENT;
-	}
-	return rte_ring_dequeue(g_ring_bwrcvs[prc_id], (void**)data);
-}
-
-
 void clean_trans_data(tgg_trans_data* bdata)
 {
     if (bdata->data) {
@@ -735,7 +720,7 @@ void clean_trans_data(tgg_trans_data* bdata)
     high_freq_free(g_mempool_trans, bdata, sizeof(tgg_trans_data));
 }
 
-void clean_bw_data(tgg_bw_data* bdata)
+void clean_bw_data(int prc_id, tgg_bw_data* bdata)
 {
     if (bdata->data) {
     	memset(bdata->data, 0, bdata->data_len);
@@ -743,18 +728,19 @@ void clean_bw_data(tgg_bw_data* bdata)
         bdata->data = NULL;
     }
     memset(bdata, 0, sizeof(tgg_bw_data));
-    high_freq_free(g_mempool_bwrcv, bdata, sizeof(tgg_bw_data));
+    high_freq_free(g_mempool_bwrcv[prc_id], bdata, sizeof(tgg_bw_data));
 }
 
-void clean_write_data(tgg_write_data* wdata)
+void clean_write_data(int core_id, tgg_write_data* wdata)
 {
+	clean_fdidlist(wdata->lst_fd);
     if (wdata->data) {
     	memset(wdata->data, 0, wdata->data_len);
         high_freq_free(g_mempool_write_data, wdata->data, wdata->data_len);
         wdata->data = NULL;
     }
     memset(wdata, 0, sizeof(tgg_write_data));
-    high_freq_free(g_mempool_write, wdata, sizeof(tgg_write_data));
+    high_freq_free(g_mempool_write[core_id], wdata, sizeof(tgg_write_data));
 }
 
 void clean_fdidlist(tgg_fd_id_list* fdiddata)
@@ -775,10 +761,10 @@ void clean_fdidlist(tgg_fd_id_list* fdiddata)
 }
 
 
-tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& mapfdidx, int fdopt)
+tgg_write_data* format_send_data(int core_id, const std::string& sdata, std::map<int, int>& mapfdidx, int fdopt)
 {
 	tgg_write_data* wdata = NULL;
-	int ret = high_freq_malloc(g_mempool_write, (void**)&wdata, sizeof(tgg_write_data));
+	int ret = high_freq_malloc(g_mempool_write[core_id], (void**)&wdata, sizeof(tgg_write_data));
     // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
 	if (ret < 0) {
 		LOG_ERROR("get mem from write pool failed,code:%d.", ret);
@@ -831,7 +817,7 @@ add_data_failed:
 	LOG_ERROR("malloc mem failed.");
 	clean_fdidlist(wdata->lst_fd);
 	memset(wdata, 0, sizeof(tgg_write_data));
-	high_freq_free(g_mempool_write, wdata, sizeof(tgg_write_data));
+	high_freq_free(g_mempool_write[core_id], wdata, sizeof(tgg_write_data));
 	return NULL;
 }
 
@@ -842,7 +828,7 @@ int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, in
 		LOG_ERROR("mapfdidx is empty.");
 		return 0;
 	}
-	tgg_write_data* wdata = format_send_data(data, mapfdidx, fdopt);
+	tgg_write_data* wdata = format_send_data(core_id, data, mapfdidx, fdopt);
 	if (!wdata) {
 		LOG_ERROR("Format send data failed.");
 		return -1;
