@@ -23,7 +23,6 @@ static const char* s_dump_file = "/var/corefiles/";//tgg_gw_master_core
 static int s_fd_timeout = 60*1000;
 extern const char* g_rte_malloc_type;
 extern struct rte_mempool* g_mempool_write;
-extern struct rte_mempool* g_mempool_read_data;
 extern struct rte_mempool* g_mempool_write_data;
 extern ushort g_gateway_port;
 extern tgg_stats g_tgg_stats;
@@ -259,7 +258,8 @@ static void tgg_do_send(tgg_write_data* wdata)
 				LOG_INFO("Closing Connection[%d].", cli_fd);
 				tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSING);// 先设置标记，防止队列没人消费，影响其他连接
 				if(wdata->fd_opt & FD_WRITE) {
-					mt_sleep(1000);// ws的关闭帧发送完以后等待客户端先关闭，如果1s后没有关闭，我们要主动结束
+					// 这里不能sleep，我们只有一个发送的协程，一旦sleep会影响其他fd的写入
+					// mt_sleep(1000);// ws的关闭帧发送完以后等待客户端先关闭，如果1s后没有关闭，我们要主动结束
 									// 到了这里后面的数据其实都应该要丢弃了，所以后续数据已经不重要了
 				}
 				mt_close(cli_fd);// TODO:待优化，在这里结束可能会报错，四次挥手不完整：epoll schedule failed, errno: 62
@@ -274,13 +274,13 @@ send_client_end:
 		fd_id_list = fd_id_list->next;
 	}
 	// 所有fd都发送完了之后，需要清理并回收内存
-	clean_fdidlist(wdata->lst_fd);
-	if(wdata->data) {
-		memset(wdata->data, 0, wdata->data_len);
-		high_freq_free(g_mempool_write_data, wdata->data, wdata->data_len);
-	}
-	memset(wdata, 0, sizeof(tgg_write_data));
-	high_freq_free(g_mempool_write, wdata, sizeof(tgg_write_data));
+	clean_write_data(g_core_id, wdata);
+	// if(wdata->data) {
+	// 	memset(wdata->data, 0, wdata->data_len);
+	// 	high_freq_free(g_mempool_write_data, wdata->data, wdata->data_len);
+	// }
+	// memset(wdata, 0, sizeof(tgg_write_data));
+	// high_freq_free(g_mempool_write[g_core_id], wdata, sizeof(tgg_write_data));
 }
 
 static void tgg_send(void *arg)
@@ -304,7 +304,9 @@ static void tgg_send(void *arg)
 static int tgg_gw_master()
 {
 	// 启动发送线程
-	mt_start_thread((void *)tgg_send, NULL);
+	// for(int i = 0; i < TggConfigure::getInstance()->get_gwwrite_co_count(); ++i) {
+		mt_start_thread((void *)tgg_send, NULL);
+	// }
 
 	struct sockaddr_in addr;
 	addr.sin_family = AF_INET;

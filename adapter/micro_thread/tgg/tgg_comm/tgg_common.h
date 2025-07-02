@@ -108,13 +108,10 @@ int tgg_dequeue_trans(tgg_bw_data** data);
 int tgg_enqueue_bwfdx(tgg_bwfdx_data* data);
 int tgg_dequeue_bwfdx(tgg_bwfdx_data** data);
 
-int tgg_enqueue_bwrcv(int prc_id, tgg_bw_data* data);
-int tgg_dequeue_bwrcv(int prc_id, tgg_bw_data** data);
-
 int tgg_enqueue_write(int core_id, tgg_write_data* data);
 int tgg_dequeue_write(int core_id, tgg_write_data** data);
 
-tgg_bw_data* get_bwdata_from_transdata(tgg_trans_data* tdata);
+tgg_bw_data* get_bwdata_from_transdata(int prc_id, tgg_trans_data* tdata);
 
 int tgg_enqueue_bwsnd(int queue_id, tgg_bw_data* data);
 int tgg_dequeue_bwsnd(int queue_id, tgg_bw_data** data);
@@ -157,13 +154,13 @@ int get_valid_idx();
 
 // 清理队列
 void clean_trans_data(tgg_trans_data* bdata);
-void clean_bw_data(tgg_bw_data* bdata);
-void clean_write_data(tgg_write_data* wdata);
+void clean_bw_data(int prc_id, tgg_bw_data* bdata);
+void clean_write_data(int core_id, tgg_write_data* wdata);
 void clean_fdidlist(tgg_fd_id_list* fdiddata);
 
 
 // 发送给客户端
-tgg_write_data* format_send_data(const std::string& sdata, std::map<int, int>& mapfdidx, int fdopt);
+tgg_write_data* format_send_data(int core_id, const std::string& sdata, std::map<int, int>& mapfdidx, int fdopt);
 int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, int>& mapfdidx, int fdopt);
 int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx, int fdopt);
 

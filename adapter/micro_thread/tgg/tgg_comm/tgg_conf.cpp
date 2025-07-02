@@ -166,6 +166,16 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     //      __FILE__, __LINE__, lcore_count, ccore_count);
     //     return -1;
     // }
+    // gwrcv write协程的个数
+    this->gwwrite_co_count = get_int_value(&pTgg_Ini, "gateway", "co_count");
+    if(this->gwwrite_co_count <= 0) return -1;
+
+    if(this->gwwrite_co_count > 100000 || this->gwwrite_co_count < 1) {
+        RTE_LOG(ERR, USER1, "[%s][%d] invalid gwwrite co_count:[%d].", __FILE__, __LINE__, this->gwwrite_co_count);
+        return -1;
+    } else {
+        this->gwwrite_co_count = 500;// 默认个数
+    }
 
     // redis cluster ip
     std::string redis_ips = pTgg_Ini.getValue("redis", "addrs");
@@ -182,6 +192,23 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
         RTE_LOG(ERR, USER1, "[%s][%d] parse config redis password:[%s] failed.", __FILE__, __LINE__, this->redis_pwd.c_str());
         return -1;
     }
+
+    // bcore_mask  bw的进程绑定那几个core
+    core_mask = pTgg_Ini.getValue("bwserver", "bcore_mask");
+    int bcore_mask = parse_lcore_mask(core_mask);
+    if(bcore_mask <= 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] read config lcore mask failed:[%d].",
+         __FILE__, __LINE__, bcore_mask);
+        return -1;
+    }
+    // 收包进程绑定的core不能与cli处理线程绑定的core重叠
+    if(this->lcore_mask & bcore_mask || this->ccore_mask & bcore_mask) {
+        RTE_LOG(ERR, USER1, "[%s][%d] bcore mask[%x] can't duplicate with lcore mask:[%x] or ccore mask:[%x].",
+         __FILE__, __LINE__, bcore_mask, this->lcore_mask, this->ccore_mask);
+        return -1;
+    }
+    this->bcore_mask = bcore_mask;
+
     // bw服务进程个数
     int nbwsvr_count = get_int_value(&pTgg_Ini, "bwserver", "process_count");
     if(nbwsvr_count <= 0)  return -1;

@@ -20,6 +20,7 @@ public:
     }
     int init(const char* fstack_conf, const char* tgg_conf);
 private:
+    int gwwrite_co_count;          // gwrcv写协程的个数
     int lcore_mask;         // 收包进程绑定的核
     int ccore_mask;         // cli处理进程绑定的核
     std::vector<int>    lcore_pos;/// 收包进程绑定的核的位置
@@ -28,6 +29,7 @@ private:
     unsigned short port;    // 网关对外使用的端口  客户端
     std::vector<std::string> redis_addrs; // redis集群地址
     std::string redis_pwd;  // redis 登陆密码
+    int bcore_mask;         // bw 进程要绑定的核
     unsigned int bwsvr_count;        // bw处理进程个数
     int co_count;           // 单个bwserver持有的协程数
     std::string bw_addr;        // 网关对内ip   服务端
@@ -44,6 +46,8 @@ private:
 public:
     int get_lcore_mask() { return lcore_mask;}
     int get_ccore_mask() { return ccore_mask;}
+    int get_bcore_mask() { return bcore_mask;}
+    int get_gwwrite_co_count() {return gwwrite_co_count;}
     const std::vector<int>& get_lcore_pos() {return lcore_pos;}
     const std::vector<int>& get_ccore_pos() {return ccore_pos;}
     const std::string& get_gateway_addr() {return addr;}
