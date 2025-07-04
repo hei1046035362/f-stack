@@ -100,6 +100,7 @@ static void custom_fork(const char* exec_name)
 }
 
 static uint64_t s_last_check_time = 0;
+static int* s_pid_check_times;
 // 定时器回调函数
 void check_bwprc()
 {
@@ -125,10 +126,26 @@ void check_bwprc()
                         continue;
                     } else {
                         LOG_ERROR("kill process[%d] faild error:%d.", pid, errno);
-                        continue;
+                        // TODO 上线后这段代码要放开，防止死锁导致无法启动新的进程
+                        if (kill(pid, 0) == 0) {
+                            if(s_pid_check_times[i] < 3) {// 重试三次，不方便sleep，如果三个周期都没有退出，就强制结束
+                                s_pid_check_times[i]++;
+                                continue;
+                            }
+                            LOG_WARNING("Process %d exists. Sending SIGKILL...", pid);
+                            // 2. 发送 SIGKILL 信号
+                            if (kill(pid, SIGKILL) == 0) {
+                                LOG_WARNING("SIGKILL sent successfully.");
+                            } else {
+                                LOG_ERROR("kill(SIGKILL) failed");
+                                continue;
+                            }
+                        }
+                        // continue;
                     }
                 }
             }
+            s_pid_check_times[i] = 0;
             custom_fork("gwbwprc");
         }
     }
@@ -190,10 +207,13 @@ void tgg_process_init()
 	tgg_sig_init();
 	// tgg_iterprint_gidsbyuid();
 	init_endians();
+    int bwcount = TggConfigure::getInstance()->get_bwsvr_count();
+    s_pid_check_times = new int[bwcount]{0};
 }
 
 void tgg_process_uninit()
 {
+    delete[] s_pid_check_times;
 	tgg_register_uninit();
 }
 

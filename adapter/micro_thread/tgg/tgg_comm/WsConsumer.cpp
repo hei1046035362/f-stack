@@ -149,7 +149,7 @@ bool WsConsumer::ConnectionValid(int core_id, int fd, void* data)
 
 void WsConsumer::OnClose()
 {
-    _status = FD_STATUS_CLOSING;
+    tgg_set_cli_status(core_id, fd, FD_STATUS_CLOSING);
     _Send2Server("", FD_CLOSE);
     SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
 }
@@ -288,6 +288,10 @@ void WsConsumer::OnMessage(const std::string& msg)
 
 void WsConsumer::OnSend(const std::string& msg, int fd_opt)
 {
+    if((tgg_get_cli_status(this->core_id, this->fd) & FD_STATUS_DISCONNECTED)) {
+        LOG_WARNING("send faild, connection is off");
+        return;
+    }
     int ret = NS_MICRO_THREAD::mt_send(this->fd, msg.c_str(), msg.size(), 0, 1000);
     if (ret == -4) {
         // 主动断开连接

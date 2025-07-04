@@ -113,9 +113,6 @@ static int consume_rdata(int clt_fd, const char* buf, int len, enum FD_OPT opt)
 	rdata.data = (void*)buf;
     WsConsumer cons;
     int ret = cons.ConsumerData(&rdata);
-    if(cons.SendedClose()) {
-    	ret |= 0x0100;
-    }
 	return ret;
 }
 
@@ -153,10 +150,10 @@ static void tgg_recv(void *arg)
 		tgg_close_cli(g_core_id, cli_fd);
 		return;
 	}
-	char buf[4 * 1024] = {0};
+	char buf[1024] = {0};
 	while (g_run_status) {
 		// 1、接收数据  mt_recv在没有数据包的情况下会阻塞，让出cpu给其他的action执行
-		ret = mt_recv(cli_fd, (void *)buf, 4 * 1024, 0, s_fd_timeout);
+		ret = mt_recv(cli_fd, (void *)buf, 1024, 0, s_fd_timeout);
 		if(ret == -1 && errno == ETIME) {
 			LOG_ERROR("client heart beat timeout, idx:%d.", idx);
 			break;
@@ -198,16 +195,19 @@ static void tgg_recv(void *arg)
 			LOG_ERROR("consume data failed.");				
 			break;
 		}
-		if(consume_ret & 0x0100) {// 已经发送过关闭帧了
+		if(tgg_get_cli_status(g_core_id, cli_fd) & FD_STATUS_CLOSING) {// 已经发送过关闭帧了
 			break;
 		}
 	}
-	if(!consume_ret || !(consume_ret & 0x0100)) {// 没发送过close
+	if(ret <= 0) {// 连接已断开，通知写协程，不必再执行发送
+		tgg_set_cli_status(g_core_id, cli_fd, FD_STATUS_DISCONNECTED);
+	}
+	if(!(tgg_get_cli_status(g_core_id, cli_fd) & FD_STATUS_CLOSING)) {// 没发送过close给gwcliprc
 		consume_rdata(cli_fd, NULL, 0, FD_CLOSE);
 	}
 	LOG_DEBUG("wait client[%d] close...", cli_fd);
 	// 等待连接在缓存中的数据被消费完才能关闭
-	int index = 1000*60;// 最长等待1分钟，关闭包会在trans队列中可能多次enqueue back，尽可能让数据包走正常流程关闭
+	int index = 100*60;// 最长等待1分钟，关闭包会在trans队列中可能多次enqueue back，尽可能让数据包走正常流程关闭
 	while(tgg_get_cli_idx(g_core_id, cli_fd) != TGG_FD_CLOSING && index > 0 && g_run_status) {
 	    mt_sleep(10);
 	    index--;
@@ -217,7 +217,7 @@ static void tgg_recv(void *arg)
 	}
 	close(cli_fd);// 这里不能使用mt_close,mt_close只设置标记，不会发送fin包，fd依然还存在
 	clean_client_data(cli_fd, idx);
-	LOG_WARNING("client[%d] closed.", cli_fd);
+	LOG_WARNING("client coreid[%d] fd[%d] idx[%d] closed.", g_core_id, cli_fd, idx);
 }
 
 static void tgg_do_send(tgg_write_data* wdata)
@@ -242,7 +242,7 @@ static void tgg_do_send(tgg_write_data* wdata)
 			}
 
 			// 是否需要发送数据
-			if (wdata->fd_opt & FD_WRITE) {
+			if (wdata->fd_opt & FD_WRITE && (!(tgg_get_cli_status(g_core_id, cli_fd) & FD_STATUS_DISCONNECTED))) {
 				int ret = mt_send(cli_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
 				if (ret == -4) {
 					// 主动断开连接
@@ -257,12 +257,12 @@ static void tgg_do_send(tgg_write_data* wdata)
 			if ( wdata->fd_opt & FD_CLOSE) {
 				LOG_INFO("Closing Connection[%d].", cli_fd);
 				tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSING);// 先设置标记，防止队列没人消费，影响其他连接
-				if(wdata->fd_opt & FD_WRITE) {
-					// 这里不能sleep，我们只有一个发送的协程，一旦sleep会影响其他fd的写入
-					// mt_sleep(1000);// ws的关闭帧发送完以后等待客户端先关闭，如果1s后没有关闭，我们要主动结束
-									// 到了这里后面的数据其实都应该要丢弃了，所以后续数据已经不重要了
-				}
-				mt_close(cli_fd);// TODO:待优化，在这里结束可能会报错，四次挥手不完整：epoll schedule failed, errno: 62
+				// if(wdata->fd_opt & FD_WRITE) {
+				// 	// 这里不能sleep，我们只有一个发送的协程，一旦sleep会影响其他fd的写入
+				// 	// mt_sleep(1000);// ws的关闭帧发送完以后等待客户端先关闭，如果1s后没有关闭，我们要主动结束
+				// 					// 到了这里后面的数据其实都应该要丢弃了，所以后续数据已经不重要了
+				// }
+				// mt_close(cli_fd);// TODO:待优化，在这里结束可能会报错，四次挥手不完整：epoll schedule failed, errno: 62
 								 // 但正常结束流程里close，需要等待30s，不可配置，freebsd内部控制
 			}
 		} else {
@@ -285,11 +285,16 @@ send_client_end:
 
 static void tgg_send(void *arg)
 {
+	// std::vector< std::list<void*> > vec_queue;
+	// vec_queue.reserve(TggConfigure::getInstance()->get_gwwrite_co_count());
+	// for(int i = 0; i < TggConfigure::getInstance()->get_gwwrite_co_count(); ++i) {
+	// 	mt_start_thread((void *)tgg_do_send, vec_queue[i]);
+	// }
 	while(g_run_status) {
 	    tgg_write_data* wdata = NULL;
 	    if (tgg_dequeue_write(g_core_id, &wdata) < 0) {
 	    	// 队列空
-			mt_sleep(10);
+			mt_sleep(5);
 	    	continue;
 	    }
 	    if (!wdata) {
