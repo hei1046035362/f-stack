@@ -55,7 +55,8 @@ void clean_all_bussiness_hash()
 
 static bool try_clean_trans_data(tgg_trans_data* tdata)
 {
-    if (tdata->fd_opt & FD_CLOSE) {
+    if (tdata->fd_opt & FD_CLOSE) {// 只要连接尚未关闭，就重入队列
+        LOG_DEBUG("try enque back trans queue, coreid[%d] fd[%d] idx[%d].", tdata->coreid, tdata->fd, tdata->idx);
         if(tgg_enqueue_trans(tdata) < 0) {// 这里不需要重试，重试也不能解决问题，这里是trans队列唯一消费的地方
             LOG_FATAL("enque back trans queue failed, coreid[%d] fd[%d] idx[%d].", tdata->coreid, tdata->fd, tdata->idx);
             clean_trans_data(tdata);// 失败的话，很可能回导致内存泄漏，需要观察
@@ -112,9 +113,9 @@ static void* deal_trans(void*)
         }
         if(vec_bwfdx.size() <= 0) {
             // 防止满队列，死锁 没有bwfdx时，所有连接全部关闭，所有数据全部丢弃
-            LOG_INFO("no bwfdx found, droped data.");
+            LOG_DEBUG("no bwfdx found, drop data.");
             Send2Fd(tdata->coreid, tdata->fd, tdata->idx, "", FD_WRITE|FD_CLOSE, 0);
-            try_clean_trans_data(tdata);
+            clean_trans_data(tdata);// 前面已经清空gwbwrcv侧的hash表了，这里不需要重入队列
             continue;
         }
 

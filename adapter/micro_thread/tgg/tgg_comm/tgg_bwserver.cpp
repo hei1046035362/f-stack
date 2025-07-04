@@ -226,9 +226,9 @@ static int write_data()
         };
         if(bdata->fd_opt & FD_CLOSE) {// 要在发送给bw之前先回给客户端，否则客户端收到的消息可能不及时，write会导致协程切换
             // 这里发送给客户端和清理hash表信息的顺序待商榷
-            Send2Client(cid, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
+            LOG_WARNING("catched an close cmd, coreid[%d] fd[%d] idx[%d] cid:%d.", bdata->coreid, bdata->fd, bdata->idx, cid);
+            Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
             tgg_free_session(bdata->coreid, bdata->fd, cid);
-            LOG_INFO("catched an close cmd, cid:%d.", cid);
         }
         std::string sdata;
         if(bdata->data_len > 0) {
@@ -265,6 +265,18 @@ void clean_queue_data()
     // 上次异常退出未处理的数据，先清理掉
     tgg_bw_data* bdata = NULL;
     while(tgg_dequeue_bwsnd(g_prc_id, &bdata) != -ENOENT) {
+        if(!bdata) {
+            continue;
+        }
+        int cid = tgg_get_cli_cid(bdata->coreid, bdata->fd);
+        if(cid > 0) {
+            if(bdata->fd_opt & FD_CLOSE) {// 要在发送给bw之前先回给客户端，否则客户端收到的消息可能不及时，write会导致协程切换
+                // 这里发送给客户端和清理hash表信息的顺序待商榷
+                LOG_WARNING("catched an close cmd, coreid[%d] fd[%d] idx[%d] cid:%d.", bdata->coreid, bdata->fd, bdata->idx, cid);
+                Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
+                tgg_free_session(bdata->coreid, bdata->fd, cid);
+            }
+        }
         clean_bw_data(g_prc_id, bdata);
     }
     // 初始化数据结构

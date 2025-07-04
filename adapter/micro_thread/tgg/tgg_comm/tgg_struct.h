@@ -87,8 +87,9 @@ enum FD_STATUS
     FD_STATUS_CONNECTED = 2,    // 有这个状态才能发包
     FD_STATUS_BIND = 4,    // 有这个状态才能发包
     FD_STATUS_KEEP = 8,
-    FD_STATUS_CLOSING = 16,  // 设置这个标记以后，关于这个fd的所有操作都要停止了，除了清理内存
-    FD_STATUS_CLOSED = 32    // 这个状态下或者为0才能接收新的连接
+    FD_STATUS_CLOSING = 16,  // gwrcv已发送close包给gwcliprc (只发送一次,发送过就不再发送)
+    FD_STATUS_CLOSED = 32,    // 这个状态下或者为0才能接收新的连接
+    FD_STATUS_DISCONNECTED = 64,  // 连接已断开
 };
 
 #define DEFAULT_WSDATA_LEN 4096   // ws默认缓存是4k，超过4k的连接  10w个连接就是400M，
