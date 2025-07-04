@@ -161,10 +161,17 @@ typedef struct st_read_data {
 // list<fd>  hash<gid, list<fd>> 这些一个gid/uid有多个fd的hash表的value
 typedef struct st_tgg_fd_list {
     int64_t fdidcid;// 存储在hash表中的是fdidcid，在线程或进程之间传递时是fd
-    // int idx;
-    rte_rwlock_t lock;
     struct st_tgg_fd_list* next;
 } tgg_fd_list;
+
+
+typedef struct st_tgg_fdidcid_list {
+    // int64_t fdidcid;// 存储在hash表中的是fdidcid，在线程或进程之间传递时是fd
+    // int idx;
+    rte_rwlock_t lock;// hash 表 value为list时，操作时需要锁
+    struct st_tgg_fd_list* list;
+} tgg_fd_hash_value;
+
 
 // list<fd,idx>  下行数据同一份数据发送给多个客户端时使用
 typedef struct st_tgg_fd_idx_list {
@@ -230,19 +237,23 @@ typedef struct st_pid_data {
 
 
 // gid hash data
-typedef tgg_fd_list tgg_gid_data;
+typedef tgg_fd_hash_value tgg_gid_data;
 
 // uid hash data
-typedef tgg_fd_list tgg_uid_data;
+typedef tgg_fd_hash_value tgg_uid_data;
 
 
 typedef struct st_list_iddata {
     char data[TGG_GID_LEN];
-    rte_rwlock_t lock;
     struct st_list_iddata* next;
 } tgg_list_id;
 
-typedef tgg_list_id tgg_gid_list;
+typedef struct st_cidgid_value {
+    rte_rwlock_t lock;
+    tgg_list_id* list;
+} tgg_fd_hash_svalue;
+
+typedef tgg_fd_hash_svalue tgg_gid_list;
 
 // cid hash value
 typedef struct st_tgg_cid_data {
