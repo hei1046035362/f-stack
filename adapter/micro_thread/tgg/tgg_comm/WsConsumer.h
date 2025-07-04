@@ -10,13 +10,11 @@ class WsConsumer : Websocket
 {
 public:
 
-    WsConsumer() {_status = FD_STATUS_READYFORCONNECT;}
+    WsConsumer() {}
 
     virtual ~WsConsumer() {}
 
     int ConsumerData(void* data);
-
-    bool SendedClose() {return _status == FD_STATUS_CLOSING;}
 
 protected:
     bool ConnectionValid(int core_id, int fd, void* data);
@@ -58,9 +56,6 @@ private:
 
 private:
     int _idx;
-    int _status;
-    std::string _uid;
-    int _cid;
     void* data;
 };
 

@@ -74,12 +74,13 @@ int generate_bwfdx(int prc_id, int fd)
     return ((fd << 8) | prc_id);
 }
 
-static int s_cur_cli_idx = 1;
+static int s_cur_cli_idx = 0;
 int get_valid_idx(int core_id)
 {
 	int looptimes = 2;
 	while (1) {
 		// TODO  后续要考虑自增id超过uint32_max了怎么处理，
+		++s_cur_cli_idx;
 		if(s_cur_cli_idx >= g_fd_limit) {
 			s_cur_cli_idx = 1;
 			looptimes--;
@@ -90,10 +91,8 @@ int get_valid_idx(int core_id)
 			return -1;
 		}
 		if(tgg_check_idx_exist(core_id, s_cur_cli_idx) < 0) {
-			s_cur_cli_idx++;
 			break;
 		}
-		s_cur_cli_idx++;
 	}
 	LOG_INFO("valid idx %d.", s_cur_cli_idx);
 	return s_cur_cli_idx;
@@ -126,6 +125,7 @@ int tgg_init_cli(int core_id, int fd, char* ip_str, uint32_t ip, ushort port)
 		LOG_ERROR("init client failed, add idx:%d failed, core id:%d fd:%d.", cli->idx, core_id, fd);
 		return -1;
 	}
+	cli->status = 0;
 	cli->authorized = 0;
 	memcpy(cli->ip_str, ip_str, INET_ADDRSTRLEN);
 	cli->ip = ip;

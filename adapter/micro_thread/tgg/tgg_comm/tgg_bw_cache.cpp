@@ -118,7 +118,7 @@ static int tgg_hash_del_key(const rte_hash* hash, rte_rcu_qsbr *rcu, const char*
     tgg_fd_list *current = node_list->list;
     tgg_fd_list *tmp;
     while (current) {
-        LOG_DEBUG("deleted hash[%s] key[%d] node[%ld].", hash->name, key, current->fdidcid);
+        LOG_DEBUG("deleted hash[%s] key[%s] node[%ld].", hash->name, key, current->fdidcid);
         tmp = current;
         current = current->next;
         dpdk_rte_free(tmp); // 归还节点到内存池
@@ -171,7 +171,7 @@ static int tgg_hash_del_fdlst4key(const rte_hash* hash, rte_rcu_qsbr *rcu, const
                 node_list->list = current->next;
             }
             dpdk_rte_free(current); // 归还节点到内存池
-            LOG_INFO("deleted hash[%s] key[%d] node[%ld].", hash->name, key, fdidcid);
+            LOG_INFO("deleted hash[%s] key[%s] node[%ld].", hash->name, key, fdidcid);
             found = 1;
             break;
         }
@@ -202,7 +202,7 @@ static int tgg_hash_del_fdlst4key(const rte_hash* hash, rte_rcu_qsbr *rcu, const
     }
 
     if(!found) {
-        LOG_ERROR("hash[%s] key[%d] node[%ld] not found.", hash->name, key, fdidcid);
+        LOG_ERROR("hash[%s] key[%s] node[%ld] not found.", hash->name, key, fdidcid);
     }
     rte_rwlock_write_unlock(&node_list->lock);
     return found ? 0 : -1; // 返回是否找到并删除
@@ -327,7 +327,7 @@ static int tgg_hash_del_intkey(const rte_hash* hash, rte_rcu_qsbr *rcu, int64_t 
 
     // 查找哈希表项
     if (rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(int64_t), 0), (void**)&node_list) < 0) {
-        LOG_WARNING("delete hash[%s] key[%ld] not found.", hash->name, key);
+        LOG_INFO("delete hash[%s] key[%ld] not found.", hash->name, key);
         return -1; // 键不存在
     }
 
