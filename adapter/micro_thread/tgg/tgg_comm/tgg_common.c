@@ -394,7 +394,12 @@ int tgg_set_bw_prcstatus(int prc_id, int status)
 void tgg_new_bw_session(int prc_id, int fd, int cmd,
 						const char* workerkey, uint32_t remote_ip, ushort remote_port)
 {
-	tgg_clean_bwfdx(prc_id, fd);
+	if(tgg_get_bwfdx_status(prc_id, fd) > 0) {
+		LOG_WARNING("connection[prcid:%d fd:%d] prev info not cleaned, clean first.", prc_id, fd);
+		tgg_close_bw_session(prc_id, fd);
+	} else{
+	 	tgg_clean_bwfdx(prc_id, fd);
+	}
 	tgg_set_bwfdx_workerkey(prc_id, fd, workerkey);
 	tgg_set_bwfdx_cmd(prc_id, fd, cmd);
     tgg_set_bwfdx_ip(prc_id, fd, remote_ip);
