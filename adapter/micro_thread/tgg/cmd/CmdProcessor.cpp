@@ -46,7 +46,7 @@ static int get_remote_info(int sockfd, uint32_t& ip, ushort& port)
     socklen_t addrlen = sizeof(remote_addr);
     // 获取远端地址信息
     if (getpeername(sockfd, (struct sockaddr *)&remote_addr, &addrlen) == -1) {
-        LOG_ERROR("getpeername error.");
+        LOG_ERROR("getpeername error:%s.", strerror(errno));
         return -1;
     }
     // 获取 IP 地址
@@ -226,6 +226,10 @@ int CmdKick::ExecCmd()
     // Send2Client(cid, body, FD_WRITE, !raw);
     Send2Client(cid, "kick", FD_WRITE|FD_CLOSE, !raw);
     int64_t fdidcid = tgg_get_fdbycid(cid);
+    if(fdidcid <= 0) {
+        LOG_DEBUG("Kick: cmd executed failed, get fdidcid[%ld] by cid[%d] failed.", fdidcid, cid);
+        return -1;
+    }
     tgg_free_session(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), cid);
     LOG_DEBUG("Kick: cmd executed cid[%d].", cid);
     return 0;
@@ -654,7 +658,7 @@ int CmdSendToUid::ExecCmd()
         BatchSend2ClientByfds(lst_fds, body, FD_WRITE, !raw);
         LOG_DEBUG("SendToUid: cmd exec success.");
     } else {
-        LOG_WARNING("SendToUid: no fd found for all uids[%s].", juid["ext_data"].get<std::string>().c_str());
+        LOG_WARNING("SendToUid: no fd found for all uids[%s].", jdata["ext_data"].get<std::string>().c_str());
     }
     return 0;
 }

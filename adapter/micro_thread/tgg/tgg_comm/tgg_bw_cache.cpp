@@ -471,6 +471,7 @@ int tgg_get_fdsbygid(const char* gid, std::list<int64_t>& lst_fd)
     APROPRIAT_HASH_KEY(gid, TGG_GID_LEN);
     tgg_gid_data* value = (tgg_gid_data*)tgg_hash_get_value(g_gid_hash, _key, TGG_GID_LEN);
     if(!value) {
+        LOG_DEBUG("get fdlist failed by gid[%s], value is empty.", gid);
         return -1;
     }
     ReadLock lock(&value->lock);
@@ -595,7 +596,7 @@ int tgg_get_fdsbyuid(const char* uid, std::list<int64_t>& lst_fd)
     // ReadLock lock(get_uidfd_lock());
     tgg_uid_data* value = (tgg_uid_data*)tgg_hash_get_value(g_uid_hash, _key, TGG_UID_LEN);
     if(!value) {
-        LOG_INFO("[%s][%d]get fdidcid by uid[%s] failed.", uid);
+        LOG_INFO("get fdidcid by uid[%s] failed.", uid);
         return -1;
     }
     ReadLock lock(&value->lock);
@@ -669,6 +670,7 @@ int64_t tgg_get_fdbycid(int64_t cid)
 {
     int64_t* value = (int64_t*)tgg_hash_get_intkey_value(g_cid_hash, cid);
     if(!value) {
+        LOG_DEBUG("get fd by cid:%ld failed, value is NULL.", cid);
         return -1;
     }
     return *value;
