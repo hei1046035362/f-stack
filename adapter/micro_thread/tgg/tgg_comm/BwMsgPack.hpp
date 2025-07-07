@@ -62,11 +62,14 @@ public:
         // bwjdata = nlohmann::json::parse(body)
         int body_len = bwdata->pack_len - bwdata->ext_len - sizeof(tgg_bw_protocal);
         if(body_len > 0) {
-            std::string body(bwdata->data + bwdata->ext_len, // body的起始位置
-                             body_len); // body的长度
-            bwjdata["body"] = bin2hex(body);// TODO 存内容改为存地址，json无法直接存储二进制数据，后续执行命令的时候再转回来
+            // std::string body(bwdata->data + bwdata->ext_len, // body的起始位置
+            //                  body_len); // body的长度
+            // bwjdata["body"] = bin2hex(body);// TODO 存内容改为存地址，json无法直接存储二进制数据，后续执行命令的时候再转回来
+            bwjdata["body"] = reinterpret_cast<uintptr_t>(bwdata->data + bwdata->ext_len);
+            bwjdata["body_len"] = body_len;
         } else {
-            bwjdata["body"] = "";
+            bwjdata["body"] = reinterpret_cast<uintptr_t>(nullptr);
+            bwjdata["body_len"] = 0;
         }
         if(bwdata->ext_len > 0) {
             std::string ext_data(bwdata->data, bwdata->ext_len);
