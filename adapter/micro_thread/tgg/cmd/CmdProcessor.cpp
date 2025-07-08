@@ -24,6 +24,19 @@
 static int s_compress_flag = 0;
 static int s_is_open_binary = 0;
 
+static void get_body_string(const nlohmann::json& jdata, std::string& body)
+{
+    if(jdata["body"].is_string()) {
+        body = jdata["body"].get<std::string>();
+    } else {
+        const char* sbody = reinterpret_cast<char*>(jdata["body"].get<uintptr_t>());
+        int body_len = jdata["body_len"].get<int>();
+        if(body_len) {
+            body = std::move(std::string(sbody, body_len));
+        }
+    }  
+}
+
 void CmdBaseProcessor::Send2BW(const nlohmann::json& data, bool serialize)
 {
     std::string result = std::move(serialize ? Php_Serialize(data) : data.dump());
@@ -67,7 +80,9 @@ int CmdWorkerConnect::ExecCmd()
 {
     std::string bwSeckey = TggConfigure::getInstance()->get_secret_key();// tgg_get_bwfdx_seckey(this->prc_id, this->fd);
     try {
-        nlohmann::json worker_info = nlohmann::json::parse(std::string(jdata["body"]));
+        std::string body;
+        get_body_string(jdata, body);
+        nlohmann::json worker_info = nlohmann::json::parse(body);
         if (worker_info["secret_key"].get<std::string>() != bwSeckey) {
             LOG_ERROR("Gateway: Worker key[%s] does not match conn key[%s].", 
                 worker_info["secretKey"].get<std::string>().c_str(), bwSeckey.c_str());
@@ -123,7 +138,9 @@ int CmdGatewayClientConnect::ExecCmd()
             return -1;
         }
         // printf("jdata:%s\n", jdata.dump(4).c_str());
-        nlohmann::json worker_info = nlohmann::json::parse(std::string(jdata["body"]));
+        std::string body;
+        get_body_string(jdata, body);
+        nlohmann::json worker_info = nlohmann::json::parse(body);
         if (worker_info["secret_key"].get<std::string>() != bwSeckey) {
             LOG_ERROR("Gateway: Worker key[%s] does not match conn key[%s].", 
                 worker_info["secretKey"].get<std::string>().c_str(), bwSeckey.c_str());
@@ -131,6 +148,7 @@ int CmdGatewayClientConnect::ExecCmd()
             //tgg_close_bw_session(this->prc_id, this->fd);
             return -1;
         }
+        LOG_DEBUG("GatewayClientConnect: cmd executed body:%s.", body.c_str());
     } catch (const nlohmann::json::exception& e) {
     // 捕获其他任何未预料到的异常
         LOG_ERROR("Exception catched:%s.", e.what());
@@ -138,8 +156,6 @@ int CmdGatewayClientConnect::ExecCmd()
         // free_bw_session(this->prc_id, this->fd);
         return -1;
     }
-    LOG_DEBUG("GatewayClientConnect: cmd executed body:%s.",
-     jdata["body"].dump().c_str());
     // CMD_GATEWAY_CLIENT_CONNECT 类型的连接没有workerkey
     tgg_new_bw_session(this->prc_id, this->fd, GatewayProtocal::CMD_GATEWAY_CLIENT_CONNECT, "");
     return 0;
@@ -149,10 +165,10 @@ int CmdSendToOne::ExecCmd()
 {
     int cid = jdata["connection_id"];
     int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
-    std::string body = std::move(hex2bin(jdata["body"].get<std::string>()));
-    // TODO 目前只支持ws发送
-    LOG_DEBUG("SendToOne: cmd executed cid[%d] data:%s.",
-     cid, jdata["body"].get<std::string>().c_str());
+    std::string body;
+    get_body_string(jdata, body);
+  // TODO 目前只支持ws发送
+    LOG_DEBUG("SendToOne: cmd executed cid[%d] data:%s.", cid, body.c_str());
     Send2Client(cid, body, FD_WRITE, !raw);
     return 0;
 }
@@ -160,7 +176,8 @@ int CmdSendToOne::ExecCmd()
 int CmdSendToGroup::ExecCmd()
 {
     int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
-    std::string body = hex2bin(jdata["body"].get<std::string>());
+    std::string body;
+    get_body_string(jdata, body);
     // 要排除的cid
     std::set<std::string> setExeptCid;
     nlohmann::json ext_data = nlohmann::json::parse(jdata["ext_data"].get<std::string>());
@@ -250,7 +267,8 @@ int CmdDestroy::ExecCmd()
 int CmdSendToALL::ExecCmd()
 {
     int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
-    std::string body = hex2bin(jdata["body"].get<std::string>());
+    std::string body;
+    get_body_string(jdata, body);
     // if(!raw) {
     // }
 
@@ -268,7 +286,7 @@ int CmdSendToALL::ExecCmd()
                 BatchSend2ClientBycids(lstCids, body, FD_WRITE, !raw);
             }
         }
-        LOG_DEBUG("SendToALL: cmd executed cids[%s] data:%s.", ext_data.c_str(), jdata["body"].get<std::string>().c_str());
+        LOG_DEBUG("SendToALL: cmd executed cids[%s] body:%s.", ext_data.c_str(), body.c_str());
         return 0;
     }
 
@@ -282,7 +300,7 @@ int CmdSendToALL::ExecCmd()
         BatchSend2ClientByfds(lstFds, body, FD_WRITE, !raw);
     }
  
-    LOG_DEBUG("SendToALL: sendto all clients, extend:%s.", jdata["body"].get<std::string>().c_str());
+    LOG_DEBUG("SendToALL: sendto all clients, extend:%s.", ext_data.c_str());
     return 0;
 }
 
@@ -642,7 +660,8 @@ int CmdUnBindUid::ExecCmd()
 int CmdSendToUid::ExecCmd()
 {
     bool raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
-    std::string body = jdata["body"];
+    std::string body;
+    get_body_string(jdata, body);
     std::list<int64_t> lst_fds;
     nlohmann::json juid = nlohmann::json::parse(jdata["ext_data"].get<std::string>());
     std::vector<std::string> vec_uids = juid.get<std::vector<std::string> >();
@@ -879,38 +898,40 @@ static int json_parse_body(unsigned char flag, nlohmann::json& jdata)//const std
     int cmd = 0;
     std::string result;
     nlohmann::json obj;
-    std::string body = jdata["body"].get<std::string>();
-    if(body.length() <= 4) {
-        LOG_DEBUG("invalid body length:%d.", body.length());
+    const char* body = reinterpret_cast<char*>(jdata["body"].get<uintptr_t>());
+    int body_len = jdata["body_len"].get<int>();
+    if(body_len <= 2) {
+        LOG_DEBUG("invalid body length:%d.", body_len);
         return 0;
     }
-    //                                           0x32 -> ":"                 0x7b -> "{"
-    if(body.length() > 4 && body.substr(2, 2) != "3a" && body.substr(0, 2) != "7b") {
+    //                            0x32 -> ":"       0x7b -> "{"
+    if(body_len > 2 && body[1] != 0x3a && body[0] != 0x7b) {
         // 当前body为字符串，需要在发送的时候转换成二进制
         std::string print_data;
-        if(body.substr(0, 4) == "fffe") {
-            std::string bin_data = hex2bin(body);
-            message_unpack(bin_data, print_data);
+        if(body[0] == 0xff && body[1] == 0xfe) {
+            // std::string bin_data = hex2bin(body);
+            message_unpack(body, print_data);
         } else {
-            print_data = body;
+            print_data = std::move(std::string(body, body_len));
         }
         LOG_DEBUG("send to cli data:%s", print_data.c_str());
         return 0;
     }
-    jdata["body"] = hex2bin(body);
+    // jdata["body"] = hex2bin(body);
+    // 走到这里来的都是字符串
     try {
         
         if(!flag) {
-            obj = Php_UnSerialize(jdata["body"].get<std::string>());
+            obj = Php_UnSerialize(std::move(body));
         } else {
-            obj = nlohmann::json::parse(jdata["body"].get<std::string>());
+            obj = nlohmann::json::parse(body);
         }
         jdata["body"] = obj.dump();
+        LOG_DEBUG("body: %s", body.c_str());
         if(!obj.contains("cmd")) {// 没有cmd就不需要解包
-            LOG_DEBUG("no cmd found in body:\n%s.", jdata["body"].get<std::string>().c_str());
+            LOG_DEBUG("no cmd found in body:\n%s.", body);
             return 0;
         }
-        LOG_DEBUG("body: %s", obj.dump(4).c_str());
         cmd = obj["cmd"].get<std::int32_t>();
     } catch (const nlohmann::json::parse_error& e) {
         LOG_ERROR("parse json error:%s", e.what());

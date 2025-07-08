@@ -1,194 +1,237 @@
 #include "Serialize.hpp"
-#include <iostream>
-#include <sstream>
+#include <string>
+#include <stdexcept>
+#include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
 
-// 递归序列化函数
-std::string Php_Serialize(const json& j) {
-    std::stringstream ss;
-
-    if (j.is_object()) {
-        // 对象 -> PHP关联数组格式
-        ss << "a:" << j.size() << ":{";
-        for (auto it = j.begin(); it != j.end(); ++it) {
-            ss << "s:" << it.key().size() << ":\"" << it.key() << "\";" 
-               << Php_Serialize(it.value());
-        }
-        ss << "}";
-    } else if (j.is_array()) {
-        // 数组 -> PHP索引数组格式
-        ss << "a:" << j.size() << ":{";
-        for (size_t i = 0; i < j.size(); ++i) {
-            ss << "i:" << i << ";" << Php_Serialize(j[i]);
-        }
-        ss << "}";
-    } else if (j.is_string()) {
-        // 字符串 -> PHP字符串格式
-        ss << "s:" << j.get<std::string>().size() << ":\"" << j.get<std::string>() << "\";";
-    } else if (j.is_number_integer()) {
-        // 整数 -> PHP整数格式
-        ss << "i:" << j.get<int>() << ";";
-    } else if (j.is_number_float()) {
-        // 浮点数 -> PHP浮点数格式
-        ss << "d:" << j.get<double>() << ";";
-    } else if (j.is_boolean()) {
-        // 布尔值 -> PHP布尔值格式
-        ss << "b:" << (j.get<bool>() ? 1 : 0) << ";";
-    } else if (j.is_null()) {
-        // 空值 -> PHP NULL
-        ss << "N;";
-    } else {
-        throw std::invalid_argument("Unsupported JSON type for PHP serialization.");
+class PhpSerializer {
+public:
+    // Unserialize PHP serialized string to JSON
+    static json unserialize(const std::string& input) {
+        size_t pos = 0;
+        return parseValue(input, pos);
     }
 
-    return ss.str();
+    // Serialize JSON to PHP serialized string
+    static std::string serialize(const json& j) {
+        std::string result;
+        // Estimate initial capacity to reduce reallocations
+        size_t estimated_size = estimateSerializedSize(j);
+        result.reserve(estimated_size);
+        serializeValue(j, result);
+        return result;
+    }
+
+    // PHP's array_replace_recursive equivalent
+    static json array_replace_recursive(const json& base, const json& replacement) {
+        if (!base.is_object() && !base.is_array()) {
+            return replacement;
+        }
+        if (!replacement.is_object() && !replacement.is_array()) {
+            return replacement;
+        }
+
+        json result = base;
+        for (auto& item : replacement.items()) {
+            if (base.contains(item.key())) {
+                if (base[item.key()].is_object() && item.value().is_object()) {
+                    result[item.key()] = array_replace_recursive(base[item.key()], item.value());
+                } else {
+                    result[item.key()] = item.value();
+                }
+            } else {
+                result[item.key()] = item.value();
+            }
+        }
+        return result;
+    }
+
+private:
+    // Parse a single value from PHP serialized string
+    static json parseValue(const std::string& input, size_t& pos) {
+        if (pos >= input.length()) {
+            throw std::runtime_error("Unexpected end of input");
+        }
+
+        char type = input[pos];
+        pos += 2; // Skip type and colon
+
+        switch (type) {
+            case 's': return parseString(input, pos);
+            case 'i': return parseInteger(input, pos);
+            case 'd': return parseDouble(input, pos);
+            case 'b': return parseBoolean(input, pos);
+            case 'a': return parseArray(input, pos);
+            case 'N': pos++; return nullptr;
+            default: throw std::runtime_error("Unknown type: " + std::string(1, type));
+        }
+    }
+
+    static std::string parseString(const std::string& input, size_t& pos) {
+        size_t colon = input.find(':', pos);
+        if (colon == std::string::npos) {
+            throw std::runtime_error("Invalid string format");
+        }
+        int length = std::stoi(input.substr(pos, colon - pos));
+        pos = colon + 2;
+        std::string result = input.substr(pos, length);
+        pos += length + 2;
+        return result;
+    }
+
+    static int parseInteger(const std::string& input, size_t& pos) {
+        size_t semicolon = input.find(';', pos);
+        if (semicolon == std::string::npos) {
+            throw std::runtime_error("Invalid integer format");
+        }
+        int result = std::stoi(input.substr(pos, semicolon - pos));
+        pos = semicolon + 1;
+        return result;
+    }
+
+    static double parseDouble(const std::string& input, size_t& pos) {
+        size_t semicolon = input.find(';', pos);
+        if (semicolon == std::string::npos) {
+            throw std::runtime_error("Invalid double format");
+        }
+        double result = std::stod(input.substr(pos, semicolon - pos));
+        pos = semicolon + 1;
+        return result;
+    }
+
+    static bool parseBoolean(const std::string& input, size_t& pos) {
+        if (input[pos] == '0' || input[pos] == '1') {
+            bool result = input[pos] == '1';
+            pos += 2;
+            return result;
+        }
+        throw std::runtime_error("Invalid boolean format");
+    }
+
+    static json parseArray(const std::string& input, size_t& pos) {
+        size_t colon = input.find(':', pos);
+        if (colon == std::string::npos) {
+            throw std::runtime_error("Invalid array format");
+        }
+        int size = std::stoi(input.substr(pos, colon - pos));
+        pos = colon + 2;
+        json result = json::object();
+        for (int i = 0; i < size; ++i) {
+            json key = parseValue(input, pos);
+            json value = parseValue(input, pos);
+            if (key.is_number()) {
+                if (!result.is_array()) {
+                    json temp = json::array();
+                    for (auto& item : result.items()) {
+                        temp[item.key()] = item.value();
+                    }
+                    result = temp;
+                }
+                result[key.get<int>()] = value;
+            } else {
+                result[key.get<std::string>()] = value;
+            }
+        }
+        pos++;
+        return result;
+    }
+
+    // Estimate serialized string size for pre-allocation
+    static size_t estimateSerializedSize(const json& j) {
+        size_t size = 0;
+        if (j.is_null()) {
+            size += 2; // "N;"
+        } else if (j.is_boolean()) {
+            size += 4; // "b:0;" or "b:1;"
+        } else if (j.is_number_integer()) {
+            size += 12; // "i:" + up to 10 digits + ";"
+        } else if (j.is_number_float()) {
+            size += 24; // "d:" + up to 22 chars for double + ";"
+        } else if (j.is_string()) {
+            std::string s = j.get<std::string>();
+            size += s.length() + 16; // "s:" + length digits + ":\"\";" + string
+        } else if (j.is_array() || j.is_object()) {
+            size += 16; // "a:" + size digits + ":{}"
+            for (auto& item : j.items()) {
+                size += estimateSerializedSize(item.key());
+                size += estimateSerializedSize(item.value());
+            }
+        }
+        return size;
+    }
+
+    // Serialize JSON value to PHP serialized format using std::string
+    static void serializeValue(const json& j, std::string& result) {
+        if (j.is_null()) {
+            result += "N;";
+        } else if (j.is_boolean()) {
+            result += "b:";
+            result += j.get<bool>() ? "1" : "0";
+            result += ";";
+        } else if (j.is_number_integer()) {
+            result += "i:";
+            result += std::to_string(j.get<int>());
+            result += ";";
+        } else if (j.is_number_float()) {
+            result += "d:";
+            result += std::to_string(j.get<double>());
+            result += ";";
+        } else if (j.is_string()) {
+            std::string s = j.get<std::string>();
+            result += "s:";
+            result += std::to_string(s.length());
+            result += ":\"";
+            result += s;
+            result += "\";";
+        } else if (j.is_array() || j.is_object()) {
+            result += "a:";
+            result += std::to_string(j.size());
+            result += ":{";
+            for (auto& item : j.items()) {
+                if (j.is_array()) {
+                    serializeValue(json(std::stoi(item.key())), result);
+                } else {
+                    serializeValue(item.key(), result);
+                }
+                serializeValue(item.value(), result);
+            }
+            result += "}";
+        } else {
+            throw std::runtime_error("Unsupported JSON type");
+        }
+    }
+};
+
+// Example usage
+/*
+int main() {
+    try {
+        std::string php_str = "a:2:{s:3:\"key\";s:5:\"value\";i:1;d:42.5;}";
+        json result = PhpSerializer::unserialize(php_str);
+        std::cout << "Unserialized: " << result.dump(2) << std::endl;
+
+        std::string serialized = PhpSerializer::serialize(result);
+        std::cout << "Serialized: " << serialized << std::endl;
+
+        json base = PhpSerializer::unserialize("a:2:{s:3:\"key\";s:5:\"value\";s:4:\"nest\";a:1:{s:2:\"in\";i:1;}}");
+        json replacement = PhpSerializer::unserialize("a:2:{s:3:\"key\";s:3:\"new\";s:4:\"nest\";a:1:{s:2:\"in\";i:2;}}");
+        json merged = PhpSerializer::array_replace_recursive(base Agilent, replacement);
+        std::cout << "Merged: " << merged.dump(2) << std::endl;
+        std::cout << "Serialized merged: " << PhpSerializer::serialize(merged) << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+    }
+    return 0;
+}
+*/
+
+// 递归序列化函数
+std::string Php_Serialize(const json& j) {
+    return PhpSerializer::serialize(j);
 }
 
 nlohmann::json Php_UnSerialize(const std::string& input) {
-    size_t pos = 0;//input.find('{') + 1;
-    
-    auto skipWhitespace = [&]() {
-        while (pos < input.length() && std::isspace(input[pos])) pos++;
-    };
-    
-    auto parseStringLength = [&]() {
-        skipWhitespace();
-        size_t lenEnd = input.find(':', pos);// 取字符串的长度(字符串)或元素个数(对象)
-        if (lenEnd == std::string::npos) return (size_t)0;
-        
-        size_t len = std::stoi(input.substr(pos, lenEnd - pos));
-        pos = lenEnd + 2; // 跳过 ":"
-        return len;
-    };
-
-    auto parseString = [&](size_t len) {
-        if (pos + len > input.length()) return std::string();
-        std::string str = input.substr(pos, len);
-        pos += len + 2; // 跳过字符串和引号
-        return str;
-    };
-
-    std::function<nlohmann::json()> parseValue = [&]() {
-        skipWhitespace();
-        
-        // 字符串
-        if (input[pos] == 's') {
-            pos += 2;
-            size_t len = parseStringLength();
-            return nlohmann::json(parseString(len));
-        }
-        // 整数
-        else if (input[pos] == 'i') {
-            pos += 2;
-            size_t end = input.find(';', pos);
-            int val = std::stoi(input.substr(pos, end - pos));
-            pos = end + 1;
-            return nlohmann::json(val);
-        }
-        // 浮点数
-        else if (input[pos] == 'd') {
-            pos += 2;
-            size_t end = input.find(';', pos);
-            double val = std::stod(input.substr(pos, end - pos));
-            pos = end + 1;
-            return nlohmann::json(val);
-        }
-        // 布尔值
-        else if (input[pos] == 'b') {
-            pos += 2;
-            bool val = (input[pos] == '1');
-            pos += 2;
-            return nlohmann::json(val);
-        }
-        // Null
-        else if (input[pos] == 'N') {
-            pos += 2;
-            return nlohmann::json(nullptr);
-        }
-        // 数组
-        else if (input[pos] == 'a') {
-            pos += 2;
-            size_t arrayLen = parseStringLength();
-            
-            nlohmann::json arr = arrayLen == 1 ? nlohmann::json::object() : nlohmann::json::array();
-            
-            for (size_t i = 0; i < arrayLen; ++i) {
-                skipWhitespace();
-                
-                // 解析键
-                nlohmann::json key;
-                if (input[pos] == 'i') {
-                    pos += 2;
-                    size_t end = input.find(';', pos);
-                    int nkey = std::stoi(input.substr(pos, end - pos));
-                    key = nkey;
-                    pos = end + 1;
-                    arr = nlohmann::json::array();
-                }
-                else if (input[pos] == 's') {
-                    pos += 2;
-                    size_t len = parseStringLength();
-                    std::string skey = parseString(len);
-                    key = skey;
-                }
-                
-                // 解析值
-                nlohmann::json value = parseValue();
-                
-                if (arr.is_object()) {
-                    std::string sKey = key.dump();
-                    sKey.erase(std::remove(sKey.begin(), sKey.end(), '\"'), sKey.end());
-                    arr[sKey] = value;
-                } else {
-                    if (!key.is_null() && !key.is_number_integer()) {// key 为整数说明是数组下标，下标不需要保存
-                        nlohmann::json obj;
-                        std::string sKey = key.dump();
-                        sKey.erase(std::remove(sKey.begin(), sKey.end(), '\"'), sKey.end());
-                        obj[sKey] = value;
-                        arr.push_back(obj);
-                    } else {
-                        arr.push_back(value);
-                    }
-                }
-                // std::cout << "key:" << key.dump() << std::endl;
-                // std::cout << "value:" << value.dump() << std::endl;
-                // std::cout << "array:" << arr.dump(4) << std::endl;
-            }
-            
-            pos++; // 跳过 }
-            return arr;
-        }
-        
-        throw std::runtime_error("Unknown type at position " + std::to_string(pos));
-    };
-    
-    return parseValue();
+    return PhpSerializer::unserialize(input);
 }
 
-// int main() {
-//     // 构造 JSON 数据
-//     json data = {
-//         {"487336", {
-//             {"groups", json::array({"416078112896319488"})},
-//             {"uid", "416078112896319488"}
-//         }}
-//     };
-
-//     // 序列化为 PHP 格式
-//     std::string php_serialized = Php_Serialized(data);
-//     std::cout << "PHP Serialized Data:\n" << php_serialized << std::endl;
-//     // std::string serialized_data = "a:1:{s:6:\"487336\";a:2:{s:6:\"groups\";a:1:{i:0;s:18:\"416078112896319488\";}s:3:\"uid\";s:18:\"416078112896319488\";}";
-//     std::string phpSerialized = "a:1:{s:6:\"487336\";a:2:{s:6:\"groups\";a:1:{i:0;s:18:\"416078112896319488\";}s:3:\"uid\";s:18:\"416078112896319488\";}}";
-    
-//     try {
-        
-//         nlohmann::json result = Php_UnSerialize(phpSerialized);
-        
-//         std::cout << result.dump(4) << std::endl;
-//     } 
-//     catch (const std::exception& e) {
-//         std::cerr << "Parse error: " << e.what() << std::endl;
-//     }
-//     return 0;
-// }
