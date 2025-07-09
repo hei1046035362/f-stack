@@ -30,7 +30,8 @@ endif
 CC = g++
 
 # You shouldn't need to make any more changes below this line.
-INCCOMM=-I./valgrind -I$(FF_PATH)/lib -I$(FF_PATH)/adapter/micro_thread -I$(FF_PATH)/adapter/micro_thread/tgg -I${FF_PATH}/app/libco/
+INCCOMM=-I./valgrind -I$(FF_PATH)/lib -I$(FF_PATH)/adapter/micro_thread -I$(FF_PATH)/adapter/micro_thread/tgg -I${FF_PATH}/app/libco/ \
+		-I${FF_PATH}/app/rapidjson/include
 SOURCE_FILES := $(wildcard cmd/*.c cmd/*.cpp comm/*.c comm/*.cpp tgg_comm/*.c tgg_comm/*.cpp ./*.c)
 #.c.o:
 #	$(CC) -c $*.c

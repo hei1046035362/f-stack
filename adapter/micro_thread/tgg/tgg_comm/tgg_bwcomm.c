@@ -201,6 +201,19 @@ int message_pack(uint16_t command, uint32_t seq, uint8_t protocol,
     return 0;
 }
 
+#include "rapidjson/document.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
+
+// 辅助函数：将 rapidjson::Value 转换为字符串
+static std::string rapidjson_to_string(const rapidjson::Value& val)
+{
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    val.Accept(writer);
+    return buffer.GetString();
+}
+
 int message_unpack(const std::string& packedData, std::string& result)
 {
     const unsigned int PACKAGE_SEPARATOR = 65534;
@@ -269,16 +282,31 @@ int message_unpack(const std::string& packedData, std::string& result)
         body = compressedBody;
     }
 
-    nlohmann::json jdata; 
-
-    // 将解析结果整理到结果向量中
-    jdata["cmd"] = command;
-    jdata["seq"] = seq;
-    jdata["version"] = version;
-    jdata["compressFormat"] = compressFormat;
-    jdata["body"] = bin2hex(body);
-    result = jdata.dump();
-
+    // 结果存储成json
+    rapidjson::Document jdata;
+    jdata.SetObject();
+    rapidjson::Document::AllocatorType& allocator = jdata.GetAllocator();
+    
+    // 添加字段（需显式管理内存）
+    jdata.AddMember("cmd", 
+                   rapidjson::Value().SetInt(command), 
+                   allocator);
+    jdata.AddMember("seq", 
+                   rapidjson::Value().SetUint(seq), 
+                   allocator);
+    jdata.AddMember("version", 
+                   rapidjson::Value().SetInt(version), 
+                   allocator);
+    jdata.AddMember("compressFormat", 
+                   rapidjson::Value().SetInt(compressFormat), 
+                   allocator);
+    
+    // 处理二进制数据（假设bin2hex返回std::string）
+    std::string hexBody = bin2hex(body);
+    jdata.AddMember("body", 
+                   rapidjson::Value().SetString(hexBody.c_str(), hexBody.size(), allocator).Move(), 
+                   allocator);
+    result = rapidjson_to_string(jdata);
     return 0;
 }
 
