@@ -268,17 +268,23 @@ int main(int argc, char *argv[])
 
     unsigned int port = TggConfigure::getInstance()->get_register_port();
     const std::string& ip = TggConfigure::getInstance()->get_register_addr();
-    g_register_fd = connect_tcp_socket( port, ip.c_str());
-    while (g_register_fd < 0 && g_run) {// 没连上就每隔5s重连一次
-        LOG_INFO("connect to register[%s:%d] failed, check if server is alive.", ip.c_str(), port);
-        poll(NULL, 0, 5000);// sleep 5s
+    while(g_run) {
         g_register_fd = connect_tcp_socket( port, ip.c_str());
-    }
+        while (g_register_fd < 0 && g_run) {// 没连上就每隔5s重连一次
+            LOG_INFO("connect to register[%s:%d] failed, check if server is alive.", ip.c_str(), port);
+            int looptimes = 500; // 没连上的话，每5s重连一次注册中心
+            while(g_run && looptimes > 0) {
+                usleep(10);
+                looptimes--;
+            }
+            g_register_fd = connect_tcp_socket( port, ip.c_str());
+        }
 
-    LOG_INFO("connect to register %s:%d.\n", ip.c_str(), port);
+        LOG_INFO("connected to register %s:%d.\n", ip.c_str(), port);
 
-    if(g_run) {
         main_register_proc();
+        
+        LOG_WARNING("connection to register is down.");
     }
 
 
