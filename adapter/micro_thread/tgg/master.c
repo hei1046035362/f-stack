@@ -101,13 +101,13 @@ static int create_tcp_sock()
 	return fd;
 }
 
-static int consume_rdata(int clt_fd, const char* buf, int len, enum FD_OPT opt)
+static int consume_rdata(int clt_fd, const char* buf, int len, int idx, enum FD_OPT opt)
 {
 	g_tgg_stats.en_read_stats.malloc_st++;
 	tgg_read_data rdata = {0};
 	rdata.fd = clt_fd;
 	rdata.coreid = g_core_id;
-	rdata.idx = tgg_get_cli_idx(rdata.coreid, clt_fd);
+	rdata.idx = idx;
 	rdata.fd_opt = opt;
 	rdata.data_len = len;
 	rdata.data = (void*)buf;
@@ -144,7 +144,7 @@ static void tgg_recv(void *arg)
 	}
 	int idx = tgg_get_cli_idx(g_core_id, cli_fd);
 	// 通知后台有新的连接
-	if (consume_rdata(cli_fd, "", 0, FD_NEW) < 0) {
+	if (consume_rdata(cli_fd, "", 0, idx, FD_NEW) < 0) {
 		LOG_ERROR("send new connection[%d] to cliprc failed, core id:%d idx:%d.", cli_fd, g_core_id, idx);
 		close(cli_fd);
 		tgg_close_cli(g_core_id, cli_fd);
@@ -177,12 +177,16 @@ static void tgg_recv(void *arg)
 		if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
 			// 调试打印
 			if(!strncmp(buf, "GET", 3)) {// GET请求消息
-				LOG_DEBUG("fd:%d idx:%d recv data:%s.", cli_fd, tgg_get_cli_idx(g_core_id, cli_fd), (char*)buf);
+				LOG_DEBUG("fd:%d idx:%d recv data:%s.", cli_fd, idx, (char*)buf);
 			} else {// 其他消息
-	    		LOG_DEBUG("fd:%d idx:%d revc data:%s.", cli_fd, tgg_get_cli_idx(g_core_id, cli_fd), bin2hex(std::string((char*)buf, ret)).c_str());
+	    		LOG_DEBUG("fd:%d idx:%d revc data:%s.", cli_fd, idx, bin2hex(std::string((char*)buf, ret)).c_str());
 			}
 		}
-		consume_ret = consume_rdata(cli_fd, buf, ret, FD_READ);
+		if(tgg_get_cli_idx(g_core_id, cli_fd) == TGG_FD_CLOSING) {// 服务端发送踢人命令的时候会触发
+			LOG_WARNING("connection[%d] idx[%d] is closing.", cli_fd, idx);
+			break;
+		}
+		consume_ret = consume_rdata(cli_fd, buf, ret, idx, FD_READ);
 		if (consume_ret < 0) {
 			if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
 				// 调试打印
@@ -192,7 +196,7 @@ static void tgg_recv(void *arg)
 					LOG_WARNING("fd:%d idx:%d revc data:%s.", cli_fd, tgg_get_cli_idx(g_core_id, cli_fd), bin2hex(std::string((char*)buf, ret)).c_str());
 				}
 			}
-			LOG_ERROR("consume data failed.");				
+			LOG_ERROR("consume data failed.");
 			break;
 		}
 		if(tgg_get_cli_status(g_core_id, cli_fd) & FD_STATUS_CLOSING) {// 已经发送过关闭帧了
@@ -202,8 +206,8 @@ static void tgg_recv(void *arg)
 	if(ret <= 0) {// 连接已断开，通知写协程，不必再执行发送
 		tgg_set_cli_status(g_core_id, cli_fd, FD_STATUS_DISCONNECTED);
 	}
-	if(!(tgg_get_cli_status(g_core_id, cli_fd) & FD_STATUS_CLOSING)) {// 没发送过close给gwcliprc
-		consume_rdata(cli_fd, NULL, 0, FD_CLOSE);
+	if(!(tgg_get_cli_status(g_core_id, cli_fd) & FD_STATUS_CLOSING) && tgg_get_cli_idx(g_core_id, cli_fd) != TGG_FD_CLOSING) {// 没发送过close给gwcliprc
+		consume_rdata(cli_fd, NULL, 0, idx, FD_CLOSE);
 	}
 	LOG_DEBUG("wait client[%d] close...", cli_fd);
 	// 等待连接在缓存中的数据被消费完才能关闭

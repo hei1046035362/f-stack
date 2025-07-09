@@ -302,7 +302,7 @@ int message_unpack(const std::string& packedData, std::string& result)
                    allocator);
     
     // 处理二进制数据（假设bin2hex返回std::string）
-    std::string hexBody = bin2hex(body);
+    std::string hexBody = bin2hex(body, false);
     jdata.AddMember("body", 
                    rapidjson::Value().SetString(hexBody.c_str(), hexBody.size(), allocator).Move(), 
                    allocator);
