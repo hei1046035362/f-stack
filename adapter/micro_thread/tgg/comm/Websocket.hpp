@@ -49,7 +49,7 @@ private:
     // 生成websocket连接的唯一键
     std::string _GenerateAcceptKey(const std::string& key);
 
-    std::string _HandleHandshake(const std::string& request, HttpRequest& req);
+    int _HandleHandshake(const std::string& request, HttpRequest& req, std::string& response);
         
     /* parse base frame according to
      * https://www.rfc-editor.org/rfc/rfc6455#section-5.2
