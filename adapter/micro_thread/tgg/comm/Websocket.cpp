@@ -130,34 +130,39 @@ std::string Websocket::_GenerateAcceptKey(const std::string& key)
     return Encrypt::Base64Encode(Encrypt::sha1(concat_key));
 }
 
-std::string Websocket::_HandleHandshake(const std::string& request, HttpRequest& req)
+int Websocket::_HandleHandshake(const std::string& request, HttpRequest& req, std::string& response)
 {
     // std::istringstream stream(request);
     // std::string line;
     // std::string web_key;
     // int check_count = 2;
     if((request.size() < 5) || (request.substr(0, 5) != "GET /")) {
-        std::cerr << "Invalid http request:" << request << std::endl;
-        return "";
+        LOG_ERROR("Invalid http request:%s", request.c_str());
+        response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid request method or path";
+        return -1;
     }
     parse_http_request(request, req);
 
     if (!is_valid_websocket_handshake(req)) {
-        std::cerr << "Invalid WebSocket handshake" << request << std::endl;
-        return "";
+        LOG_ERROR("Invalid WebSocket handshake:%s", request.c_str());
+        response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid WebSocket handshake headers";
+        return -1;
     }
     std::string accept_key = _GenerateAcceptKey(req.headers["sec-websocket-key"]);
 
-        // 构建握手响应
-    std::ostringstream response;
-    response << "HTTP/1.1 101 Switching Protocols\r\n"
-    << "Upgrade: websocket\r\n"
-    << "Sec-WebSocket-Version: 13\r\n"
-    << "Connection: Upgrade\r\n"
-    << "Sec-WebSocket-Accept: " << accept_key << "\r\n"
-    << "Server: workerman/4.1.15\r\n"
-    << "\r\n";
-    return response.str();
+    // 构建握手响应
+    response.clear();
+    size_t RESPONSE_SIZE = 256 + accept_key.size(); // 实测响应平均长度
+    response.reserve(RESPONSE_SIZE);
+
+    // 使用单个内存块构建响应（避免多次内存分配）
+    response.append("HTTP/1.1 101 Switching Protocols\r\n"
+                   "Upgrade: websocket\r\n"
+                   "Connection: Upgrade\r\n"
+                   "Sec-WebSocket-Accept: ");
+    response.append(accept_key);
+    response.append("\r\nServer: workerman/4.1.15\r\n\r\n");
+    return 0;
 }
 
 void form_con_req_to_bw_data()
@@ -396,9 +401,10 @@ int Websocket::ReadData(void* data, int len)
                 }
             }
             HttpRequest req;
-            std::string response = _HandleHandshake(std::string((char*)input, in_len), req);
-            if (response.empty()) {
-                LOG_ERROR("handle shake response is empty.");
+            std::string response;
+            if (_HandleHandshake(std::string((char*)input, in_len), req, response) < 0) {
+                OnSend(response, FD_WRITE);
+                LOG_ERROR("handle shake check failed.");
                 return -1;
             }
             OnHandShake(response.c_str(), req);
