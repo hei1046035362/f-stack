@@ -1,47 +1,51 @@
 #include "Serialize.hpp"
-#include <string>
 #include <stdexcept>
-#include <nlohmann/json.hpp>
-
-using json = nlohmann::json;
+#include "log.hpp"
+using namespace rapidjson;
 
 class PhpSerializer {
 public:
-    // Unserialize PHP serialized string to JSON
-    static json unserialize(const std::string& input) {
+    // Unserialize PHP serialized string to RapidJSON Document
+    static Document unserialize(const std::string& input) {
         size_t pos = 0;
-        return parseValue(input, pos);
+        Document doc;
+        doc.SetObject(); // 初始化为对象
+        parseValue(input, pos, doc, doc.GetAllocator());
+        return doc;
     }
 
-    // Serialize JSON to PHP serialized string
-    static std::string serialize(const json& j) {
+    // Serialize RapidJSON Value to PHP serialized string
+    static std::string serialize(const Value& j) {
         std::string result;
-        // Estimate initial capacity to reduce reallocations
-        size_t estimated_size = estimateSerializedSize(j);
-        result.reserve(estimated_size);
         serializeValue(j, result);
         return result;
     }
 
     // PHP's array_replace_recursive equivalent
-    static json array_replace_recursive(const json& base, const json& replacement) {
-        if (!base.is_object() && !base.is_array()) {
-            return replacement;
-        }
-        if (!replacement.is_object() && !replacement.is_array()) {
-            return replacement;
-        }
+    static Document array_replace_recursive(const Value& base, const Value& replacement, Document::AllocatorType& allocator) {
+        Document result;
+        result.CopyFrom(base, allocator); // 深拷贝基础对象
 
-        json result = base;
-        for (auto& item : replacement.items()) {
-            if (base.contains(item.key())) {
-                if (base[item.key()].is_object() && item.value().is_object()) {
-                    result[item.key()] = array_replace_recursive(base[item.key()], item.value());
+        // 递归合并逻辑
+        if (replacement.IsObject()) {
+            for (auto& m : replacement.GetObject()) {
+                const char* key = m.name.GetString();
+                if (result.HasMember(key)) {
+                    if (result[key].IsObject() && m.value.IsObject()) {
+                        // 递归处理嵌套对象
+                        Document child = array_replace_recursive(result[key], m.value, allocator);
+                        result[key].CopyFrom(child, allocator);
+                    } else {
+                        // 直接覆盖非对象值
+                        result[key].CopyFrom(m.value, allocator);
+                    }
                 } else {
-                    result[item.key()] = item.value();
+                    // 添加新成员
+                    Value newKey(key, allocator);
+                    Value newValue;
+                    newValue.CopyFrom(m.value, allocator);
+                    result.AddMember(newKey, newValue, allocator);
                 }
-            } else {
-                result[item.key()] = item.value();
             }
         }
         return result;
@@ -49,7 +53,7 @@ public:
 
 private:
     // Parse a single value from PHP serialized string
-    static json parseValue(const std::string& input, size_t& pos) {
+    static void parseValue(const std::string& input, size_t& pos, Value& parent, Document::AllocatorType& allocator) {
         if (pos >= input.length()) {
             throw std::runtime_error("Unexpected end of input");
         }
@@ -58,147 +62,169 @@ private:
         pos += 2; // Skip type and colon
 
         switch (type) {
-            case 's': return parseString(input, pos);
-            case 'i': return parseInteger(input, pos);
-            case 'd': return parseDouble(input, pos);
-            case 'b': return parseBoolean(input, pos);
-            case 'a': return parseArray(input, pos);
-            case 'N': pos++; return nullptr;
+            case 's': parseString(input, pos, parent, allocator); break;
+            case 'i': parseInteger(input, pos, parent, allocator); break;
+            case 'd': parseDouble(input, pos, parent, allocator); break;
+            case 'b': parseBoolean(input, pos, parent, allocator); break;
+            case 'a': parseArray(input, pos, parent, allocator); break;
+            case 'N': pos++; parent.SetNull(); break;
             default: throw std::runtime_error("Unknown type: " + std::string(1, type));
         }
     }
 
-    static std::string parseString(const std::string& input, size_t& pos) {
+    static void parseString(const std::string& input, size_t& pos, Value& parent, Document::AllocatorType& allocator) {
         size_t colon = input.find(':', pos);
-        if (colon == std::string::npos) {
-            throw std::runtime_error("Invalid string format");
-        }
+        if (colon == std::string::npos) throw std::runtime_error("Invalid string format");
+        
         int length = std::stoi(input.substr(pos, colon - pos));
-        pos = colon + 2;
-        std::string result = input.substr(pos, length);
-        pos += length + 2;
-        return result;
+        pos = colon + 2; // Skip colon and quote
+        std::string str = input.substr(pos, length);
+        pos += length + 2; // Skip string and closing quote
+        
+        parent.SetString(str.c_str(), static_cast<SizeType>(str.length()), allocator);
     }
 
-    static int parseInteger(const std::string& input, size_t& pos) {
+    static void parseInteger(const std::string& input, size_t& pos, Value& parent, Document::AllocatorType& allocator) {
         size_t semicolon = input.find(';', pos);
-        if (semicolon == std::string::npos) {
-            throw std::runtime_error("Invalid integer format");
-        }
-        int result = std::stoi(input.substr(pos, semicolon - pos));
+        if (semicolon == std::string::npos) throw std::runtime_error("Invalid integer format");
+        
+        int value = std::stoi(input.substr(pos, semicolon - pos));
         pos = semicolon + 1;
-        return result;
+        parent.SetInt(value);
     }
 
-    static double parseDouble(const std::string& input, size_t& pos) {
+    static void parseDouble(const std::string& input, size_t& pos, Value& parent, Document::AllocatorType& allocator) {
         size_t semicolon = input.find(';', pos);
-        if (semicolon == std::string::npos) {
-            throw std::runtime_error("Invalid double format");
-        }
-        double result = std::stod(input.substr(pos, semicolon - pos));
+        if (semicolon == std::string::npos) throw std::runtime_error("Invalid double format");
+        
+        double value = std::stod(input.substr(pos, semicolon - pos));
         pos = semicolon + 1;
-        return result;
+        parent.SetDouble(value);
     }
 
-    static bool parseBoolean(const std::string& input, size_t& pos) {
+    static void parseBoolean(const std::string& input, size_t& pos, Value& parent, Document::AllocatorType& allocator) {
         if (input[pos] == '0' || input[pos] == '1') {
-            bool result = input[pos] == '1';
+            parent.SetBool(input[pos] == '1');
             pos += 2;
-            return result;
+        } else {
+            throw std::runtime_error("Invalid boolean format");
         }
-        throw std::runtime_error("Invalid boolean format");
     }
 
-    static json parseArray(const std::string& input, size_t& pos) {
+    static void parseArray(const std::string& input, size_t& pos, Value& parent, Document::AllocatorType& allocator) {
         size_t colon = input.find(':', pos);
-        if (colon == std::string::npos) {
-            throw std::runtime_error("Invalid array format");
-        }
+        if (colon == std::string::npos) throw std::runtime_error("Invalid array format");
+        
         int size = std::stoi(input.substr(pos, colon - pos));
-        pos = colon + 2;
-        json result = json::object();
+        pos = colon + 2; // Skip colon and opening brace
+        
+        parent.SetObject(); // PHP数组在JSON中表示为对象
+        
         for (int i = 0; i < size; ++i) {
-            json key = parseValue(input, pos);
-            json value = parseValue(input, pos);
-            if (key.is_number()) {
-                if (!result.is_array()) {
-                    json temp = json::array();
-                    for (auto& item : result.items()) {
-                        temp[item.key()] = item.value();
-                    }
-                    result = temp;
-                }
-                result[key.get<int>()] = value;
-            } else {
-                result[key.get<std::string>()] = value;
+            Value key;
+            parseValue(input, pos, key, allocator); // 解析键
+            
+            Value value;
+            parseValue(input, pos, value, allocator); // 解析值
+            
+            // 添加键值对
+            if (key.IsString()) {
+                parent.AddMember(
+                    Value(key.GetString(), allocator),
+                    value,
+                    allocator
+                );
+            } else if (key.IsInt()) {
+                // 数字键转换为字符串键（保持PHP数组特性）
+                std::string numKey = std::to_string(key.GetInt());
+                parent.AddMember(
+                    Value(numKey.c_str(), allocator),
+                    value,
+                    allocator
+                    );
             }
         }
-        pos++;
-        return result;
+        pos++; // Skip closing brace
     }
 
-    // Estimate serialized string size for pre-allocation
-    static size_t estimateSerializedSize(const json& j) {
-        size_t size = 0;
-        if (j.is_null()) {
-            size += 2; // "N;"
-        } else if (j.is_boolean()) {
-            size += 4; // "b:0;" or "b:1;"
-        } else if (j.is_number_integer()) {
-            size += 12; // "i:" + up to 10 digits + ";"
-        } else if (j.is_number_float()) {
-            size += 24; // "d:" + up to 22 chars for double + ";"
-        } else if (j.is_string()) {
-            std::string s = j.get<std::string>();
-            size += s.length() + 16; // "s:" + length digits + ":\"\";" + string
-        } else if (j.is_array() || j.is_object()) {
-            size += 16; // "a:" + size digits + ":{}"
-            for (auto& item : j.items()) {
-                size += estimateSerializedSize(item.key());
-                size += estimateSerializedSize(item.value());
-            }
-        }
-        return size;
-    }
-
-    // Serialize JSON value to PHP serialized format using std::string
-    static void serializeValue(const json& j, std::string& result) {
-        if (j.is_null()) {
+    // Serialize RapidJSON Value to PHP format
+    static void serializeValue(const rapidjson::Value& j, std::string& result) {
+        if (j.IsNull()) {
             result += "N;";
-        } else if (j.is_boolean()) {
+        } else if (j.IsBool()) {
             result += "b:";
-            result += j.get<bool>() ? "1" : "0";
+            result += j.GetBool() ? "1" : "0";
             result += ";";
-        } else if (j.is_number_integer()) {
+        } else if (j.IsInt()) {
             result += "i:";
-            result += std::to_string(j.get<int>());
+            result += std::to_string(j.GetInt());
             result += ";";
-        } else if (j.is_number_float()) {
+        } else if (j.IsUint()) {
+            result += "i:";
+            result += std::to_string(j.GetUint());
+            result += ";";
+        } else if (j.IsInt64()) {
+            result += "i:";
+            result += std::to_string(j.GetInt64());
+            result += ";";
+        } else if (j.IsUint64()) {
+            result += "i:";
+            result += std::to_string(j.GetUint64());
+            result += ";";
+        } else if (j.IsDouble()) {
             result += "d:";
-            result += std::to_string(j.get<double>());
+            result += std::to_string(j.GetDouble());
             result += ";";
-        } else if (j.is_string()) {
-            std::string s = j.get<std::string>();
+        } else if (j.IsString()) {
+            std::string s = j.GetString();
             result += "s:";
             result += std::to_string(s.length());
             result += ":\"";
             result += s;
             result += "\";";
-        } else if (j.is_array() || j.is_object()) {
+        } else if (j.IsArray()) {  // 新增数组类型处理
             result += "a:";
-            result += std::to_string(j.size());
+            result += std::to_string(j.Size());  // 数组元素数量
             result += ":{";
-            for (auto& item : j.items()) {
-                if (j.is_array()) {
-                    serializeValue(json(std::stoi(item.key())), result);
+        
+            // 遍历数组元素
+            for (rapidjson::SizeType i = 0; i < j.Size(); ++i) {
+                // 序列化数组索引（PHP要求索引从0开始）
+                result += "i:";
+                result += std::to_string(i);
+                result += ";";
+                
+                // 序列化数组元素值
+                serializeValue(j[i], result);
+            }
+            result += "}";
+        } else if (j.IsObject()) {
+            result += "a:";
+            result += std::to_string(j.MemberCount());
+            result += ":{";
+        
+            for (auto& m : j.GetObject()) {
+                // 序列化键（修复潜在类型问题）
+                if (m.name.IsString()) {
+                    // 安全处理字符串键
+                    result += "s:";
+                    result += std::to_string(m.name.GetStringLength());
+                    result += ":\"";
+                    result += m.name.GetString();
+                    result += "\";";
                 } else {
-                    serializeValue(item.key(), result);
+                    // 非字符串键直接序列化
+                    serializeValue(m.name, result);
                 }
-                serializeValue(item.value(), result);
+            
+                // 序列化值
+                serializeValue(m.value, result);
             }
             result += "}";
         } else {
-            throw std::runtime_error("Unsupported JSON type");
+            LOG_ERROR("Unknown value type:%d", j.GetType());
+            // 处理未知类型（安全回退）
+            result += "N;";
         }
     }
 };
@@ -227,11 +253,14 @@ int main() {
 */
 
 // 递归序列化函数
-std::string Php_Serialize(const json& j) {
+std::string Php_Serialize(const Value& j) {
     return PhpSerializer::serialize(j);
 }
 
-nlohmann::json Php_UnSerialize(const std::string& input) {
+Document Php_UnSerialize(const std::string& input) {
     return PhpSerializer::unserialize(input);
 }
 
+Document Php_ArrayReplaceRecursive(const Value& base, const Value& replacement, Document::AllocatorType& allocator) {
+    return PhpSerializer::array_replace_recursive(base, replacement, allocator);
+}
