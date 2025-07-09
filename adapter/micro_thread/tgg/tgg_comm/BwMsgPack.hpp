@@ -53,54 +53,69 @@ public:
     }
 
     // 从二进制数据转换为数组，对应decode函数
-    static void decode(tgg_bw_protocal* bwdata, nlohmann::json& bwjdata) {
-        bwjdata["flag"] = (int)(bwdata->flag);
-        if(big_endian()) {
-            bwdata->ext_len = htonl(bwdata->ext_len);
-            bwdata->pack_len = htonl(bwdata->pack_len);
-        }
-        // bwjdata = nlohmann::json::parse(body)
-        int body_len = bwdata->pack_len - bwdata->ext_len - sizeof(tgg_bw_protocal);
-        if(body_len > 0) {
-            // std::string body(bwdata->data + bwdata->ext_len, // body的起始位置
-            //                  body_len); // body的长度
-            // bwjdata["body"] = bin2hex(body);// TODO 存内容改为存地址，json无法直接存储二进制数据，后续执行命令的时候再转回来
-            bwjdata["body"] = reinterpret_cast<uintptr_t>(bwdata->data + bwdata->ext_len);
-            bwjdata["body_len"] = body_len;
-        } else {
-            bwjdata["body"] = reinterpret_cast<uintptr_t>(nullptr);
-            bwjdata["body_len"] = 0;
-        }
-        if(bwdata->ext_len > 0) {
-            std::string ext_data(bwdata->data, bwdata->ext_len);
-            bwjdata["ext_data"] = ext_data.c_str();
-        } else {
-            bwjdata["ext_data"] = "";
-        }
-
-        bwjdata["pack_len"] = (unsigned int)bwdata->pack_len;
-        bwjdata["cmd"] = (int)bwdata->cmd;
-        unsigned int local_ip = bwdata->local_ip;
-        unsigned int client_ip = bwdata->client_ip;
-        bwjdata["local_ip"] = inet_ntoa(*reinterpret_cast<in_addr*>(&local_ip));// inet_ntoa要求的是网络字节序，因此不需要ntohl转换
-        bwjdata["client_ip"] = inet_ntoa(*reinterpret_cast<in_addr*>(&client_ip));
-        if(big_endian()) {
-            bwjdata["local_port"] = ntohs(bwdata->local_port);
-            bwjdata["client_port"] = ntohs(bwdata->client_port);
-            bwjdata["connection_id"] = ntohl(bwdata->connection_id);
-            bwjdata["gateway_port"] = ntohs(bwdata->gateway_port);
-        } else {
-            unsigned short local_port = bwdata->local_port;
-            unsigned short client_port = bwdata->client_port;
-            unsigned int connection_id = bwdata->connection_id;
-            unsigned int gateway_port = bwdata->gateway_port;
-            bwjdata["local_port"] = local_port;
-            bwjdata["client_port"] = client_port;
-            bwjdata["connection_id"] = connection_id;
-            bwjdata["gateway_port"] = gateway_port;
-        }
-
+static void decode(tgg_bw_protocal* bwdata, rapidjson::Document& bwjdata) {
+    // 确保bwjdata是对象类型
+    bwjdata.SetObject();
+    rapidjson::Document::AllocatorType& allocator = bwjdata.GetAllocator();
+    
+    // 1. 处理flag字段
+    bwjdata.AddMember("flag", static_cast<int>(bwdata->flag), allocator);
+    
+    // 2. 字节序转换（保持原逻辑）
+    if(big_endian()) {
+        bwdata->ext_len = htonl(bwdata->ext_len);
+        bwdata->pack_len = htonl(bwdata->pack_len);
     }
+    
+    // 3. 处理body字段（存储指针地址）
+    int body_len = bwdata->pack_len - bwdata->ext_len - sizeof(tgg_bw_protocal);
+    if(body_len > 0) {
+        // 存储二进制数据的指针地址（替代nlohmann的指针存储）
+        bwjdata.AddMember("body", 
+                         reinterpret_cast<uintptr_t>(bwdata->data + bwdata->ext_len), 
+                         allocator);
+        bwjdata.AddMember("body_len", body_len, allocator);
+    } else {
+        bwjdata.AddMember("body", reinterpret_cast<uintptr_t>(nullptr), allocator);
+        bwjdata.AddMember("body_len", 0, allocator);
+    }
+    
+    // 4. 处理ext_data字段（深拷贝字符串）
+    if(bwdata->ext_len > 0) {
+        // std::string ext_data(bwdata->data, bwdata->ext_len);
+        // 使用深拷贝避免悬空指针
+        bwjdata.AddMember("ext_data", rapidjson::Value().SetString(bwdata->data, bwdata->ext_len, allocator), allocator);
+    } else {
+        bwjdata.AddMember("ext_data", "", allocator);
+    }
+    
+    // 5. 添加基础字段
+    bwjdata.AddMember("pack_len", static_cast<unsigned int>(bwdata->pack_len), allocator);
+    bwjdata.AddMember("cmd", static_cast<int>(bwdata->cmd), allocator);
+    
+    // 6. IP地址转换（保持原逻辑）
+    unsigned int local_ip = bwdata->local_ip;
+    unsigned int client_ip = bwdata->client_ip;
+    bwjdata.AddMember("local_ip", 
+                     rapidjson::StringRef(inet_ntoa(*reinterpret_cast<in_addr*>(&local_ip))),
+                     allocator);
+    bwjdata.AddMember("client_ip", 
+                     rapidjson::StringRef(inet_ntoa(*reinterpret_cast<in_addr*>(&client_ip))),
+                     allocator);
+    
+    // 7. 端口处理（字节序转换）
+    if(big_endian()) {
+        bwjdata.AddMember("local_port", ntohs(bwdata->local_port), allocator);
+        bwjdata.AddMember("client_port", ntohs(bwdata->client_port), allocator);
+        bwjdata.AddMember("connection_id", ntohl(bwdata->connection_id), allocator);
+        bwjdata.AddMember("gateway_port", ntohs(bwdata->gateway_port), allocator);
+    } else {
+        bwjdata.AddMember("local_port", static_cast<unsigned short>(bwdata->local_port), allocator);
+        bwjdata.AddMember("client_port", static_cast<unsigned short>(bwdata->client_port), allocator);
+        bwjdata.AddMember("connection_id", static_cast<unsigned int>(bwdata->connection_id), allocator);
+        bwjdata.AddMember("gateway_port", static_cast<unsigned int>(bwdata->gateway_port), allocator);
+    }
+}
 
 private:
     // 简单模拟序列化，这里只是将字符串包裹在特定格式中，实际可能需要更完善的序列化逻辑
