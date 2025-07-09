@@ -88,7 +88,7 @@ std::string Encrypt::Aes128Encrypt(const std::string& origData)
     EVP_EncryptFinal_ex(ctx, (unsigned char*)cryptedData.c_str() + len, &exLen);
     EVP_CIPHER_CTX_free(ctx);
     // cryptedData 的长度要压缩到实际加密结果的长度
-    return bin2hex(cryptedData.substr(0, exLen + len));
+    return bin2hex(cryptedData.substr(0, exLen + len), false);
 }
 std::string Encrypt::encrypt(const std::string& data)
 {
