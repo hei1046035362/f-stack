@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <algorithm>
 
 #include <set>
 #include <list>
@@ -24,27 +25,39 @@
 static int s_compress_flag = 0;
 static int s_is_open_binary = 0;
 
-static void get_body_string(const nlohmann::json& jdata, std::string& body)
+// 辅助函数：将 rapidjson::Value 转换为字符串
+// bForLog 是否作为日志打印使用，作为日志打印时，非DEBUG情况下直接返回空字符串，防止性能损耗
+static std::string rapidjson_to_string(const rapidjson::Value& val, bool bForLog = true) {
+    if(bForLog && AsyncLogger::getInstance().getloglevel() != LogLevel::DEBUG) {
+        return "";
+    }
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    val.Accept(writer);
+    return buffer.GetString();
+}
+
+static void get_body_string(const rapidjson::Value& jdata, std::string& body)
 {
-    if(jdata["body"].is_string()) {
-        body = jdata["body"].get<std::string>();
-    } else {
-        const char* sbody = reinterpret_cast<char*>(jdata["body"].get<uintptr_t>());
-        int body_len = jdata["body_len"].get<int>();
+    if(jdata["body"].IsString()) {
+        body = jdata["body"].GetString();
+    } else if (jdata["body"].IsUint64()) {
+        const char* sbody = reinterpret_cast<char*>(jdata["body"].GetUint64());
+        int body_len = jdata["body_len"].GetInt();
         if(body_len) {
-            body = std::move(std::string(sbody, body_len));
+            body = std::string(sbody, body_len);
         }
     }  
 }
 
-void CmdBaseProcessor::Send2BW(const nlohmann::json& data, bool serialize)
+void CmdBaseProcessor::Send2BW(const rapidjson::Value& data, bool serialize)
 {
-    std::string result = std::move(serialize ? Php_Serialize(data) : data.dump());
+    std::string result = serialize ? Php_Serialize(data) : rapidjson_to_string(data, false);
     int len = big_endian() ? htonl(result.size()) : result.size();
     std::string rsp;
     rsp.resize(sizeof(int));
     memcpy(const_cast<char* >(rsp.data()), &len, sizeof(int));
-    rsp += std::move(result);
+    rsp += result;
     int ret = write(this->fd, rsp.c_str(), rsp.size());
     if(ret < 0) {
         LOG_ERROR("send data[%s] to BW failed.", result.c_str());        
@@ -82,25 +95,36 @@ int CmdWorkerConnect::ExecCmd()
     try {
         std::string body;
         get_body_string(jdata, body);
-        nlohmann::json worker_info = nlohmann::json::parse(body);
-        if (worker_info["secret_key"].get<std::string>() != bwSeckey) {
-            LOG_ERROR("Gateway: Worker key[%s] does not match conn key[%s].", 
-                worker_info["secretKey"].get<std::string>().c_str(), bwSeckey.c_str());
+        rapidjson::Document worker_info;
+        worker_info.Parse(body.c_str());
+        if (worker_info.HasParseError()) {
+            LOG_ERROR("WorkerConnect: JSON parse error");
+            close(this->fd);
+            return -1;
+        }
+        if (!worker_info.HasMember("secret_key")) {
+            LOG_ERROR("WorkerConnect: no Worker key found.");
+            close(this->fd);
+            return -1;
+        }
+        if (std::string(worker_info["secret_key"].GetString()) != bwSeckey) {
+            LOG_ERROR("WorkerConnect:  Worker key[%s] does not match conn key[%s].", 
+                worker_info["secretKey"].GetString(), bwSeckey.c_str());
             close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             return -1;
         }
         uint32_t remote_ip; 
         ushort remote_port;
         if (get_remote_info(this->fd, remote_ip, remote_port) < 0) {// 获取远端ip port 失败
-            LOG_ERROR("get remote info failed, fd:[%d].", this->fd);
+            LOG_ERROR("WorkerConnect: get remote info failed, fd:[%d].", this->fd);
             close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             return -1;
         }
-        std::string bwWokerkey = uint32_to_hex(remote_ip) + ":" + worker_info["worker_key"].get<std::string>();
+        std::string bwWokerkey = uint32_to_hex(remote_ip) + ":" + bwSeckey;
         if (tgg_check_bwwkkey_exist(bwWokerkey.c_str()) >= 0) {// 在一台服务器上businessWorker->name不能相同
             close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             // tgg_close_bw_session(this->prc_id, this->fd);
-            LOG_ERROR("bw[%s] already exist.", bwWokerkey.c_str());
+            LOG_ERROR("WorkerConnect: bw[%s] already exist.", bwWokerkey.c_str());
             return -1;
         }
         // tgg_add_bwwkkey(bwWokerkey.c_str());
@@ -111,14 +135,14 @@ int CmdWorkerConnect::ExecCmd()
             // 如果加入失败，就要销毁连接，否则这个服务就没有人使用
             tgg_close_bw_session(this->prc_id, this->fd);
             close(this->fd);
-            LOG_ERROR("add bw[%d] fd[%d] failed.", prc_id, fd);
+            LOG_ERROR("WorkerConnect: add bw[%d] fd[%d] failed.", prc_id, fd);
             return -1;
         }
         LOG_DEBUG("WorkerConnect: added bw[prc:%d,fd:%d] success, total bw count:%d.", 
             prc_id, fd, tgg_get_bwfdx_count());
-    } catch (const nlohmann::json::exception& e) {
+    } catch (...) {
     // 捕获其他任何未预料到的异常
-        LOG_ERROR("Exception catched:%s.", e.what());
+        LOG_ERROR("Exception catched.");
         close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
         // free_bw_session(this->prc_id, this->fd);
         return -1;
@@ -133,25 +157,35 @@ int CmdGatewayClientConnect::ExecCmd()
         uint32_t remote_ip; 
         ushort remote_port;
         if (get_remote_info(this->fd, remote_ip, remote_port) < 0) {// 获取远端ip port 失败
-            LOG_ERROR("get remote info failed, fd:%d.", this->fd);
+            LOG_ERROR("GatewayClientConnect:get remote info failed, fd:%d.", this->fd);
             close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             return -1;
         }
         // printf("jdata:%s\n", jdata.dump(4).c_str());
         std::string body;
         get_body_string(jdata, body);
-        nlohmann::json worker_info = nlohmann::json::parse(body);
-        if (worker_info["secret_key"].get<std::string>() != bwSeckey) {
-            LOG_ERROR("Gateway: Worker key[%s] does not match conn key[%s].", 
-                worker_info["secretKey"].get<std::string>().c_str(), bwSeckey.c_str());
+        rapidjson::Document worker_info;
+        worker_info.Parse(body.c_str());
+        if (worker_info.HasParseError()) {
+            LOG_ERROR("GatewayClientConnect:JSON parse error");
+            close(this->fd);
+            return -1;
+        }
+        if (!worker_info.HasMember("secret_key")) {
+            LOG_ERROR("GatewayClientConnect:no Worker key found.");
+            close(this->fd);
+            return -1;
+        }
+        if (std::string(worker_info["secret_key"].GetString()) != bwSeckey) {
+            LOG_ERROR("GatewayClientConnect: Worker key[%s] does not match conn key[%s].", 
+                worker_info["secretKey"].GetString(), bwSeckey.c_str());
             close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
-            //tgg_close_bw_session(this->prc_id, this->fd);
             return -1;
         }
         LOG_DEBUG("GatewayClientConnect: cmd executed body:%s.", body.c_str());
-    } catch (const nlohmann::json::exception& e) {
+    } catch (...) {
     // 捕获其他任何未预料到的异常
-        LOG_ERROR("Exception catched:%s.", e.what());
+        LOG_ERROR("Exception catched.");
         close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
         // free_bw_session(this->prc_id, this->fd);
         return -1;
@@ -163,7 +197,7 @@ int CmdGatewayClientConnect::ExecCmd()
 
 int CmdSendToOne::ExecCmd()
 {
-    int cid = jdata["connection_id"];
+    int cid = jdata["connection_id"].GetInt();
     int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string body;
     get_body_string(jdata, body);
@@ -175,69 +209,75 @@ int CmdSendToOne::ExecCmd()
 
 int CmdSendToGroup::ExecCmd()
 {
-    int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
+    int raw = true; // 原始标志位 //jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string body;
     get_body_string(jdata, body);
-    // 要排除的cid
+
+    // 解析 ext_data
+    rapidjson::Document ext_data;
+    ext_data.Parse(jdata["ext_data"].GetString());
+    if (ext_data.HasParseError()) {
+        LOG_ERROR("Failed to parse ext_data");
+        return -1;
+    }
+
+    // 构建排除cid集合
     std::set<std::string> setExeptCid;
-    nlohmann::json ext_data = nlohmann::json::parse(jdata["ext_data"].get<std::string>());
-    if (ext_data.contains("exclude") && ext_data["exclude"].is_array()) {
-        for (const auto& element : ext_data["exclude"]) {
-            setExeptCid.insert(element.get<std::string>());
+    if (ext_data.HasMember("exclude") && ext_data["exclude"].IsArray()) {
+        const rapidjson::Value& excludeArray = ext_data["exclude"];
+        for (rapidjson::SizeType i = 0; i < excludeArray.Size(); i++) {
+            setExeptCid.insert(excludeArray[i].GetString());
         }
     }
-    // 所有需要发送数据的cid对应的fd
+
+    // 收集待发送的fd列表
     std::list<int64_t> lstAllFds;
-    // 判断是否存在group字段且为数组类型
-    if (ext_data.contains("group") && ext_data["group"].is_array()) {
-        // 遍历需要发送数据的所有group
-        for (const auto& element : ext_data["group"]) {
-            // 通过gid找到在线的fdx列表
+    if (ext_data.HasMember("group") && ext_data["group"].IsArray()) {
+        const rapidjson::Value& groupArray = ext_data["group"];
+        for (rapidjson::SizeType i = 0; i < groupArray.Size(); i++) {
+            const char* gid = groupArray[i].GetString();
             std::list<int64_t> lstFds;
-            if (tgg_get_fdsbygid(element.get<std::string>().c_str(), lstFds) < 0) {// 没找到gid
-                LOG_WARNING("gid[%s] not exist.", element.get<std::string>().c_str());
+            if (tgg_get_fdsbygid(gid, lstFds) < 0) {
+                LOG_WARNING("gid[%s] not exist.", gid);
                 continue;
             }
-            // 根据hash<gid,list<fdidcid>>找到gid对应的fdid列表,根据fdid找到cid
-            std::list<int64_t>::iterator itFd = lstFds.begin();
-            while (itFd != lstFds.end()) {
-                int64_t fdidcid = *itFd;
-                if(fdidcid < 0) {
-                    LOG_WARNING("Invalid fdidcid[%lld] for gid[%s].", fdidcid, element.get<std::string>().c_str());
-                    itFd++;
+
+            for (int64_t fdidcid : lstFds) {
+                if (fdidcid < 0) {
+                    LOG_WARNING("Invalid fdidcid[%lld] for gid[%s].", fdidcid, gid);
                     continue;
                 }
+
                 int cid = GET_CID_FDCID_MASK(fdidcid);
-                if(cid <= 0) {
-                    LOG_WARNING("cid for fdidcid[%lld] gid[%s] not exist.", 
-                        fdidcid, element.get<std::string>().c_str());
-                    itFd++;
+                if (cid <= 0) {
+                    LOG_WARNING("cid for fdidcid[%lld] gid[%s] not exist.", fdidcid, gid);
                     continue;
                 }
-                // 确认cid是否要排除
-                std::set<std::string>::iterator iter = setExeptCid.find(std::to_string(cid));
-                if(iter == setExeptCid.end()) {
-                    // 不在排除队列中就加入发送队列
+
+                if (setExeptCid.find(std::to_string(cid)) == setExeptCid.end()) {
                     lstAllFds.push_back(fdidcid);
                 }
-                itFd++;
             }
         }
-        if(lstAllFds.size() > 0) {
+
+        if (!lstAllFds.empty()) {
             BatchSend2ClientByfds(lstAllFds, body, FD_WRITE, !raw);
-            LOG_DEBUG("SendToGroup: cmd executed gid[%s].", ext_data["group"].dump().c_str());
+            
+            // 日志优化：直接记录gid数量而非完整JSON[1](@ref)
+            LOG_DEBUG("SendToGroup: cmd executed for %d groups", groupArray.Size());
         }
     } else {
         LOG_WARNING("SendToGroup: cmd executed, no Group found.");
         return -1;
     }
+    
     LOG_DEBUG("SendToGroup: cmd executed.");
     return 0;
 }
 
 int CmdKick::ExecCmd()
 {
-    int cid = jdata["connection_id"];
+    int cid = jdata["connection_id"].GetInt();
     // std::string body = jdata["body"].get<std::string>();
     int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     // Send2Client(cid, body, FD_WRITE, !raw);
@@ -254,7 +294,7 @@ int CmdKick::ExecCmd()
 
 int CmdDestroy::ExecCmd()
 {
-    int cid = jdata["connection_id"];
+    int cid = jdata["connection_id"].GetInt();
     int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     Send2Client(cid, "destroy", FD_WRITE|FD_CLOSE, !raw);// TODO 是否要立即销毁，不发送ws的关闭帧(去掉FD_WRITE就行)了
     int64_t fdidcid = tgg_get_fdbycid(cid);
@@ -266,23 +306,32 @@ int CmdDestroy::ExecCmd()
 
 int CmdSendToALL::ExecCmd()
 {
-    int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
+    int raw = true;
     std::string body;
     get_body_string(jdata, body);
-    // if(!raw) {
-    // }
 
     std::list<int> lstCids;
-    std::string ext_data = jdata["ext_data"];
-    if(!ext_data.empty()) {
-        nlohmann::json jext = nlohmann::json::parse(ext_data);
-        if(jext.contains("connections") && jext["connections"].is_array()) {
-            // 发送给所有指定的cid
-            for (const auto& element : jext["connections"]) {
-                // 通过gid找到在线的fd列表
-                lstCids.push_back(element);
+    std::string ext_data = jdata["ext_data"].GetString();  // 直接获取字符串值
+
+    if (!ext_data.empty()) {
+        // 创建 RapidJSON 文档对象
+        rapidjson::Document jext;
+        jext.Parse(ext_data.c_str());  // 解析 JSON 字符串
+
+        // 检查解析是否成功且包含 connections 数组
+        if (!jext.HasParseError() && 
+            jext.HasMember("connections") && 
+            jext["connections"].IsArray()) 
+        {
+            const rapidjson::Value& connections = jext["connections"];
+            // 遍历数组元素
+            for (rapidjson::SizeType i = 0; i < connections.Size(); i++) {
+                if (connections[i].IsInt()) {  // 确保元素是整数
+                    lstCids.push_back(connections[i].GetInt());
+                }
             }
-            if(lstCids.size() > 0) {
+
+            if (!lstCids.empty()) {
                 BatchSend2ClientBycids(lstCids, body, FD_WRITE, !raw);
             }
         }
@@ -292,20 +341,24 @@ int CmdSendToALL::ExecCmd()
 
     // 所有在线的客户端fd
     std::list<int64_t> lstFds;
-    if(tgg_get_allfds(lstFds) < 0) {
+    if (tgg_get_allfds(lstFds) < 0) {
         LOG_WARNING("SendToALL: get all online clients failed.");
         return -1;
     }
-    if(lstFds.size() > 0) {
+
+    if (!lstFds.empty()) {
         BatchSend2ClientByfds(lstFds, body, FD_WRITE, !raw);
     }
- 
+
     LOG_DEBUG("SendToALL: sendto all clients, extend:%s.", ext_data.c_str());
     return 0;
 }
 
-void CmdSelect::FormatResult(const std::list<int64_t>& lst_fd, int mask, nlohmann::json& result)
+void CmdSelect::FormatResult(const std::list<int64_t>& lst_fd, int mask, rapidjson::Document& result)
 {
+    // 获取分配器引用（关键优化点）
+    rapidjson::Document::AllocatorType& allocator = result.GetAllocator();
+    
     std::list<int64_t>::const_iterator itFd = lst_fd.begin();
     while (itFd != lst_fd.end()) {
         if(*itFd < 0) {
@@ -313,124 +366,181 @@ void CmdSelect::FormatResult(const std::list<int64_t>& lst_fd, int mask, nlohman
             itFd++;
             continue;
         }
+        
         int coreid = GET_COREID_FDCID_MASK(*itFd);
         int fd = GET_FD_FDCID_MASK(*itFd);
         int cid = GET_CID_FDCID_MASK(*itFd);
         std::string scid = std::to_string(cid);
-        if(!result.contains(scid)) {
-            result[scid] = nlohmann::json::object();
+        
+        // 检查并创建 CID 对象（使用 rapidjson API）
+        if(!result.HasMember(scid.c_str())) {
+            rapidjson::Value cidObj(rapidjson::kObjectType);
+            result.AddMember(
+                rapidjson::Value(scid.c_str(), allocator).Move(),
+                cidObj,
+                allocator
+            );
         }
+        
+        rapidjson::Value& cidObj = result[scid.c_str()];
         std::string uid = tgg_get_cli_uid(coreid, fd);
+        
         if(uid.empty()) {
             LOG_WARNING("[%s][%d] uid for fd[%d] not exist.", fd);
             itFd++;
             continue;
         }
+        
+        // 处理 GROUP ID 字段
         if(mask & FIELD_GID) {
             std::set<std::string> set_gids;
             if (!tgg_get_gidsbyuid(uid.c_str(), set_gids)) {
-                if (!result[scid].contains("groups")) {
-                    result[scid]["groups"] = nlohmann::json::array();
+                if (!cidObj.HasMember("groups")) {
+                    rapidjson::Value groups(rapidjson::kArrayType);
+                    cidObj.AddMember("groups", groups, allocator);
                 } else {
-                    // 已经填充过了就不要再次执行了
                     LOG_WARNING("cid[%d] groups already exist.", cid);
                 }
-                std::set<std::string>::iterator itGid = set_gids.begin();
-                while(itGid != set_gids.end()) {
-                    result[scid]["groups"].push_back(*itGid);
-                    itGid++;
+                
+                rapidjson::Value& groupsArray = cidObj["groups"];
+                for (auto& gid : set_gids) {
+                    groupsArray.PushBack(
+                        rapidjson::Value(gid.c_str(), allocator).Move(),
+                        allocator
+                    );
                 }
             }
         }
+        
+        // 处理 UID 字段
         if(mask & FIELD_UID) {
-            if (!result[scid].contains("uid")) {
-                result[scid]["uid"] = nlohmann::json::object();
-                result[scid]["uid"] = uid;
+            if (!cidObj.HasMember("uid")) {
+                cidObj.AddMember(
+                    "uid",
+                    rapidjson::Value(uid.c_str(), allocator).Move(),
+                    allocator
+                );
             } else {
-                // 已经填充过了就不要再次执行了
-                LOG_WARNING("cid[%d] groups already exist.", cid);
+                LOG_WARNING("cid[%d] uid already exist.", cid);
             }
         }
+        
         itFd++;
     }
 }
 
 int CmdSelect::ExecCmd()
 {
-    std::string ext_data = jdata["ext_data"];
-    nlohmann::json result = nlohmann::json::object();
-    if(ext_data.empty()) {
-        LOG_WARNING("Select cmd, extend data:%s.", ext_data.c_str());
+    // 获取 ext_data 字段
+    const rapidjson::Value& extDataValue = jdata["ext_data"];
+    std::string ext_data;
+    if (extDataValue.IsString()) {
+        ext_data = extDataValue.GetString();
+    }
+
+    // 创建结果文档和分配器
+    rapidjson::Document result(rapidjson::kObjectType);
+    // rapidjson::Document::AllocatorType& allocator = result.GetAllocator();
+
+    if (ext_data.empty()) {
+        LOG_WARNING("Select cmd, extend data is empty");
         Send2BW(result);
         return 0;
     }
+
     try {
-        nlohmann::json jext_data = nlohmann::json::parse(ext_data);
-        std::vector<std::string> fields = jext_data["fields"].get<std::vector<std::string>>();
-        int mask = 0;// 根据fields字段设置返回数据的掩码
-        for(auto& it : fields) {
-            if(it == "cid") {
-                mask |= FIELD_CID;
-            } else if (it == "uid") {
-                mask |= FIELD_UID;
-            } else if (it == "gid") {
-                mask |= FIELD_GID;
+        // 解析 ext_data
+        rapidjson::Document jext_data;
+        jext_data.Parse(ext_data.c_str());
+        if (jext_data.HasParseError()) {
+            LOG_ERROR("JSON parse error in ext_data");
+            return -1;
+        }
+
+        // 处理 fields 数组
+        std::vector<std::string> fields;
+        if (jext_data.HasMember("fields") && jext_data["fields"].IsArray()) {
+            const rapidjson::Value& fieldsArray = jext_data["fields"];
+            for (rapidjson::SizeType i = 0; i < fieldsArray.Size(); i++) {
+                fields.push_back(fieldsArray[i].GetString());
             }
         }
-        nlohmann::json where = jext_data["where"];
-        result = nlohmann::json::object();
-        //std::map<int, std::map<std::string, std::string>> client_info_array;
-        if (!where.is_null()) {
-            for (auto& it : where.items()) {
-                const std::string& key = it.key();
-                if (key!= "connection_id") {// json数据格式不一样，所以要区分一下
-                    // group user session [123123213213,123123123123]
-                    auto& items = it.value();
-                        
-                    for (const auto& item : items) {// item为gid,uid等  where 条件中的item
-                        // 通过gid获取该group下的所有fd
-                        std::list<int64_t> lst_fd;
-                        if(key == "groups") {
-                            if (tgg_get_fdsbygid(item.get<std::string>().c_str(), lst_fd) < 0) {// gid是否存在,并取出gid所有连接
-                                continue;
+
+        // 设置字段掩码
+        int mask = 0;
+        for (auto& it : fields) {
+            if (it == "cid") mask |= FIELD_CID;
+            else if (it == "uid") mask |= FIELD_UID;
+            else if (it == "gid") mask |= FIELD_GID;
+        }
+
+        // 处理 where 条件
+        result.SetObject();
+        if (jext_data.HasMember("where") && !jext_data["where"].IsNull()) {
+            const rapidjson::Value& where = jext_data["where"];
+            
+            for (rapidjson::Value::ConstMemberIterator it = where.MemberBegin(); 
+                 it != where.MemberEnd(); ++it) 
+            {
+                const std::string key = it->name.GetString();
+                const rapidjson::Value& value = it->value;
+                
+                if (key != "connection_id") {
+                    // 处理 groups 和 uid 条件
+                    if (value.IsArray()) {
+                        for (rapidjson::SizeType i = 0; i < value.Size(); i++) {
+                            std::list<int64_t> lst_fd;
+                            const char* item = value[i].GetString();
+                            
+                            if (key == "groups") {
+                                if (tgg_get_fdsbygid(item, lst_fd) < 0) continue;
+                            } 
+                            else if (key == "uid") {
+                                if (tgg_get_fdsbyuid(item, lst_fd) < 0) continue;
                             }
-                        }else if (key == "uid"){
-                            if (tgg_get_fdsbyuid(item.get<std::string>().c_str(), lst_fd) < 0) {// uid是否存在,并取出uid所有连接
-                                continue;
+                            
+                            if (!lst_fd.empty()) {
+                                FormatResult(lst_fd, mask, result);
                             }
                         }
-                        if(lst_fd.empty()) {
-                            continue;
-                        }
-                        FormatResult(lst_fd, mask, result);
                     }
-                } else {
-                    // cid {"9527":9527}
+                } 
+                else {
+                    // 处理 connection_id
                     std::list<int64_t> lst_fds;
-                    for (const auto& connection_id : it.value()) {
-                        int cid = connection_id;
-                        int64_t fdidcid = tgg_get_fdbycid(cid);
-                        if (fdidcid > 0) {
-                            lst_fds.push_back(fdidcid);
+                    if (value.IsArray()) {
+                        for (rapidjson::SizeType i = 0; i < value.Size(); i++) {
+                            int cid = value[i].GetInt();
+                            int64_t fdidcid = tgg_get_fdbycid(cid);
+                            if (fdidcid > 0) {
+                                lst_fds.push_back(fdidcid);
+                            }
                         }
                     }
                     FormatResult(lst_fds, mask, result);
                 }
             }
-        } else {
+        } 
+        else {
+            // 处理全局条件
             std::list<int64_t> lst_fds;
             if (!tgg_get_allfds(lst_fds)) {
-                if(lst_fds.size() > 0) {
+                if (!lst_fds.empty()) {
                     FormatResult(lst_fds, mask, result);
                 }
             }
         }
-        // Php json转php格式化字符串
-    } catch (const std::exception& e) {
-        LOG_ERROR("Error parsing data:%s.", e.what());
+    } 
+    catch (const std::exception& e) {
+        LOG_ERROR("Error parsing data: %s", e.what());
     }
+
     Send2BW(result);
-    LOG_DEBUG("Select: cmd executed Select[%s] data:%s.", ext_data.c_str(), result.dump().c_str());
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    result.Accept(writer);
+    LOG_DEBUG("Select: cmd executed data: %s", buffer.GetString());
+    
     return 0;
 }
 
@@ -440,21 +550,31 @@ int CmdGetGroupIdList::ExecCmd()
     if (tgg_get_allonlinegids(lst_gid) < 0) {
         LOG_WARNING("get all online gids failed.");
     }
-    nlohmann::json result = nlohmann::json::array();
-    std::list<std::string>::iterator it = lst_gid.begin();
-    while (it != lst_gid.end()) {
-        result.push_back(*it);
-        it++;
+
+    // 创建 rapidjson 文档（数组类型）
+    rapidjson::Document result(rapidjson::kArrayType);
+    rapidjson::Document::AllocatorType& allocator = result.GetAllocator(); // 获取分配器
+
+    // 遍历列表并添加到 JSON 数组
+    for (const auto& gid : lst_gid) {
+        // 将 std::string 转换为 rapidjson::Value（需显式拷贝）
+        rapidjson::Value val;
+        val.SetString(gid.c_str(), allocator);
+        result.PushBack(val, allocator); // 添加到数组[1,7](@ref)
     }
-    Send2BW(result);
-    LOG_DEBUG("GetGroupIdList: cmd executed data:%s.", result.dump().c_str());
+
+    // 发送序列化后的字符串
+    Send2BW(result); // 需确保 Send2BW 支持 std::string 参数[1,7](@ref)
+    
+    // 记录日志（直接使用序列化字符串）
+    LOG_DEBUG("GetGroupIdList: cmd executed data:%s.", rapidjson_to_string(result).c_str());
     return 0;
 }
 
 int CmdSetSession::ExecCmd()
 {
-    std::string session = jdata["ext_data"];
-    int cid = jdata["connection_id"];
+    std::string session = jdata["ext_data"].GetString();
+    int cid = jdata["connection_id"].GetInt();
     if(cid <= 0) {
         LOG_ERROR("set session failed, invalid cid[%d].", cid);
         return -1;
@@ -475,8 +595,10 @@ int CmdSetSession::ExecCmd()
 
 int CmdGetSessionByCid::ExecCmd()
 {
-    nlohmann::json result;
-    int cid = jdata["connection_id"];
+    rapidjson::Document result;
+    result.SetObject(); // 初始化为空对象
+    rapidjson::Document::AllocatorType& allocator = result.GetAllocator();
+    int cid = jdata["connection_id"].GetInt();
     int64_t fdicid = -1;
     std::string session;
     if(cid <= 0) {
@@ -490,13 +612,13 @@ int CmdGetSessionByCid::ExecCmd()
     }
     session = tgg_get_cli_reserved(GET_COREID_FDCID_MASK(fdicid), GET_FD_FDCID_MASK(fdicid));
     if(session.empty()) {
-        result = nlohmann::json::array();
+        result.SetArray(); // 设为空数组
         LOG_INFO("session is empty of cid[%d].", cid);
         goto SEND_GET_SESSION;
     }
-    result = session;
+    result.SetString(session.c_str(), allocator);
     LOG_DEBUG("GetSession: cmd executed cid[%d] data:%s.", cid, session.c_str());
-    Send2BW(result, false);
+    Send2BW(result);
     return 0;
 
 SEND_GET_SESSION:
@@ -506,67 +628,87 @@ SEND_GET_SESSION:
 
 int CmdGetAllClientSession::ExecCmd()
 {
-    nlohmann::json result = nlohmann::json::array();
+    rapidjson::Document result;
+    result.SetArray(); // 初始化为数组
+    rapidjson::Document::AllocatorType& allocator = result.GetAllocator();
+
     std::list<int64_t> lst_fds;
     tgg_get_allfds(lst_fds);
     for (auto fdidcid : lst_fds) {
         std::string session = tgg_get_cli_reserved(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid));
         int cid = tgg_get_cli_cid(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid));
-        nlohmann::json node = nlohmann::json::object();
-        node[std::to_string(cid)] = session;
-        result.push_back(node);
+        std::string scid = std::to_string(cid);
+        // 创建节点对象 { "cid": "session_data" }
+        rapidjson::Value node(rapidjson::kObjectType);
+        node.AddMember(
+            rapidjson::Value().SetString(scid.c_str(), scid.size(), allocator), 
+            rapidjson::Value().SetString(session.c_str(), session.size(), allocator), 
+            allocator
+        );
+        result.PushBack(node, allocator);
     }
-    LOG_DEBUG("GetAllClientSession: cmd executed data:%s.", result.dump().c_str());
+    LOG_DEBUG("GetAllClientSession: cmd executed data:%s.", rapidjson_to_string(result).c_str());
     Send2BW(result);
     return 0;
 }
 
-static void json_replace_recursive(nlohmann::json& target, const nlohmann::json& source) {
-    // 处理数组类型（您的特殊格式）
-    if (target.is_array() && source.is_array()) {
-        // 遍历源数组中的每个单键对象
-        for (const auto& source_item : source) {
-            if (!source_item.is_object() || source_item.size() != 1) 
-                continue;  // 跳过非单键对象
-
-            // 提取源对象的键值对
-            auto it = source_item.begin();
-            const std::string key = it.key();
-            const nlohmann::json& value = it.value();
-
-            // 在target中查找相同键的对象
+static void json_replace_recursive(rapidjson::Value& target, 
+                                  const rapidjson::Value& source,
+                                  rapidjson::Document::AllocatorType& allocator) {
+    // 处理数组类型
+    if (target.IsArray() && source.IsArray()) {
+        for (rapidjson::SizeType i = 0; i < source.Size(); i++) {
+            const rapidjson::Value& source_item = source[i];
+            if (!source_item.IsObject() || source_item.MemberCount() != 1) 
+                continue;
+                
+            // 获取键值对
+            auto it = source_item.MemberBegin();
+            const char* key = it->name.GetString();
+            const rapidjson::Value& value = it->value;
+            
+            // 在target中查找相同键
             bool found = false;
-            for (auto& target_item : target) {
-                if (target_item.is_object() && target_item.contains(key)) {
+            for (rapidjson::SizeType j = 0; j < target.Size(); j++) {
+                rapidjson::Value& target_item = target[j];
+                if (target_item.IsObject() && target_item.HasMember(key)) {
                     found = true;
-                    // 递归合并值（支持嵌套对象）
-                    json_replace_recursive(target_item[key], value);
-                    break;  // 单键对象只需处理一次
+                    // 递归合并
+                    json_replace_recursive(target_item[key], value, allocator);
+                    break;
                 }
             }
-
+            
             // 未找到则添加新对象
             if (!found) {
-                target.push_back({{key, value}});
+                rapidjson::Value new_item(rapidjson::kObjectType);
+                new_item.AddMember(
+                    rapidjson::Value().SetString(key, strlen(key), allocator), 
+                    rapidjson::Value(value, allocator), 
+                    allocator
+                );
+                target.PushBack(new_item, allocator);
             }
         }
     } 
-    // 处理标准对象类型
-    else if (target.is_object() && source.is_object()) {
-        for (auto it = source.begin(); it != source.end(); ++it) {
-            const auto& key = it.key();
-            const auto& value = it.value();
-
-            if (target.contains(key) && target[key].is_object() && value.is_object()) {
-                json_replace_recursive(target[key], value);
+    // 处理对象类型
+    else if (target.IsObject() && source.IsObject()) {
+        for (auto it = source.MemberBegin(); it != source.MemberEnd(); ++it) {
+            const char* key = it->name.GetString();
+            if (target.HasMember(key) && 
+                target[key].IsObject() && 
+                it->value.IsObject()) {
+                // 递归合并嵌套对象
+                json_replace_recursive(target[key], it->value, allocator);
             } else {
-                target[key] = value;
+                // 直接覆盖值
+                target.AddMember(
+                    rapidjson::Value().SetString(key, strlen(key), allocator), 
+                    rapidjson::Value(it->value, allocator), 
+                    allocator
+                );
             }
         }
-    } 
-    // 其他类型直接覆盖
-    else {
-        target = source;
     }
 }
 
@@ -583,7 +725,7 @@ static void json_replace_recursive(nlohmann::json& target, const nlohmann::json&
 int CmdUpdateSession::ExecCmd()
 {
     // TODO 稍微有点复杂，且当前拿不到数据
-    int cid = jdata["connection_id"];
+    int cid = jdata["connection_id"].GetInt();
     if(cid <= 0) {
         LOG_ERROR("set session failed, invalid cid[%d].",  cid);
         return -1;
@@ -595,7 +737,7 @@ int CmdUpdateSession::ExecCmd()
     }
     int coreid = GET_COREID_FDCID_MASK(fdidcid);
     int clifd = GET_FD_FDCID_MASK(fdidcid);
-    std::string ext_data = jdata["ext_data"];
+    std::string ext_data = jdata["ext_data"].GetString();
     std::string session = tgg_get_cli_reserved(coreid, clifd);
     if(session.empty()) {
         if (tgg_set_cli_reserved(coreid, clifd, ext_data.c_str()) < 0) {
@@ -604,26 +746,32 @@ int CmdUpdateSession::ExecCmd()
         }
         return 0;
     }
-    nlohmann::json jsession = Php_UnSerialize(session);
-    nlohmann::json jsession_for_merge = Php_UnSerialize(ext_data);
-    json_replace_recursive(jsession, jsession_for_merge);
-    std::string data = Php_Serialize(jsession);
+    // 反序列化PHP字符串（假设Php_UnSerialize返回rapidjson::Document）
+    rapidjson::Document jsession = Php_UnSerialize(session);
+    rapidjson::Document jsession_for_merge = Php_UnSerialize(ext_data);
+    
+    // 递归合并JSON
+    Php_ArrayReplaceRecursive(jsession, jsession_for_merge, jsession.GetAllocator());
+    
+    // 序列化回PHP格式
+    std::string data = Php_Serialize(jsession.GetObject());
     tgg_set_cli_reserved(coreid, clifd, data.c_str());
+    
     LOG_DEBUG("UpdateSession: cmd executed cid[%d] data:%s.", cid, data.c_str());
     return 0;
 }
 
 int CmdIsOnline::ExecCmd()
 {
-    nlohmann::json result;
-    int cid = jdata["connection_id"];
+    rapidjson::Document result;
+    int cid = jdata["connection_id"].GetInt();
     int clifdx = tgg_get_fdbycid(cid);
     if(clifdx <= 0) {
-        result = "0";
+        result.SetString("0");
     } else {
-        result = "1";
+        result.SetString("1");
     }
-    LOG_DEBUG("IsOnline: send cid[%d] IsOnline result[%s] to server.", cid, result.dump().c_str());
+    LOG_DEBUG("IsOnline: send cid[%d] IsOnline result[%s] to server.", cid, rapidjson_to_string(result).c_str());
     Send2BW(result);
     return 0;
 }
@@ -633,8 +781,8 @@ int CmdBindUid::ExecCmd()
     // std::string s_uid = std::to_string(jdata["user_id"].get<std::uint64_t>());
     // return tgg_bind_session(this->fd, s_uid.c_str(), tgg_get_cli_cid(this->fd).c_str());
     // TODO Binduid到底是客户端过来消息绑定，还是服务端过来消息绑定
-    std::string suid = jdata["ext_data"].get<std::string>();
-    int cid = jdata["connection_id"];
+    std::string suid = jdata["ext_data"].GetString();
+    int cid = jdata["connection_id"].GetInt();
     if(suid.empty() || cid < 0) {
         LOG_ERROR("bind uid failed, uid[%s] and cid[%d] shouldn't be empty.", suid.c_str(), cid);
         return -1;
@@ -646,7 +794,7 @@ int CmdBindUid::ExecCmd()
 
 int CmdUnBindUid::ExecCmd()
 {
-    int cid = jdata["connection_id"];
+    int cid = jdata["connection_id"].GetInt();
     if(cid < 0) {
         LOG_ERROR("unbind failed, invalid cid[%d].", cid);
         return -1;
@@ -663,21 +811,43 @@ int CmdSendToUid::ExecCmd()
     std::string body;
     get_body_string(jdata, body);
     std::list<int64_t> lst_fds;
-    nlohmann::json juid = nlohmann::json::parse(jdata["ext_data"].get<std::string>());
-    std::vector<std::string> vec_uids = juid.get<std::vector<std::string> >();
-    for(auto& it : vec_uids) {
+// 1. 获取ext_data字符串
+    std::string ext_data_str = jdata["ext_data"].GetString(); // 直接获取字符串[1,4](@ref)
+
+    // 2. 解析JSON字符串为rapidjson文档
+    rapidjson::Document juid;
+    juid.Parse(ext_data_str.c_str());
+    if (juid.HasParseError() || !juid.IsArray()) { // 检查解析结果[6,8](@ref)
+        LOG_WARNING("SendToUid: invalid ext_data format");
+        return -1;
+    }
+
+    // 3. 提取UID数组
+    std::vector<std::string> vec_uids;
+    for (rapidjson::SizeType i = 0; i < juid.Size(); i++) { // 遍历数组[6](@ref)
+        if (juid[i].IsString()) {
+            vec_uids.push_back(juid[i].GetString());
+        } else {
+            LOG_WARNING("SendToUid: non-string element in UID array at index %d", i);
+        }
+    }
+
+    // 4. 收集所有UID对应的文件描述符
+    for (auto& it : vec_uids) {
         std::list<int64_t> lst_fd;
         if (tgg_get_fdsbyuid(it.c_str(), lst_fd) < 0) {
-            LOG_WARNING("SendToUid: no fd found for uid[%s].", it.c_str());
+            LOG_WARNING("SendToUid: no fd found for uid[%s]", it.c_str());
             continue;
         }
         lst_fds.splice(lst_fds.end(), lst_fd);
     }
-    if(lst_fds.size() > 0) {
+
+    // 5. 批量发送数据
+    if (!lst_fds.empty()) {
         BatchSend2ClientByfds(lst_fds, body, FD_WRITE, !raw);
-        LOG_DEBUG("SendToUid: cmd exec success.");
+        LOG_DEBUG("SendToUid: cmd exec success. Sent to %zu fds", lst_fds.size());
     } else {
-        LOG_WARNING("SendToUid: no fd found for all uids[%s].", jdata["ext_data"].get<std::string>().c_str());
+        LOG_WARNING("SendToUid: no fd found for all uids[%s]", ext_data_str.c_str());
     }
     return 0;
 }
@@ -685,8 +855,8 @@ int CmdSendToUid::ExecCmd()
 
 int CmdJoinGroup::ExecCmd()
 {
-    std::string group = jdata["ext_data"];
-    int cid = jdata["connection_id"];
+    std::string group = jdata["ext_data"].GetString();
+    int cid = jdata["connection_id"].GetInt();
     if(group.empty() || cid <= 0) {
         LOG_ERROR("set session failed, ext_data[%s] and cid[%d] shouldn't be empty.", group.c_str(), cid);
         return -1;
@@ -716,8 +886,8 @@ int CmdJoinGroup::ExecCmd()
 
 int CmdLeaveGroup::ExecCmd()
 {
-    std::string group = jdata["ext_data"];
-    int cid = jdata["connection_id"];
+    std::string group = jdata["ext_data"].GetString();
+    int cid = jdata["connection_id"].GetInt();
     if(group.empty() || cid <= 0) {
         LOG_ERROR("set session failed, ext_data[%s] and cid[%d] shouldn't be empty.", group.c_str(), cid);
         return -1;
@@ -746,7 +916,7 @@ int CmdLeaveGroup::ExecCmd()
 
 int CmdUnGroup::ExecCmd()
 {
-    std::string group = jdata["ext_data"];
+    std::string group = jdata["ext_data"].GetString();
     if(group.empty()) {
         LOG_ERROR("ungroup failed, group[%s] shouldn't be empty.",
                  __FILE__, __LINE__, group.c_str());
@@ -773,8 +943,11 @@ int CmdUnGroup::ExecCmd()
 
 int CmdGetClientSessionsByGroup::ExecCmd()
 {
-    nlohmann::json result = nlohmann::json::array();
-    std::string group = jdata["ext_data"];
+    rapidjson::Document result;
+    result.SetArray(); // 创建数组类型
+    rapidjson::Document::AllocatorType& allocator = result.GetAllocator();
+    
+    std::string group = jdata["ext_data"].GetString();
     if(group.empty()) {
         LOG_ERROR("get session by group failed, group[%s] shouldn't be empty.", group.c_str());
         Send2BW(result);
@@ -794,27 +967,32 @@ int CmdGetClientSessionsByGroup::ExecCmd()
             }
             std::string connection_id = std::to_string(cid);// cid的前12位是ip和port，后面的才是connection_id
             std::string session = tgg_get_cli_reserved(coreid, fd);
-            nlohmann::json unit = nlohmann::json::object();
-            unit[connection_id] = session;
-            result.push_back(unit);
+            rapidjson::Value unit(rapidjson::kObjectType);
+            unit.AddMember(
+                rapidjson::Value().SetString(connection_id.c_str(), connection_id.size(), allocator),
+                rapidjson::Value().SetString(session.c_str(), session.size(), allocator),
+                allocator
+            );
+            result.PushBack(unit, allocator);
             itFd++;
         }
     }
     Send2BW(result);
-    LOG_DEBUG("GetClientSessionsByGroup: cmd executed gid[%s] data:%s.", group.c_str(), result.dump().c_str());
+    LOG_DEBUG("GetClientSessionsByGroup: cmd executed gid[%s] data:%s.", group.c_str(), rapidjson_to_string(result).c_str());
     return 0;
 }
 
 
 int CmdGetClientCountByGroup::ExecCmd()
 {
-    nlohmann::json result = 0;
-    std::string group = jdata["ext_data"];
+    rapidjson::Document result;
+    result.SetInt(0);
+    std::string group = jdata["ext_data"].GetString();
     if(group.empty()) {
         std::list<int64_t> lst_cid;
         tgg_get_allonlinecids(lst_cid);
-        result = lst_cid.size();
-        LOG_DEBUG("GetAllClientCount:%s.", result.dump().c_str());
+        result.SetInt(lst_cid.size());
+        LOG_DEBUG("GetAllClientCount:%s.", rapidjson_to_string(result).c_str());
         Send2BW(result);
         return 0;
     }
@@ -823,17 +1001,19 @@ int CmdGetClientCountByGroup::ExecCmd()
     if (!tgg_get_fdsbygid(group.c_str(), lst_sfd)) {
         count = lst_sfd.size();
     }
-    result = count;
+    result.SetInt(count);
     Send2BW(result);
-    LOG_DEBUG("GetClientCountByGroup: cmd executed gid[%s] data:%s.", group.c_str(), result.dump().c_str());
+    LOG_DEBUG("GetClientCountByGroup: cmd executed gid[%s] data:%s.", group.c_str(), rapidjson_to_string(result).c_str());
     return 0;
 }
 
 int CmdGetClientIdByUid::ExecCmd()
 {
-    nlohmann::json result = nlohmann::json::array();
+    rapidjson::Document result;
+    result.SetArray(); // 创建数组
+    rapidjson::Document::AllocatorType& allocator = result.GetAllocator();
     std::string data;
-    std::string suid = jdata["ext_data"];
+    std::string suid = jdata["ext_data"].GetString();
     if(suid.empty()) {
         LOG_ERROR("get session by uid failed, uid[%s] shouldn't be empty.", suid.c_str());
         Send2BW(result);
@@ -849,8 +1029,8 @@ int CmdGetClientIdByUid::ExecCmd()
                 itFd++;
                 continue;
             }
-            std::string connection_id = std::to_string(cid);// cid的前12位是ip和port，后面的才是connection_id
-            result.push_back(connection_id);
+            // std::string connection_id = std::to_string(cid);
+            result.PushBack(cid, allocator);
             itFd++;
         }
     } else {
@@ -858,101 +1038,136 @@ int CmdGetClientIdByUid::ExecCmd()
     }
 
     Send2BW(result);
-    LOG_DEBUG("GetClientIdByUid: cmd executed uid[%s] data:%s.", suid.c_str(), result.dump().c_str());
+    LOG_DEBUG("GetClientIdByUid: cmd executed uid[%s] data:%s.", suid.c_str(), rapidjson_to_string(result).c_str());
     return 0;
 }
 
 int CmdBatchGetClientIdByUid::ExecCmd()
 {
-    nlohmann::json result = nlohmann::json::array();
-    std::string data;
-    nlohmann::json juid = nlohmann::json::parse(jdata["ext_data"].get<std::string>());
-    std::vector<std::string> vec_uids = juid.get<std::vector<std::string> >();
-    for(auto& it : vec_uids) {
+    rapidjson::Document result;
+    result.SetArray(); // 外层数组
+    rapidjson::Document::AllocatorType& allocator = result.GetAllocator();
+
+    // 解析ext_data中的JSON数组
+    std::string ext_data = jdata["ext_data"].GetString();
+    rapidjson::Document juid;
+    juid.Parse(ext_data.c_str());
+    
+    if(!juid.IsArray()) {
+        LOG_ERROR("Invalid uid array format");
+        return -1;
+    }
+
+    for (rapidjson::SizeType i = 0; i < juid.Size(); i++) {
+        const char* uid = juid[i].GetString();
+        rapidjson::Value uid_obj(rapidjson::kObjectType);
+        rapidjson::Value arr(rapidjson::kArrayType);
+        
         std::list<int64_t> lst_sfd;
-        nlohmann::json juid = nlohmann::json::object();
-        juid[it] = nlohmann::json::array();
-        if (!tgg_get_fdsbyuid(it.c_str(), lst_sfd)) {
-            std::list<int64_t>::iterator itFd = lst_sfd.begin();
-            while (itFd != lst_sfd.end()) {
-                int cid = GET_CID_FDCID_MASK(*itFd);//tgg_get_cli_cid(*itFd & 0xff, *itFd >> 8);
-                if(cid < 0) {
-                    LOG_WARNING("invalid cid[%d].", cid);
-                    itFd++;
-                    continue;
+        if (tgg_get_fdsbyuid(uid, lst_sfd) == 0) {
+            for (auto fdid : lst_sfd) {
+                int cid = GET_CID_FDCID_MASK(fdid);
+                if(cid >= 0) {
+                    arr.PushBack(cid, allocator);
                 }
-                // std::string connection_id = std::to_string(cid);// cid的前12位是ip和port，后面的才是connection_id
-                juid[it].push_back(cid);
-                itFd++;
             }
         }
-        result.push_back(juid);
+        
+        uid_obj.AddMember(
+            rapidjson::StringRef(uid),
+            arr,
+            allocator
+        );
+        result.PushBack(uid_obj, allocator);
     }
+
     Send2BW(result);
-    LOG_DEBUG("BatchGetClientIdByUid: cmd executed data:%s.", result.dump().c_str());
+    LOG_DEBUG("BatchGetClientIdByUid: cmd executed data:%s.", rapidjson_to_string(result).c_str());
     return 0;
 }
 
-static int json_parse_body(unsigned char flag, nlohmann::json& jdata)//const std::string& jdata, std::string& result)
+static int json_parse_body(unsigned char flag, rapidjson::Document& jdata)
 {
     int cmd = 0;
     std::string result;
-    nlohmann::json obj;
-    const char* body = reinterpret_cast<char*>(jdata["body"].get<uintptr_t>());
-    int body_len = jdata["body_len"].get<int>();
+    rapidjson::Document obj; // 替换nlohmann::json为rapidjson::Document
+    rapidjson::Document::AllocatorType& allocator = obj.GetAllocator();
+
+    // 1. 获取body指针和长度
+    uintptr_t body_ptr = jdata["body"].GetUint64(); // 直接获取uintptr_t
+    const char* body = reinterpret_cast<char*>(body_ptr);
+    int body_len = jdata["body_len"].GetInt();
+
     if(body_len <= 2) {
         LOG_DEBUG("invalid body length:%d.", body_len);
         return 0;
     }
-    //                            0x32 -> ":"       0x7b -> "{"
+
+    // 2. 检查body格式
     if(body_len > 2 && body[1] != 0x3a && body[0] != 0x7b) {
-        // 当前body为字符串，需要在发送的时候转换成二进制
         std::string print_data;
         if(body[0] == 0xff && body[1] == 0xfe) {
-            // std::string bin_data = hex2bin(body);
             message_unpack(body, print_data);
         } else {
-            print_data = std::move(std::string(body, body_len));
+            print_data.assign(body, body_len); // 避免拷贝
         }
         LOG_DEBUG("send to cli data:%s", print_data.c_str());
         return 0;
     }
-    // jdata["body"] = hex2bin(body);
-    // 走到这里来的都是字符串
+
+    // 3. JSON解析逻辑
     try {
-        
         if(!flag) {
-            obj = Php_UnSerialize(std::move(body));
+            // 假设Php_UnSerialize返回rapidjson::Document
+            obj.CopyFrom(Php_UnSerialize(body), allocator);
         } else {
-            obj = nlohmann::json::parse(body);
+            // 直接解析body [1,4](@ref)
+            obj.Parse(body, body_len);
+            if(obj.HasParseError()) {
+                throw std::runtime_error("Parse error");
+            }
         }
-        jdata["body"] = obj.dump();
-        LOG_DEBUG("body: %s", body.c_str());
-        if(!obj.contains("cmd")) {// 没有cmd就不需要解包
-            LOG_DEBUG("no cmd found in body:\n%s.", body);
+
+        // 4. 序列化JSON并存入jdata
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+        obj.Accept(writer);
+        jdata["body"].SetString(buffer.GetString(), allocator); // 替换原指针为字符串
+        
+        LOG_DEBUG("body: %s", buffer.GetString());
+
+        // 5. 检查cmd字段
+        if(!obj.HasMember("cmd")) {
+            LOG_DEBUG("no cmd found in body");
             return 0;
         }
-        cmd = obj["cmd"].get<std::int32_t>();
-    } catch (const nlohmann::json::parse_error& e) {
-        LOG_ERROR("parse json error:%s", e.what());
+        cmd = obj["cmd"].GetInt();
+    } catch (const std::exception& e) {
+        LOG_ERROR("parse error:%s", e.what());
         return -1;
     }
+
+    // 6. 处理cmd逻辑
     if (cmd) {
+        const char* data_str = obj["data"].GetString();
         if (s_is_open_binary) {
-            result = obj["data"].get<std::string>();
+            result = data_str;
         } else {
-            std::string bin = hex2bin(obj["data"].get<std::string>());
-            if (bin.length() <= 0) {
-                LOG_ERROR("hex2bin failed:%s.", obj["data"].get<std::string>().c_str());
+            std::string bin = hex2bin(data_str);
+            if (bin.empty()) {
+                LOG_ERROR("hex2bin failed:%s.", data_str);
+                return -1;
             }
-            if (message_pack(cmd, 1, 2,
-                (uint8_t)s_compress_flag, bin, result) < 0) {
-                LOG_ERROR("message_pack failed:%s.", bin.c_str());
+            if (message_pack(cmd, 1, 2, s_compress_flag, bin, result) < 0) {
+                LOG_ERROR("message_pack failed");
             }
         }
-        jdata["body"] = result;
+        // 更新jdata的body字段 [1](@ref)
+        jdata["body"].SetString(result.c_str(), allocator);
     }
 
+    // 7. 更新body_len
+    jdata["body_len"] = strlen(jdata["body"].GetString());
     return 0;
 }
 
@@ -988,14 +1203,14 @@ void exec_cmd_processor(int prc_id, int fd, void* data)
         return;
     }
     CmdBaseProcessor* pro = NULL;
-    nlohmann::json jdata;
+    rapidjson::Document jdata;
     // 解析帧并生成json对象
     BwPackageHandler::decode(bwdata, jdata);
 
-    LOG_DEBUG("jdata:%s", jdata.dump(4).c_str());
+    LOG_DEBUG("jdata:%s", rapidjson_to_string(jdata).c_str());
 
         // 首次连接判断
-    int cmd = jdata["cmd"].get<std::int32_t>();
+    int cmd = jdata["cmd"].GetInt();
     int authorized = tgg_get_bwfdx_authorized(prc_id, fd);
     if (!authorized && cmd != CMD_WORKER_CONNECT && cmd != CMD_GATEWAY_CLIENT_CONNECT) {
         tgg_close_bw_session(prc_id, fd);
