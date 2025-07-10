@@ -352,7 +352,7 @@ static int tgg_gw_master()
 			if(clt_fd != -1) {
 				LOG_WARNING("accept error[%d]", clt_fd);
 			}
-			mt_sleep(10);
+			mt_sleep(1);
 			continue;
 		}
 		if (clt_fd >= g_fd_limit - 1)	{
