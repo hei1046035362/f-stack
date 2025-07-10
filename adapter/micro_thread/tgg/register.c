@@ -266,6 +266,11 @@ int main(int argc, char *argv[])
 	tgg_process_init();
     prc_dpdk_eal_init(argc, argv);
 
+    LOG_INFO("Try to start gwbwprc");
+    check_bwprc();
+    LOG_INFO("started gwbwprc.....");
+    sleep(5);// 等待进程启动完成
+
     unsigned int port = TggConfigure::getInstance()->get_register_port();
     const std::string& ip = TggConfigure::getInstance()->get_register_addr();
     while(g_run) {
