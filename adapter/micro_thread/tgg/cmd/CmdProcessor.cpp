@@ -202,7 +202,7 @@ int CmdSendToOne::ExecCmd()
     std::string body;
     get_body_string(jdata, body);
   // TODO 目前只支持ws发送
-    LOG_DEBUG("SendToOne: cmd executed cid[%d] data:%s.", cid, body.c_str());
+    LOG_DEBUG("SendToOne: cmd executed cid[%d] data:%s.", cid, bin2hex(body).c_str());
     Send2Client(cid, body, FD_WRITE, !raw);
     return 0;
 }
@@ -335,7 +335,7 @@ int CmdSendToALL::ExecCmd()
                 BatchSend2ClientBycids(lstCids, body, FD_WRITE, !raw);
             }
         }
-        LOG_DEBUG("SendToALL: cmd executed cids[%s] body:%s.", ext_data.c_str(), body.c_str());
+        LOG_DEBUG("SendToALL: cmd executed cids[%s] body:%s.", ext_data.c_str(), bin2hex(body).c_str());
         return 0;
     }
 
@@ -1111,7 +1111,7 @@ static int json_parse_body(unsigned char flag, rapidjson::Document& jdata)
         } else {
             print_data.assign(body, body_len); // 避免拷贝
         }
-        LOG_DEBUG("send to cli data:%s", print_data.c_str());
+        LOG_DEBUG("send to cli data:%s", bin2hex(print_data).c_str());
         return 0;
     }
 

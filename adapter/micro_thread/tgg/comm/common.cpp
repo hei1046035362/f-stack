@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <string.h>
 #include "log.hpp"
+#include <array>
 
 std::string tgg_trim(const std::string& str) {
     auto start = str.begin();
