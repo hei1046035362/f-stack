@@ -24,6 +24,7 @@
 
 static int s_compress_flag = 0;
 static int s_is_open_binary = 0;
+int g_need_authorize = 1;// bw的连接是否要先校验权限(第一个命令必须是200或202)
 
 // 辅助函数：将 rapidjson::Value 转换为字符串
 // bForLog 是否作为日志打印使用，作为日志打印时，非DEBUG情况下直接返回空字符串，防止性能损耗
@@ -99,30 +100,35 @@ int CmdWorkerConnect::ExecCmd()
         worker_info.Parse(body.c_str());
         if (worker_info.HasParseError()) {
             LOG_ERROR("WorkerConnect: JSON parse error");
-            close(this->fd);
+            this->need_close = 1;
+            // close(this->fd);
             return -1;
         }
         if (!worker_info.HasMember("secret_key")) {
             LOG_ERROR("WorkerConnect: no Worker key found.");
-            close(this->fd);
+            this->need_close = 1;
+            // close(this->fd);
             return -1;
         }
         if (std::string(worker_info["secret_key"].GetString()) != bwSeckey) {
             LOG_ERROR("WorkerConnect:  Worker key[%s] does not match conn key[%s].", 
                 worker_info["secretKey"].GetString(), bwSeckey.c_str());
-            close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
+            this->need_close = 1;
+            // close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             return -1;
         }
         uint32_t remote_ip; 
         ushort remote_port;
         if (get_remote_info(this->fd, remote_ip, remote_port) < 0) {// 获取远端ip port 失败
             LOG_ERROR("WorkerConnect: get remote info failed, fd:[%d].", this->fd);
-            close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
+            this->need_close = 1;
+            // close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             return -1;
         }
         std::string bwWokerkey = uint32_to_hex(remote_ip) + ":" + bwSeckey;
         if (tgg_check_bwwkkey_exist(bwWokerkey.c_str()) >= 0) {// 在一台服务器上businessWorker->name不能相同
-            close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
+            this->need_close = 1;
+            // close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             // tgg_close_bw_session(this->prc_id, this->fd);
             LOG_ERROR("WorkerConnect: bw[%s] already exist.", bwWokerkey.c_str());
             return -1;
@@ -134,7 +140,8 @@ int CmdWorkerConnect::ExecCmd()
         if (tgg_add_bwfdx(generate_bwfdx(this->prc_id, this->fd)) < 0) {
             // 如果加入失败，就要销毁连接，否则这个服务就没有人使用
             tgg_close_bw_session(this->prc_id, this->fd);
-            close(this->fd);
+            this->need_close = 1;
+            // close(this->fd);
             LOG_ERROR("WorkerConnect: add bw[%d] fd[%d] failed.", prc_id, fd);
             return -1;
         }
@@ -143,7 +150,8 @@ int CmdWorkerConnect::ExecCmd()
     } catch (...) {
     // 捕获其他任何未预料到的异常
         LOG_ERROR("Exception catched.");
-        close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
+        this->need_close = 1;
+        // close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
         // free_bw_session(this->prc_id, this->fd);
         return -1;
     }
@@ -158,35 +166,41 @@ int CmdGatewayClientConnect::ExecCmd()
         ushort remote_port;
         if (get_remote_info(this->fd, remote_ip, remote_port) < 0) {// 获取远端ip port 失败
             LOG_ERROR("GatewayClientConnect:get remote info failed, fd:%d.", this->fd);
-            close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
+            this->need_close = 1;
+            // close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             return -1;
         }
         // printf("jdata:%s\n", jdata.dump(4).c_str());
         std::string body;
         get_body_string(jdata, body);
+        LOG_INFO("GatewayClientConnect:JSON parse:%s", body.c_str());
         rapidjson::Document worker_info;
         worker_info.Parse(body.c_str());
         if (worker_info.HasParseError()) {
-            LOG_ERROR("GatewayClientConnect:JSON parse error");
-            close(this->fd);
+            LOG_ERROR("GatewayClientConnect:JSON parse error:%s", body.c_str());
+            this->need_close = 1;
+            // close(this->fd);
             return -1;
         }
         if (!worker_info.HasMember("secret_key")) {
             LOG_ERROR("GatewayClientConnect:no Worker key found.");
-            close(this->fd);
+            this->need_close = 1;
+            // close(this->fd);
             return -1;
         }
         if (std::string(worker_info["secret_key"].GetString()) != bwSeckey) {
             LOG_ERROR("GatewayClientConnect: Worker key[%s] does not match conn key[%s].", 
                 worker_info["secretKey"].GetString(), bwSeckey.c_str());
-            close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
+            this->need_close = 1;
+            // close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             return -1;
         }
         LOG_DEBUG("GatewayClientConnect: cmd executed body:%s.", body.c_str());
     } catch (...) {
     // 捕获其他任何未预料到的异常
         LOG_ERROR("Exception catched.");
-        close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
+        this->need_close = 1;
+        // close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
         // free_bw_session(this->prc_id, this->fd);
         return -1;
     }
@@ -1092,6 +1106,7 @@ static int json_parse_body(unsigned char flag, rapidjson::Document& jdata)
     std::string result;
     rapidjson::Document obj; // 替换nlohmann::json为rapidjson::Document
     rapidjson::Document::AllocatorType& allocator = obj.GetAllocator();
+    rapidjson::Document::AllocatorType& jallocator = jdata.GetAllocator();
 
     // 1. 获取body指针和长度
     uintptr_t body_ptr = jdata["body"].GetUint64(); // 直接获取uintptr_t
@@ -1132,7 +1147,7 @@ static int json_parse_body(unsigned char flag, rapidjson::Document& jdata)
         rapidjson::StringBuffer buffer;
         rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
         obj.Accept(writer);
-        jdata["body"].SetString(buffer.GetString(), allocator); // 替换原指针为字符串
+        jdata["body"].SetString(buffer.GetString(), jallocator); // 替换原指针为字符串
         
         LOG_DEBUG("body: %s", buffer.GetString());
 
@@ -1163,7 +1178,7 @@ static int json_parse_body(unsigned char flag, rapidjson::Document& jdata)
             }
         }
         // 更新jdata的body字段 [1](@ref)
-        jdata["body"].SetString(result.c_str(), allocator);
+        jdata["body"].SetString(result.c_str(), jallocator);
     }
 
     // 7. 更新body_len
@@ -1194,13 +1209,13 @@ static bool bwdata_frame_check(tgg_bw_data* bdata, tgg_bw_protocal* bwdata)
     return true;
 }
 
-void exec_cmd_processor(int prc_id, int fd, void* data)
+int exec_cmd_processor(int prc_id, int fd, void* data)
 {
     //std::string json_str = R"({"name": "Jane Smith", "age": 25, "is_student": true})";
     tgg_bw_data* bdata = (tgg_bw_data*)data;
     tgg_bw_protocal* bwdata = (tgg_bw_protocal*)bdata->data;
     if(!bwdata_frame_check(bdata, bwdata)) {
-        return;
+        return -1;
     }
     CmdBaseProcessor* pro = NULL;
     rapidjson::Document jdata;
@@ -1211,12 +1226,12 @@ void exec_cmd_processor(int prc_id, int fd, void* data)
 
         // 首次连接判断
     int cmd = jdata["cmd"].GetInt();
-    int authorized = tgg_get_bwfdx_authorized(prc_id, fd);
+    int authorized = g_need_authorize ? tgg_get_bwfdx_authorized(prc_id, fd) : 1;
     if (!authorized && cmd != CMD_WORKER_CONNECT && cmd != CMD_GATEWAY_CLIENT_CONNECT) {
         tgg_close_bw_session(prc_id, fd);
-        close(fd);
+        // close(fd);
         LOG_ERROR("command[%d] error or not authorized[%d].", cmd, authorized);
-        return ;
+        return -1;
     }
 
     // TODO 这里的逻辑还不确定到底是什么意思，上行数据，待调试
@@ -1322,12 +1337,19 @@ void exec_cmd_processor(int prc_id, int fd, void* data)
             break;
         default :
             LOG_ERROR("Gateway inner pack err, Unknown cmd=%d.", cmd);
+            return -1;
             break;
     }
     if(pro) {
         pro->ExecCmd();
+        if(pro->NeedClose() < 0) {
+            delete pro;
+            pro = NULL;
+            return -1;
+        }
         delete pro;
         pro = NULL;
     }
+    return 0;
 }
 

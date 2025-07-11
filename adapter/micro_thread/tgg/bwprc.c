@@ -20,7 +20,7 @@ static const char* s_dump_file = "/var/corefiles/";//tgg_gw_bwprc_core
                 // 对应的时间在规定时间内没有更新,就视为无人使用，同时要主动检查并结束之前占用这个id的进程
 int g_prc_id = -1;
 extern int g_listen_fd;
-
+extern int g_need_authorize;
 static void prc_dpdk_eal_init(int argc, char **argv);
 
 void signal_handler(int signum)
@@ -169,6 +169,7 @@ int main(int argc, char *argv[])
     set_non_block( g_listen_fd );
 
 
+    g_need_authorize = TggConfigure::getInstance()->get_secret_key().empty() ? 0 : 1;
     g_prc_id = tgg_get_valid_bwprc(TggConfigure::getInstance()->get_bwsvr_count(), get_system_ms());
     if(g_prc_id < 0) {
         close(g_listen_fd);
