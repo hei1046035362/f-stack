@@ -11,9 +11,11 @@
 class CmdBaseProcessor {
 public:
 
-	CmdBaseProcessor(int prc_id, int fd, void* data, const rapidjson::Document& jdata):prc_id(prc_id), fd(fd), data(data), jdata(jdata) {}
+	CmdBaseProcessor(int prc_id, int fd, void* data, const rapidjson::Document& jdata):
+	prc_id(prc_id), fd(fd), data(data), jdata(jdata) { need_close = 0; }
     virtual int ExecCmd() = 0;
 	virtual ~CmdBaseProcessor() {};
+	int NeedClose() {return this->need_close;}
 protected:
 	// 发送给服务端，这时候this->fd 就是服务端的fd
 	void Send2BW(const rapidjson::Value& data, bool serialize = true);
@@ -22,6 +24,7 @@ protected:
 	int prc_id;// bwprc的进程编号，不是gwprc的
     int fd;// bwprc的fd
     void* data;
+    int need_close;
     const rapidjson::Document& jdata;
 };
 
@@ -249,6 +252,6 @@ public:
 
 
 
-void exec_cmd_processor(int prc_id, int fd, void* data);
+int exec_cmd_processor(int prc_id, int fd, void* data);
 
 #endif // __CMD_PROCESSOR_H__
