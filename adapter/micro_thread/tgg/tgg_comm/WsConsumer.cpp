@@ -159,10 +159,10 @@ void WsConsumer::OnClose()
 
 void WsConsumer::OnConnect()
 {
-    tgg_set_cli_authorized(this->core_id, this->fd, AUTH_TYPE_CLIENTCONNECT);
-    if(_Send2Server("", FD_NEW) == NO_BW_AVALIABLE) {
-        SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
-    }
+    // tgg_set_cli_authorized(this->core_id, this->fd, AUTH_TYPE_CLIENTCONNECT);
+    // if(_Send2Server("", FD_NEW) == NO_BW_AVALIABLE) {
+    //     SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
+    // }
 }
 
 // 检查请求是否符合tgg的要求，不符合直接断开连接
@@ -333,10 +333,13 @@ void WsConsumer::OnHandShake(const std::string& response, struct HttpRequest& re
     std::string result = build_server_data(req, ip_str, port);
     tgg_set_cli_authorized(this->core_id, this->fd, AUTH_TYPE_HANDLESHAKED);
     OnSend(response, FD_WRITE);// 响应客户端的http请求
-    // std::string result = data.dump();
-    LOG_INFO("OnHandShake:%s.", result.c_str());
     // 通知服务端websocket 握手完成
-    if (_Send2Server(result, FD_HANDLESHAKE) == NO_BW_AVALIABLE) {
+    LOG_INFO("OnHandShake:%s.", result.c_str());
+    // if(_Send2Server(result, FD_HANDLESHAKE) == NO_BW_AVALIABLE) {
+    //     SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
+    // }
+    // 通知服务端连接已建立  这里的连接是业务侧连接校验完成，  原本是要发完205之后要再发送一个1，现在只发1了
+    if (_Send2Server(result, FD_NEW) == NO_BW_AVALIABLE) {
         SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     }
 }

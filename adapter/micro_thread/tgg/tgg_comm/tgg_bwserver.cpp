@@ -71,10 +71,10 @@ int set_non_block(int iSock)
     return ret;
 }
 
-static void tgg_process_bwrcv_data(void* arg)
+static int tgg_process_bwrcv_data(void* arg)
 {
     tgg_bw_data* bdata = (tgg_bw_data*)arg;
-    exec_cmd_processor(bdata->coreid, bdata->fd, arg);
+    return exec_cmd_processor(bdata->coreid, bdata->fd, arg);
 }
 
 std::map<int, int> map_msgtype;// 客户端上行透传 消息类型映射
@@ -224,6 +224,7 @@ static int write_data()
             .gateway_port = TggConfigure::getInstance()->get_gateway_port(),
             .ext_len = 0// TODO 暂时不知道上行数据是否能用上
         };
+        std::string ext_data = tgg_get_cli_reserved(bdata->coreid, bdata->fd);
         if(bdata->fd_opt & FD_CLOSE) {// 要在发送给bw之前先回给客户端，否则客户端收到的消息可能不及时，write会导致协程切换
             // 这里发送给客户端和清理hash表信息的顺序待商榷
             LOG_WARNING("catched an close cmd, coreid[%d] fd[%d] idx[%d] cid:%d.", bdata->coreid, bdata->fd, bdata->idx, cid);
@@ -244,7 +245,7 @@ static int write_data()
             }
         }
         clean_bw_data(prc_id, bdata);// 在调用write之前清理数据，防止协程切换导致的地址变化
-        BwPackageHandler::encode(result, &header, sdata);
+        BwPackageHandler::encode(result, &header, sdata, ext_data);
 
         // int ret = co_write_complete(fd, result.c_str(), result.length());
         int ret = turbo_write(fd, result.c_str(), result.length());
@@ -313,6 +314,7 @@ void *read_routine( void *arg )
         }
         LOG_INFO("accept new connection ip[%s], port[%u].", ip_str, ntohs(port));
         char recv_buffer[ MAX_PACKET_SIZE ];
+        int exec_ret = 0;
         // std::vector<char> recv_buffer;
         unsigned int pos = 0;
         for(;;)
@@ -361,7 +363,8 @@ void *read_routine( void *arg )
                         .peer_port = ntohs(port),
                         // .cid = 0// 下行没有cid
                     };
-                    tgg_process_bwrcv_data(&bwdata);
+                    if ((exec_ret = tgg_process_bwrcv_data(&bwdata)) <0)
+                        break;
                     left_len -= pack_len;
                     parsed_pos += pack_len;
                     header = reinterpret_cast<tgg_bw_protocal*>(recv_buffer + parsed_pos);
@@ -378,11 +381,15 @@ void *read_routine( void *arg )
                     pos = 0;
                 }
             }
-            if( ret > 0 || ( -1 == ret && EAGAIN == errno ) )
-            {
+            if(exec_ret < 0) {// 执行命令中触发主动关闭
+                LOG_WARNING("we are closing bw[ip:%s,port:%d]", ip_str, ntohs(port));
+            } else if( ret > 0 || ( -1 == ret && EAGAIN == errno ) ) {
                 continue;
+            } else if(ret != 0) {
+                LOG_WARNING("bw[ip:%s,port:%d] is closing, ret:%d, error:[%d]%s.", ip_str, ntohs(port), ret, errno, strerror(errno));
+            } else {
+                LOG_WARNING("catched a close from bw[ip:%s,port:%d]", ip_str, ntohs(port));
             }
-            LOG_WARNING("bw[ip:%s,port:%d] is closing, ret:%d, error:[%d]%s.", ip_str, ntohs(port), ret, errno, strerror(errno));
             tgg_close_bw_session(g_prc_id, fd);
             close( fd );
             LOG_WARNING("bw[ip:%s,port:%d] closed.", ip_str, ntohs(port));
