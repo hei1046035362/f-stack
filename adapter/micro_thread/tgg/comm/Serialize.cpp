@@ -22,31 +22,41 @@ public:
     }
 
     // PHP's array_replace_recursive equivalent
-    static Document array_replace_recursive(const Value& base, const Value& replacement, Document::AllocatorType& allocator) {
-        Document result;
-        result.CopyFrom(base, allocator); // 深拷贝基础对象
-
-        // 递归合并逻辑
-        if (replacement.IsObject()) {
+    static void recursive_merge(Value& base, const Value& replacement, Document::AllocatorType& allocator) {
+        if (base.IsObject() && replacement.IsObject()) {
             for (auto& m : replacement.GetObject()) {
                 const char* key = m.name.GetString();
-                if (result.HasMember(key)) {
-                    if (result[key].IsObject() && m.value.IsObject()) {
-                        // 递归处理嵌套对象
-                        Document child = array_replace_recursive(result[key], m.value, allocator);
-                        result[key].CopyFrom(child, allocator);
-                    } else {
-                        // 直接覆盖非对象值
-                        result[key].CopyFrom(m.value, allocator);
+                Value::MemberIterator baseIt = base.FindMember(key);
+                if (baseIt != base.MemberEnd()) {
+                    // 递归合并对象
+                    if (baseIt->value.IsObject() && m.value.IsObject()) {
+                        recursive_merge(baseIt->value, m.value, allocator);
+                    } 
+                    // 直接覆盖非对象值（避免深拷贝）
+                    else {
+                        baseIt->value.CopyFrom(m.value, allocator);
                     }
-                } else {
-                    // 添加新成员
-                    Value newKey(key, allocator);
+                } 
+                // 新增键值对（仅浅拷贝键名）
+                else {
+                    Value newKey(key, allocator); 
                     Value newValue;
-                    newValue.CopyFrom(m.value, allocator);
-                    result.AddMember(newKey, newValue, allocator);
+                    newValue.CopyFrom(m.value, allocator); // 深拷贝到临时对象
+                    base.AddMember(newKey, newValue.Move(), allocator); // 使用Move转移所有权
                 }
             }
+        }
+    }
+
+    static Document array_replace_recursive(const Value& base, const Value& replacement, Document::AllocatorType& allocator) {
+        Document result;
+        result.CopyFrom(base, allocator); // 仅此一次深拷贝
+    
+        // 递归合并逻辑（原地修改，避免临时对象）
+        if (replacement.IsObject() && result.IsObject()) {
+            recursive_merge(result, replacement, allocator);
+        } else {
+            result.CopyFrom(replacement, allocator); // 非对象直接覆盖
         }
         return result;
     }

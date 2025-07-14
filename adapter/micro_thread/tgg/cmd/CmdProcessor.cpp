@@ -643,7 +643,7 @@ SEND_GET_SESSION:
 int CmdGetAllClientSession::ExecCmd()
 {
     rapidjson::Document result;
-    result.SetArray(); // 初始化为数组
+    result.SetObject();
     rapidjson::Document::AllocatorType& allocator = result.GetAllocator();
 
     std::list<int64_t> lst_fds;
@@ -652,14 +652,12 @@ int CmdGetAllClientSession::ExecCmd()
         std::string session = tgg_get_cli_reserved(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid));
         int cid = tgg_get_cli_cid(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid));
         std::string scid = std::to_string(cid);
-        // 创建节点对象 { "cid": "session_data" }
-        rapidjson::Value node(rapidjson::kObjectType);
-        node.AddMember(
+        // 添加节点对象 { "cid": "session_data" }
+        result.AddMember(
             rapidjson::Value().SetString(scid.c_str(), scid.size(), allocator), 
             rapidjson::Value().SetString(session.c_str(), session.size(), allocator), 
             allocator
         );
-        result.PushBack(node, allocator);
     }
     LOG_DEBUG("GetAllClientSession: cmd executed data:%s.", rapidjson_to_string(result).c_str());
     Send2BW(result);
@@ -765,10 +763,10 @@ int CmdUpdateSession::ExecCmd()
     rapidjson::Document jsession_for_merge = Php_UnSerialize(ext_data);
     
     // 递归合并JSON
-    Php_ArrayReplaceRecursive(jsession, jsession_for_merge, jsession.GetAllocator());
+    rapidjson::Document result = Php_ArrayReplaceRecursive(jsession, jsession_for_merge, jsession.GetAllocator());
     
     // 序列化回PHP格式
-    std::string data = Php_Serialize(jsession.GetObject());
+    std::string data = Php_Serialize(result.GetObject());
     tgg_set_cli_reserved(coreid, clifd, data.c_str());
     
     LOG_DEBUG("UpdateSession: cmd executed cid[%d] data:%s.", cid, data.c_str());
@@ -958,7 +956,7 @@ int CmdUnGroup::ExecCmd()
 int CmdGetClientSessionsByGroup::ExecCmd()
 {
     rapidjson::Document result;
-    result.SetArray(); // 创建数组类型
+    result.SetObject();
     rapidjson::Document::AllocatorType& allocator = result.GetAllocator();
     
     std::string group = jdata["ext_data"].GetString();
@@ -981,13 +979,11 @@ int CmdGetClientSessionsByGroup::ExecCmd()
             }
             std::string connection_id = std::to_string(cid);// cid的前12位是ip和port，后面的才是connection_id
             std::string session = tgg_get_cli_reserved(coreid, fd);
-            rapidjson::Value unit(rapidjson::kObjectType);
-            unit.AddMember(
+            result.AddMember(
                 rapidjson::Value().SetString(connection_id.c_str(), connection_id.size(), allocator),
                 rapidjson::Value().SetString(session.c_str(), session.size(), allocator),
                 allocator
             );
-            result.PushBack(unit, allocator);
             itFd++;
         }
     }
