@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/wait.h>
+#include <sys/prctl.h>
 #include "mt_incl.h"
 #include "mt_api.h"
 #include "micro_thread.h"
@@ -44,6 +46,11 @@ void signal_handler(int signum)
 	}
 }
 
+void sigchld_handler(int sig) {
+    int status;
+    while (waitpid(-1, &status, WNOHANG) > 0); // 非阻塞回收所有僵尸进程[5,7](@ref)
+}
+
 void tgg_sig_init()
 {
 	if (signal(SIGINT, signal_handler) == SIG_ERR) {
@@ -55,6 +62,10 @@ void tgg_sig_init()
         prc_exit(-1, "Error setting signal handler");
     }
 
+    if (signal(SIGCHLD, sigchld_handler) == SIG_ERR) {
+        perror("Error setting signal handler");
+        exit(-1);
+    }
 }
 
 static int get_remote_info(int sockfd, uint32_t& ip, ushort& port, char* ip_str)
@@ -310,8 +321,139 @@ static void tgg_send(void *arg)
 	}
 }
 
+static void start_gwrcv_sendary(int lcore_id)
+{
+    // 构造参数数组
+    char* proc_id = (char*)malloc(24);
+    sprintf(proc_id, "--proc-id=%d", lcore_id);
+    LOG_DEBUG("proc id arg:%s", proc_id);
+    // char* file_prefix = (char*)malloc(128);
+    // sprintf(file_prefix, "--file-prefix=gwrcv_%d_", lcore_id);
+    // LOG_DEBUG("file prefix arg:%s", file_prefix);
+    char **args = (char**)calloc(3, sizeof(char*));
+    args[0] = const_cast<char*>("gwrcv");
+    // args[1] = const_cast<char*>("--single-file-segments");
+    // args[2] = file_prefix;
+    args[1] = proc_id;
+    args[2] = NULL; // 必须以 NULL 结尾
+    custom_fork("gwrcv", args);
+    free(args);
+    // free(file_prefix);
+}
+
+static void start_gwcliprc()
+{
+    // char* file_prefix = (char*)malloc(128);
+    // sprintf(file_prefix, "--file-prefix=gwcliprc_%d_", rte_lcore_id());
+    // LOG_DEBUG("file prefix arg:%s", file_prefix);
+    char **args = (char**)calloc(2, sizeof(char*));
+    args[0] = const_cast<char*>("gwcliprc");
+    // args[1] = const_cast<char*>("--single-file-segments");
+    // args[2] = file_prefix;
+    args[1] = NULL; // 必须以 NULL 结尾
+    custom_fork("gwcliprc", args);
+    free(args);
+    // free(file_prefix);
+}
+
+static void start_register()
+{
+    // char* file_prefix = (char*)malloc(128);
+    // sprintf(file_prefix, "--file-prefix=register_%d_", rte_lcore_id());
+    // LOG_DEBUG("file prefix arg:%s", file_prefix);
+    char **args = (char**)calloc(2, sizeof(char*));
+    args[0] = const_cast<char*>("gwregister");
+    // args[1] = const_cast<char*>("--single-file-segments");
+    // args[2] = file_prefix;
+    args[1] = NULL; // 必须以 NULL 结尾
+    custom_fork("gwregister", args);// gwbwserver由register管理，会先启动gwbwserver,然后向注册中心发起连接请求
+    free(args);
+    // free(file_prefix);
+}
+
+static uint64_t s_last_check_time = 0;
+static int* s_pid_check_times;
+// 定时器回调函数
+void check_gw_monitor()
+{
+    uint64_t now = get_system_ms();
+    if(s_last_check_time + GW_MONITOR_HEART_BEAT < now) {
+        // 500ms检测一次
+        s_last_check_time = now;
+    } else {
+        // 没到检测时间，不检测
+        return;
+    }
+    int monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
+    for (int i = 1; i < monitor_count; ++i)// 0号进程 自己不能监控自己，由service监控 
+    {
+        if(tgg_checkif_gw_monitor_timeout(i, now)) {
+            pid_t pid = tgg_get_gw_monitor_pid(i);
+            if(pid > 0) {
+                if (kill(pid, SIGINT) == -1) {// 不能kill -9，可能会导致其他进程死锁
+                    if (errno == ESRCH) {
+                        LOG_ERROR("core_id[%d] process[%d] not exist anymore.", i, pid);
+                    } else if (errno == EPERM) {
+                        LOG_ERROR("Permission denied process[%d] core_id[%d].", pid, i);
+                        continue;
+                    } else {
+                        LOG_ERROR("kill core_id[%d] process[%d] faild error:%d.", i, pid, errno);
+                        // TODO 上线后这段代码要放开，防止死锁导致无法启动新的进程
+                        if (kill(pid, 0) == 0) {
+                            if(s_pid_check_times[i] < 3) {// 重试三次，不方便sleep，如果三个周期都没有退出，就强制结束
+                                s_pid_check_times[i]++;
+                                continue;
+                            }
+                            LOG_WARNING("core_id[%d] Process %d exists. Sending SIGKILL...", i, pid);
+                            // 2. 发送 SIGKILL 信号
+                            if (kill(pid, SIGKILL) == 0) {
+                                LOG_WARNING("SIGKILL sent successfully.");
+                            } else {
+                                LOG_ERROR("kill(SIGKILL) failed");
+                                continue;
+                            }
+                        }
+                        // continue;
+                    }
+                }
+            }
+            s_pid_check_times[i] = 0;
+            if(i < monitor_count-2) {
+            	start_gwrcv_sendary(i);
+            } else if (i == monitor_count-2) {
+            	start_gwcliprc();
+            } else if (i == monitor_count - 1) {
+            	start_register();
+            }
+        }
+    }
+}
+
+static uint64_t s_last_update_time = 0;
+// 定时器回调函数
+void update_gwrcv_secondary_heart_beat() {
+    uint64_t now = get_system_ms();
+    if(now - s_last_update_time > GW_MONITOR_HEART_BEAT) {
+        s_last_update_time = now;
+        tgg_update_gw_monitor(rte_lcore_id(), now);
+    }
+}
+
+static void gw_monitor(void* argv)
+{
+	while(g_run_status) {
+		if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
+			check_gw_monitor();
+		} else {
+			update_gwrcv_secondary_heart_beat();
+		}
+		mt_sleep(100);
+	}
+}
+
 static int tgg_gw_master()
 {
+	mt_start_thread((void *)gw_monitor, NULL);
 	// 启动发送线程
 	// for(int i = 0; i < TggConfigure::getInstance()->get_gwwrite_co_count(); ++i) {
 		mt_start_thread((void *)tgg_send, NULL);
@@ -391,20 +533,36 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-	mt_init_frame(argc, argv);
+	tgg_sig_init();// 信号处理初始化
+	initOpenSSL();// 初始化ssl加解密环境
+
+	if (!mt_init_frame(argc, argv)) {
+		LOG_ERROR("mt frame init failed.");
+		return -1;
+	}
 	g_core_id = rte_lcore_id();
 	if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
 		LOG_INFO("-------master core[%d] start-------", g_core_id);
 		tgg_master_init();
+		int monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
+		s_pid_check_times = new int[monitor_count]{0};
+		check_gw_monitor();
+		mt_sleep(3000);
 	} else {
 		LOG_INFO("-------secondary core[%d] start-------", g_core_id);
 		tgg_gwrcv_secondary_init();
+		if (tgg_setup_gw_monitor(g_core_id) < 0) {// 上一个进程尚未结束
+			LOG_INFO("-------secondary core[%d] exit, prev coreid still running-------", g_core_id);
+			mt_uninit_frame();
+    		rte_eal_cleanup();
+    		AsyncLogger::getInstance().shutdown();
+    		return 0;
+		}
 	}
-	tgg_sig_init();// 信号处理初始化
-	initOpenSSL();// 初始化ssl加解密环境
 	tgg_gw_master();
 	if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
 		LOG_INFO("-------master core[%d] exit-------", g_core_id);
+		delete[] s_pid_check_times;
 		tgg_master_uninit();
 	} else {
 		LOG_INFO("-------secondary core[%d] exit-------", g_core_id);

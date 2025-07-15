@@ -145,3 +145,12 @@ std::string bin2hex(const std::string& input, bool bForLog, bool uppercase) {
     }
     return output;
 }
+
+int count_ones(unsigned int n) {
+    int count = 0;
+    while (n) {
+        n &= (n - 1);  // 每次清除一个1
+        count++;
+    }
+    return count;
+}
