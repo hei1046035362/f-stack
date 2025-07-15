@@ -20,6 +20,7 @@
 #include "tgg_comm/tgg_common.h"
 #include "tgg_comm/tgg_conf.h"
 #include "comm/log.hpp"
+#include "comm/common.hpp"
 
 const char* g_gateway_ip_str = "192.168.40.129";
 ushort g_gateway_port = 80;
@@ -61,6 +62,10 @@ const char* bwfdx_zone_name_prev = "tgg_bwfd_zone";
 // bw进程数组
 struct rte_memzone* g_bwprc_zone = NULL;
 const char* bwprc_zone_name = "tgg_bwprc_zone";
+
+// gw进程数组  包含gwrcv gwcliprc register
+struct rte_memzone* g_gw_monitor_zone = NULL;
+const char* gw_monitor_zone_name = "tgg_gw_monitor_zone";
 
 
 /// 进程锁
@@ -187,6 +192,7 @@ static void init_locks()
 		rte_spinlock_init(get_cli_lock());
 		rte_spinlock_init(get_bwfdx_lock());
 		rte_spinlock_init(get_bwprc_lock());
+		rte_rwlock_init(get_gw_monitor_lock());
 		rte_atomic32_init(get_idx_lock());
 	}
 }
@@ -382,14 +388,6 @@ struct rte_memzone* init_rcu_zone(const char* rcu_zone_name, int size)
 //     }
 // }
 
-static int count_ones(unsigned int n) {
-    int count = 0;
-    while (n) {
-        n &= (n - 1);  // 每次清除一个1
-        count++;
-    }
-    return count;
-}
 void tgg_master_init()
 {
 	LOG_INFO("Init dpdk master for tgg...");
@@ -481,6 +479,7 @@ void tgg_master_init()
 	g_bwfdx_hash = init_hash(s_bwfdx_hash_name, g_fd_limit, sizeof(int64_t));
 	g_bwwkkey_hash = init_hash(s_bwwkkey_hash_name, g_fd_limit, TGG_BWWKKEY_LEN);
 	g_bwprc_zone = make_memzone(bwprc_zone_name, TggConfigure::getInstance()->get_bwsvr_count()*sizeof(pid_data));
+	g_gw_monitor_zone = make_memzone(gw_monitor_zone_name, (lcore_count+2)*sizeof(pid_data));
 
 	// 初始化rcu
 	// size_t rcu_sz = rte_rcu_qsbr_get_memsize(RTE_MAX_LCORE);
@@ -575,10 +574,16 @@ void tgg_master_uninit()
 	}
 	rte_hash_free(g_bwfdx_hash);
 	g_bwfdx_hash = NULL;
+
 	rte_hash_free(g_bwwkkey_hash);
 	g_bwwkkey_hash = NULL;
+
 	rte_memzone_free(g_bwprc_zone);
 	g_bwprc_zone = NULL;
+
+	rte_memzone_free(g_gw_monitor_zone);
+	g_gw_monitor_zone = NULL;
+
 	rte_memzone_free(g_rcu_zone);
 	g_rcu_zone = NULL;
 }
@@ -703,11 +708,13 @@ void tgg_gwrcv_secondary_init()
 		g_idx_hash[i] = get_hash_byname(idx_hash_name);
 	}
 	tgg_secondary_init();
+	g_gw_monitor_zone = find_memzone(gw_monitor_zone_name);
 }
 
 void tgg_cliprc_init()
 {
 	tgg_secondary_init();
+	g_gw_monitor_zone = find_memzone(gw_monitor_zone_name);
 }
 
 void tgg_cliprc_uninit()
@@ -732,6 +739,7 @@ void tgg_register_init()
 {
 	tgg_secondary_init();
 	g_bwprc_zone = find_memzone(bwprc_zone_name);// 监控bwserver进程组
+	g_gw_monitor_zone = find_memzone(gw_monitor_zone_name);
 }
 
 void tgg_register_uninit()

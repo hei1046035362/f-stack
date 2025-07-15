@@ -22,4 +22,6 @@ std::string uint32_to_hex(uint32_t ip);
 
 uint64_t get_system_ms(void);
 
+int count_ones(unsigned int n);
+
 #endif // __COMMON_HPP__

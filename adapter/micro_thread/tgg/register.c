@@ -39,66 +39,6 @@ void sigchld_handler(int sig) {
     while (waitpid(-1, &status, WNOHANG) > 0); // 非阻塞回收所有僵尸进程[5,7](@ref)
 }
 
-static int get_exec_path(char* exe_path, const char* exec_name)
-{
-    ssize_t len = readlink("/proc/self/exe", exe_path, PATH_MAX - 1); // 读取符号链接[3,5,6](@ref)
-    if (len == -1) {
-        perror("readlink failed");
-        return -1;
-    }
-    printf("[%s][%d]readlink exec path[%s]\n", __FILE__, __LINE__, exe_path);
-    exe_path[len] = '\0';
-
-    // 提取目录：从末尾向前找到最后一个 '/' 并截断
-    char *last_slash = strrchr(exe_path, '/');
-    if (last_slash != NULL) {
-        memcpy(last_slash+1, exec_name, strlen(exec_name));
-        last_slash[(1+strlen(exec_name))] = '\0';
-        return 0;
-    }
-    printf("[%s][%d]invalid exec path[%s]\n", __FILE__, __LINE__, exe_path);
-    return -1;
-}
-
-static void custom_fork(const char* exec_name)
-{
-    char exe_path[PATH_MAX];
-    if(get_exec_path(exe_path, exec_name) < 0) {
-        return;
-    }
-    pid_t pid = fork();
-    if (pid < 0) {
-        LOG_ERROR("fork failed.");
-    }
-
-    if (pid == 0) {  // 子进程
-        // 1. 验证路径安全
-        if (access(exe_path, X_OK) != 0) {
-            perror("目标程序不可执行");
-            LOG_ERROR("access filepath failed [%s].", exe_path);
-            exit(EXIT_FAILURE);
-        }
-        
-        struct stat st;
-        if (stat(exe_path, &st) == -1 || !S_ISREG(st.st_mode)) {
-            fprintf(stderr, "错误：无效文件\n");
-            LOG_ERROR("stat filepath failed [%s]", exe_path);
-            exit(EXIT_FAILURE);
-        }
-        LOG_INFO("launch up a new process for [%s]", exe_path);
-        // 2. 构造参数数组
-        char **args = (char**)malloc((2) * sizeof(char*));
-        args[0] = exe_path;
-        args[1] = NULL; // 必须以 NULL 结尾
-        execv(exe_path, args);
-
-        // 若execv返回，说明执行失败
-        LOG_ERROR("execv failed.");
-        free(args);
-        exit(EXIT_FAILURE);
-    }
-}
-
 static uint64_t s_last_check_time = 0;
 static int* s_pid_check_times;
 // 定时器回调函数
@@ -146,15 +86,38 @@ void check_bwprc()
                 }
             }
             s_pid_check_times[i] = 0;
-            custom_fork("gwbwprc");
+            // 构造参数数组
+            // char* file_prefix = (char*)malloc(128);
+            // sprintf(file_prefix, "--file-prefix=gwbwprc_%d_", i);
+            // LOG_DEBUG("file prefix arg:%s", file_prefix);
+            char **args = (char**)malloc((2) * sizeof(char*));
+            args[0] = const_cast<char*>("gwbwprc");
+            // args[1] = const_cast<char*>("--single-file-segments");
+            // args[2] = file_prefix;
+            args[1] = NULL; // 必须以 NULL 结尾
+            custom_fork("gwbwprc", args);
+            // free(file_prefix);
+            free(args);
         }
     }
 }
 
+static uint64_t s_last_update_time = 0;
+// 定时器回调函数
+void update_register_heart_beat() {
+    uint64_t now = get_system_ms();
+    if(now - s_last_update_time > GW_MONITOR_HEART_BEAT) {
+        // printf("update heart beat for [PID:%d][prc_id:%d]\n", getpid(), g_prc_id);
+        s_last_update_time = now;
+        tgg_update_gw_monitor(count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 1, now);
+    }
+}
+
 int local_eventloop_fun(void* arg) {
-    if (!g_run)
+    if (!g_run || g_register_fd <= 0)
         return -1;// 终止coroutine的eventloop
     check_bwprc();
+    update_register_heart_beat();
     return 0;
 }
 
@@ -266,6 +229,13 @@ int main(int argc, char *argv[])
 	tgg_process_init();
     prc_dpdk_eal_init(argc, argv);
 
+    if (tgg_setup_gw_monitor(count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 1) < 0) {// 上一个进程尚未结束
+        LOG_INFO("-------register exit, prev instance still running-------");
+        tgg_process_uninit();
+        AsyncLogger::getInstance().shutdown();
+        return 0;
+    }
+
     LOG_INFO("Try to start gwbwprc");
     check_bwprc();
     LOG_INFO("started gwbwprc.....");
@@ -276,7 +246,7 @@ int main(int argc, char *argv[])
     while(g_run) {
         g_register_fd = connect_tcp_socket( port, ip.c_str());
         while (g_register_fd < 0 && g_run) {// 没连上就每隔5s重连一次
-            LOG_INFO("connect to register[%s:%d] failed, check if server is alive.", ip.c_str(), port);
+            LOG_INFO("connect to register[%s:%d] failed, check if register server is alive.", ip.c_str(), port);
             int looptimes = 500; // 没连上的话，每5s重连一次注册中心
             while(g_run && looptimes > 0) {
                 usleep(10);
@@ -284,8 +254,9 @@ int main(int argc, char *argv[])
             }
             g_register_fd = connect_tcp_socket( port, ip.c_str());
         }
-
-        LOG_INFO("connected to register %s:%d.\n", ip.c_str(), port);
+        if(g_register_fd > 0) {
+            LOG_INFO("connected to register %s:%d.\n", ip.c_str(), port);
+        }
 
         main_register_proc();
         

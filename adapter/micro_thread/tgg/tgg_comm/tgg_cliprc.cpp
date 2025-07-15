@@ -7,6 +7,7 @@
 #include "tgg_comm/tgg_bw_cache.h"
 #include "comm/common.hpp"
 #include "tgg_transport.h"
+#include "tgg_conf.h"
 #include <vector>
 #include <chrono>
 extern int g_run;
@@ -69,6 +70,17 @@ static bool try_clean_trans_data(tgg_trans_data* tdata)
     return true;
 }
 
+static uint64_t s_last_update_time = 0;
+// 定时器回调函数
+void update_gwcliprc_heart_beat() {
+    uint64_t now = get_system_ms();
+    if(now - s_last_update_time > GW_MONITOR_HEART_BEAT) {
+        // printf("update heart beat for [PID:%d][prc_id:%d]\n", getpid(), g_prc_id);
+        s_last_update_time = now;
+        tgg_update_gw_monitor(count_ones(TggConfigure::getInstance()->get_lcore_mask()), now);
+    }
+}
+
 static void* deal_trans(void*)
 {
     std::vector<int64_t> vec_bwfdx;
@@ -77,6 +89,7 @@ static void* deal_trans(void*)
     bool clean_hash_flag = false;// 是否要清理所有的业务hash表
     while(g_run) {
         // 取可用的bw
+        update_gwcliprc_heart_beat();
         tgg_bwfdx_data* bwfdxdata = NULL;
         if(!tgg_dequeue_bwfdx(&bwfdxdata)) {
             switch(bwfdxdata->cmd) {
@@ -108,7 +121,7 @@ static void* deal_trans(void*)
         // 取数据
         tgg_trans_data* tdata = NULL;
         if (tgg_dequeue_trans(&tdata) < 0) {
-            usleep(10);
+            usleep(2);
             continue;
         }
         if(vec_bwfdx.size() <= 0) {
