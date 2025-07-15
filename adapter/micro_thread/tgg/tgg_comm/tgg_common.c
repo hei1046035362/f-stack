@@ -13,6 +13,12 @@
 #include <iostream>
 #include "comm/log.hpp"
 #include "mt_api.h"
+#include "comm/common.hpp"
+
+#include <sys/wait.h>
+#include <sys/prctl.h>
+#include <limits.h>
+#include <sys/stat.h>
 
 extern int g_fd_limit;
 extern struct rte_memzone* g_fd_zones[MAX_LCORE_COUNT];
@@ -20,6 +26,8 @@ extern struct rte_memzone* g_fd_bw_zones[MAX_LCORE_COUNT];
 extern int g_bwfdx_limit;
 extern struct rte_memzone* g_bwfdx_zones[MAX_LCORE_COUNT];
 extern struct rte_memzone* g_bwprc_zone;
+extern struct rte_memzone* g_gw_monitor_zone;
+
 extern struct rte_ring* g_ring_writes[MAX_LCORE_COUNT];
 extern struct rte_ring* g_ring_trans;
 extern struct rte_ring* g_ring_bwfdx;
@@ -507,6 +515,59 @@ void tgg_clean_bwprc(int prc_id)
 	memset(prc, 0, sizeof(pid_data));
 }
 
+// 获取有效的进程序号
+int tgg_setup_gw_monitor(int prc_id)
+{
+	uint64_t now = get_system_ms();
+	WriteLock lock(get_gw_monitor_lock());
+	pid_data* prc = (pid_data*)(g_gw_monitor_zone->addr) + prc_id;
+	// 如果超过两倍心跳的时间都没有更新，就视为前一个进程已退出
+	if (prc->heart_beat == 0 || prc->heart_beat + 2*GW_MONITOR_HEART_BEAT < now) {
+		prc->heart_beat = now;
+		prc->pid = getpid();
+		return 0;
+	}
+	return -1;
+}
+
+// 更新心跳
+void tgg_update_gw_monitor(int prc_id, uint64_t now)
+{
+	WriteLock lock(get_gw_monitor_lock());
+	pid_data* prc = (pid_data*)g_gw_monitor_zone->addr + prc_id;
+	prc->heart_beat = now;
+}
+
+// 获取指定下标的进程id
+int tgg_get_gw_monitor_pid(int prc_id)
+{
+	ReadLock lock(get_gw_monitor_lock());
+	pid_data* prc = (pid_data*)g_gw_monitor_zone->addr + prc_id;
+	return prc->pid;
+}
+
+// 检查指定进程是否超时
+int tgg_checkif_gw_monitor_timeout(int prc_id, uint64_t now)
+{
+	ReadLock lock(get_gw_monitor_lock());
+	pid_data* prc = (pid_data*)(g_gw_monitor_zone->addr) + prc_id;
+	// 如果超过两倍心跳的时间都没有更新，就视为前一个进程已退出
+	// LOG_INFO("PID:%d, prc_id:%d heart_beat:%ld now:%ld", prc->pid, prc_id, prc->heart_beat, now);
+	if (now - prc->heart_beat > 2*GW_MONITOR_HEART_BEAT) {
+		return 1;// 超时
+	}
+	return 0;// 没超时
+}
+
+// 进程退出前主动清理，下一个进程就能快速启动
+void tgg_clean_gw_monitor(int prc_id)
+{
+	WriteLock lock(get_gw_monitor_lock());
+	pid_data* prc = (pid_data*)g_gw_monitor_zone->addr + prc_id;
+	memset(prc, 0, sizeof(pid_data));
+}
+
+
 
 int ringbuf_read(int core_id, int fd, std::string& dest, int len, int move_pos)
 {
@@ -952,4 +1013,58 @@ void print_mem_statistics()
 	for(auto iter : s_hi_freq_free) {
 		LOG_WARNING("pool[%s] hi_free times: %d", iter.first.c_str(), iter.second);	
 	}
+}
+
+
+static int get_exec_path(char* exe_path, const char* exec_name)
+{
+    ssize_t len = readlink("/proc/self/exe", exe_path, PATH_MAX - 1); // 读取符号链接[3,5,6](@ref)
+    if (len == -1) {
+        perror("readlink failed");
+        return -1;
+    }
+    exe_path[len] = '\0';
+    // 提取目录：从末尾向前找到最后一个 '/' 并截断
+    char *last_slash = strrchr(exe_path, '/');
+    if (last_slash != NULL) {
+        memcpy(last_slash+1, exec_name, strlen(exec_name));
+        last_slash[(1+strlen(exec_name))] = '\0';
+    	LOG_INFO("exec path[%s]", last_slash);
+        return 0;
+    }
+    LOG_ERROR("invalid exec path[%s]", exe_path);
+    return -1;
+}
+
+void custom_fork(const char* exec_name, char** args)
+{
+    char exe_path[PATH_MAX] = {0};
+    if(get_exec_path(exe_path, exec_name) < 0) {
+        return;
+    }
+    pid_t pid = fork();
+    if (pid < 0) {
+        LOG_ERROR("fork failed.");
+    }
+
+    if (pid == 0) {  // 子进程  不能在子进程中调用日志函数，会导致日志线程死锁
+        // 1. 验证路径安全
+        if (access(exe_path, X_OK) != 0) {
+            perror("目标程序不可执行");
+            exit(EXIT_FAILURE);
+        }
+        
+        struct stat st;
+        if (stat(exe_path, &st) == -1 || !S_ISREG(st.st_mode)) {
+            fprintf(stderr, "错误：无效文件\n");
+            exit(EXIT_FAILURE);
+        }
+        // printf("launch up a new process for [%s]", exe_path);
+        execv(exe_path, args);
+
+        // 若execv返回，说明执行失败
+        // LOG_ERROR("execv failed.");
+        // free(args);
+        exit(EXIT_FAILURE);
+    }
 }

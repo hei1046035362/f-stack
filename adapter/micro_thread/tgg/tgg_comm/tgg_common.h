@@ -6,6 +6,7 @@
 #include "tgg_struct.h"
 
 #define BW_PRC_HEART_BEAT 5000  // bwprc进程心跳最大5s
+#define GW_MONITOR_HEART_BEAT 5000  // bwprc进程心跳最大1s
 
 void init_endians();
 
@@ -88,6 +89,15 @@ int tgg_checkif_bwprc_timeout(int prc_id, uint64_t now);
 // 清理指定进程相关数据
 void tgg_clean_bwprc(int prc_id);
 
+int tgg_setup_gw_monitor(int prc_id);
+// 更新进程编号对应的时间戳
+void tgg_update_gw_monitor(int prc_id, uint64_t now);
+// 获取指定编号的进程的进程id
+int tgg_get_gw_monitor_pid(int prc_id);
+// 检查指定进程是否超时了
+int tgg_checkif_gw_monitor_timeout(int prc_id, uint64_t now);
+// 清理指定进程相关数据
+void tgg_clean_gw_monitor(int prc_id);
 
 
 // 给ws操作缓存的函数  
@@ -163,5 +173,8 @@ void clean_fdidlist(tgg_fd_id_list* fdiddata);
 tgg_write_data* format_send_data(int core_id, const std::string& sdata, std::map<int, int>& mapfdidx, int fdopt);
 int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, int>& mapfdidx, int fdopt);
 int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx, int fdopt);
+
+
+void custom_fork(const char* exec_name, char** args);
 
 #endif  // _TGG_COMMON_H_

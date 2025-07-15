@@ -14,4 +14,6 @@ rte_spinlock_t* get_cli_lock() {return &(((tgg_lock*)(g_lock_zone->addr))->cli_l
 rte_spinlock_t* get_bwfdx_lock() {return &(((tgg_lock*)(g_lock_zone->addr))->bwfdx_lock);}
 rte_atomic32_t* get_idx_lock() {return &(((tgg_lock*)(g_lock_zone->addr))->idx_lock);}
 rte_spinlock_t* get_bwprc_lock() {return &(((tgg_lock*)(g_lock_zone->addr))->bwprc_lock);}
+rte_rwlock_t* get_gw_monitor_lock() {return &(((tgg_lock*)(g_lock_zone->addr))->gw_monitor_lock);}
+
 
