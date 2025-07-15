@@ -14,6 +14,7 @@
 #include <vector>
 #include "tgg_comm/tgg_cliprc.h"
 #include "comm/log.hpp"
+#include "comm/common.hpp"
 // 绝对路径
 const char* f_stack_ini = "/data/code/f-stack/config.ini";
 
@@ -100,6 +101,13 @@ int main(int argc, char *argv[])
 	// mt_init_frame(argc, argv);
     LOG_INFO("-----------cliprc start-----------");
 	tgg_process_init();
+	if (tgg_setup_gw_monitor(count_ones(TggConfigure::getInstance()->get_lcore_mask())) < 0) {// 上一个进程尚未结束
+		LOG_INFO("-------gwcliprc exit, prev instance still running-------");
+		tgg_process_uninit();
+    	AsyncLogger::getInstance().shutdown();
+    	return 0;
+	}
+
 	// 启动透传线程
 	init_bwtrans();
 

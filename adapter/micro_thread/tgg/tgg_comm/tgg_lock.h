@@ -19,6 +19,7 @@ typedef struct  st_lock_cache {
     rte_spinlock_t bwfdx_lock;    // bwfdx 操作锁
     rte_atomic32_t idx_lock;    // idx累加的操作锁
     rte_spinlock_t bwprc_lock;    // bw进程序号锁 防止不同的进程使用同一个序号
+    rte_rwlock_t gw_monitor_lock;
 
 } tgg_lock;
 
@@ -33,5 +34,6 @@ rte_spinlock_t* get_cli_lock();// 暂未使用，后续要根据联调、压测�
 rte_spinlock_t* get_bwfdx_lock();// 未使用
 rte_atomic32_t* get_idx_lock();// 未使用
 rte_spinlock_t* get_bwprc_lock();// 有用
+rte_rwlock_t* get_gw_monitor_lock();
 
 #endif // _TGG_LOCK_STRUCT_H_
