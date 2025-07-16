@@ -40,22 +40,21 @@ uint32_t g_gate_ip = 0;
 int g_core_id;// 记录当前core_id
 
 /// 连接管理的fd数组
-uint32_t g_fd_limit = 20*10000; // 单个进程10W 个fd
-static uint32_t s_zone_size = g_fd_limit*sizeof(tgg_cli_info);  // 单个进程存储最多10w个fd
+uint32_t g_fd_limit = 250000; // 默认单个进程25W 个fd   可配置
+static uint32_t s_zone_size = g_fd_limit*sizeof(tgg_cli_info);
 struct rte_memzone* g_fd_zones[MAX_LCORE_COUNT] = {NULL};
 const char* fd_zone_name_prev = "tgg_fd_zone";
 
 
 /// 连接管理的fd数组 bw使用
-// uint32_t g_fd_limit = 10*10000; // 单个进程20W 个fd
-static uint32_t s_zone_bw_size = g_fd_limit*sizeof(tgg_cli_bw_info);  // 单个进程存储最多10w个fd
+static uint32_t s_zone_bw_size = g_fd_limit*sizeof(tgg_cli_bw_info);
 struct rte_memzone* g_fd_bw_zones[MAX_LCORE_COUNT] = {NULL};
 const char* fd_bw_zone_name_prev = "tgg_fd_bw_zone";
 
 
 /// bw连接状态记录的fd数组
-uint32_t g_bwfdx_limit = 5*10000; // 单个进程5W 个fd
-static uint32_t s_bwzone_size = g_bwfdx_limit*sizeof(tgg_bw_info);  // 单个进程存储最多10w个fd
+uint32_t g_bwfdx_limit = 5000; // 单个进程5K 个fd 可配置
+static uint32_t s_bwzone_size = g_bwfdx_limit*sizeof(tgg_bw_info);
 struct rte_memzone* g_bwfdx_zones[MAX_LCORE_COUNT] = {NULL};
 const char* bwfdx_zone_name_prev = "tgg_bwfd_zone";
 
@@ -406,6 +405,13 @@ void tgg_master_init()
 	s_large_data_mempool_size = 1024*32*lcore_count;// 大块数据，本来就很少，大多是连接创建的时候会有，但是这个是上下行三个队列都会用到
 
 	s_write_mempool_size = s_write_ring_size * TggConfigure::getInstance()->get_lcore_mask();
+
+	g_fd_limit = TggConfigure::getInstance()->get_gwrcv_fd_limit();
+	s_zone_size = g_fd_limit*sizeof(tgg_cli_info);
+	s_zone_bw_size = g_fd_limit*sizeof(tgg_cli_bw_info);
+
+	g_bwfdx_limit = TggConfigure::getInstance()->get_gwbwrcv_fd_limit();
+	s_bwzone_size = g_bwfdx_limit*sizeof(tgg_bw_info);
 	// 100W个FD  32M的空间
 	g_lock_zone = make_memzone(s_lock_zone_name, sizeof(tgg_lock));
 	init_locks();
