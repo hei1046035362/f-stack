@@ -520,6 +520,21 @@ static int tgg_gw_master()
 	return 0;
 }
 
+static void tgg_recv_clean_prev()
+{
+	for (int i = 0; i < g_fd_limit; ++i)
+	{// 防止secondary进程异常重启后，上一次的缓存没有清理
+		int idx = tgg_get_cli_idx(g_core_id, i);
+		if( idx > 0 && tgg_check_idx_exist(g_core_id, idx)) {
+			// 通知gwbwrcv 清理这个链接对应的缓存
+			LOG_ERROR("clean prev data coreid[%d] fd[%d] idx[%d].", g_core_id, i, idx);
+			consume_rdata(i, NULL, 0, idx, FD_CLOSE);
+			tgg_del_idx(g_core_id, idx);
+		}
+	}
+	tgg_iter_del_idx(g_core_id);
+}
+
 int main(int argc, char *argv[])
 {
 	init_core(s_dump_file);
@@ -558,6 +573,7 @@ int main(int argc, char *argv[])
     		AsyncLogger::getInstance().shutdown();
     		return 0;
 		}
+		tgg_recv_clean_prev();
 	}
 	tgg_gw_master();
 	if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
