@@ -24,4 +24,6 @@ uint64_t get_system_ms(void);
 
 int count_ones(unsigned int n);
 
+int wait_all_child_exit();
+
 #endif // __COMMON_HPP__
