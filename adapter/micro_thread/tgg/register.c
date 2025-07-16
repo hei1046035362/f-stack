@@ -225,7 +225,7 @@ int main(int argc, char *argv[])
         printf("init log error.\n");
         return -1;
     }
-    LOG_INFO("-----------register start----------");
+    LOG_INFO("-----------register[pid:%d] start----------", getpid());
 	tgg_process_init();
     prc_dpdk_eal_init(argc, argv);
 
@@ -263,7 +263,7 @@ int main(int argc, char *argv[])
         LOG_WARNING("connection to register is down.");
     }
 
-
+    wait_all_child_exit();
 	// TODO 进程退出时要回收资源
 	tgg_process_uninit();
 	LOG_INFO("-----------main end----------");

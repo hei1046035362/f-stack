@@ -151,7 +151,7 @@ int main(int argc, char *argv[])
         printf("init log error.\n");
         return -1;
     }
-    LOG_INFO("-----------bwprc start----------");
+    LOG_INFO("-----------bwprc[pid:%d] start----------", getpid());
 	tgg_process_init();
     prc_dpdk_eal_init(argc, argv);
 

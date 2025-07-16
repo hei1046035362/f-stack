@@ -1,6 +1,8 @@
 #include <iostream>
 #include <regex>
 #include <sys/time.h>
+#include <sys/wait.h>
+#include <sys/prctl.h>
 #include "common.hpp"
 #include <iomanip>
 #include <string.h>
@@ -153,4 +155,22 @@ int count_ones(unsigned int n) {
         count++;
     }
     return count;
+}
+
+int wait_all_child_exit()
+{
+    int status;
+    pid_t child_pid;
+    while ((child_pid = wait(&status)) != -1) { // 阻塞等待任意子进程
+        if (WIFEXITED(status)) {
+            LOG_INFO("child[pid:%d] exit, ret: %d.", child_pid, WEXITSTATUS(status));
+        }
+    }
+
+    if (errno != ECHILD) { // 确保因无子进程而退出
+        LOG_ERROR("wait error");
+        return 1;
+    }
+    LOG_INFO("all child exited");
+    return 0;
 }
