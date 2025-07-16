@@ -557,14 +557,14 @@ int main(int argc, char *argv[])
 	}
 	g_core_id = rte_lcore_id();
 	if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
-		LOG_INFO("-------master core[%d] start-------", g_core_id);
+		LOG_INFO("-------master[pid:%d] core[%d] start-------", getpid(), g_core_id);
 		tgg_master_init();
 		int monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
 		s_pid_check_times = new int[monitor_count]{0};
 		check_gw_monitor();
 		mt_sleep(3000);
 	} else {
-		LOG_INFO("-------secondary core[%d] start-------", g_core_id);
+		LOG_INFO("-------secondary[pid:%d] core[%d] start-------", getpid(), g_core_id);
 		tgg_gwrcv_secondary_init();
 		if (tgg_setup_gw_monitor(g_core_id) < 0) {// 上一个进程尚未结束
 			LOG_INFO("-------secondary core[%d] exit, prev coreid still running-------", g_core_id);
@@ -577,6 +577,7 @@ int main(int argc, char *argv[])
 	}
 	tgg_gw_master();
 	if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
+		wait_all_child_exit();
 		LOG_INFO("-------master core[%d] exit-------", g_core_id);
 		delete[] s_pid_check_times;
 		tgg_master_uninit();

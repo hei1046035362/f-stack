@@ -99,7 +99,7 @@ int main(int argc, char *argv[])
     }
 	prc_dpdk_eal_init(argc, argv);
 	// mt_init_frame(argc, argv);
-    LOG_INFO("-----------cliprc start-----------");
+    LOG_INFO("-----------cliprc[pid:%d] start-----------", getpid());
 	tgg_process_init();
 	if (tgg_setup_gw_monitor(count_ones(TggConfigure::getInstance()->get_lcore_mask())) < 0) {// 上一个进程尚未结束
 		LOG_INFO("-------gwcliprc exit, prev instance still running-------");
