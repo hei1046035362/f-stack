@@ -285,7 +285,36 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     // bwrcv服务日志级别
     this->bwserver_log_level = pTgg_Ini.getValue("bwserver", "log_level");
 
-
+    // gwrcv_fdlimit  
+    int gwrcv_fdlimit = get_int_value(&pTgg_Ini, "gateway", "fd_limit");
+    if(gwrcv_fdlimit <= 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] read config gateway fd_limit failed:[%d].",
+         __FILE__, __LINE__, gwrcv_fdlimit);
+        return -1;
+    }
+    // 小于10W或者大于100W就取默认值25W
+    if(gwrcv_fdlimit < 100000 || gwrcv_fdlimit > 1000000) {
+        RTE_LOG(INFO, USER1, "[%s][%d] gateway fd_limit[%d] is not in valid area, use default 250000.",
+         __FILE__, __LINE__, gwrcv_fdlimit);
+        gwrcv_fdlimit = 250000;
+    }
+    this->gwrcv_fd_limit = gwrcv_fdlimit;
+  
+    // gwbwrcv_fdlimit  
+    int gwbwrcv_fdlimit = get_int_value(&pTgg_Ini, "bwserver", "fd_limit");
+    if(gwbwrcv_fdlimit <= 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] read config bwserver fd_limit failed:[%d].",
+         __FILE__, __LINE__, gwbwrcv_fdlimit);
+        return -1;
+    }
+    // 小于100或者大于10W就取默认值5K
+    if(gwbwrcv_fdlimit < 100 || gwbwrcv_fdlimit > 100000) {
+        RTE_LOG(INFO, USER1, "[%s][%d] bwserver fd_limit[%d] is not in valid area, use default 5000.", 
+            __FILE__, __LINE__, gwbwrcv_fdlimit);
+        gwbwrcv_fdlimit = 5000;
+    }
+    this->gwbwrcv_fd_limit = gwbwrcv_fdlimit;
+  
     return 0;
 }
 

@@ -43,6 +43,9 @@ private:
     std::string register_log_level;        // register日志级别
     std::string bwserver_log_level;        // bwrcv服务日志级别
 
+    int gwrcv_fd_limit;             // gwrcv单个进程承载的客户端连接的上限
+    int gwbwrcv_fd_limit;           // gwbwrcv单个进程承载的bw连接的上限
+
 public:
     int get_lcore_mask() { return lcore_mask;}
     int get_ccore_mask() { return ccore_mask;}
@@ -66,6 +69,8 @@ public:
     const std::string& get_gateway_log_level() {return gateway_log_level;}
     const std::string& get_register_log_level() {return register_log_level;}
     const std::string& get_bwserver_log_level() {return bwserver_log_level;}
+    int get_gwrcv_fd_limit() { return gwrcv_fd_limit;}
+    int get_gwbwrcv_fd_limit() { return gwbwrcv_fd_limit;}
 };
 
 int tgg_init_config(int& argc, char* argv[]);
