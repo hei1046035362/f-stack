@@ -879,6 +879,26 @@ int tgg_check_idx_exist(int coreid, int64_t idx)
     return rte_hash_lookup_with_hash(g_idx_hash[coreid], &idx, rte_hash_crc(&idx, sizeof(int64_t), 0));
 }
 
+void tgg_iter_del_idx(int coreid)
+{
+    std::list<int64_t> keys_to_delete; // 预存待删键
+
+    // 阶段1：遍历并标记待删键
+    uint32_t iter = 0;
+    int64_t *key, *value;
+    while (rte_hash_iterate(g_idx_hash[coreid], (const void**)&key, (void**)&value, &iter) >= 0) {
+        if ((*key & 0xFF) == coreid) {
+            keys_to_delete.push_back(*key);
+        }
+    }
+
+    // 阶段2：批量删除并同步RCU
+    for (auto del_key : keys_to_delete) {
+        LOG_WARNING("abnormal delete coreid[%d] idx:%d", coreid, del_key);
+        tgg_del_idx(coreid, del_key);
+    }
+}
+
 int tgg_add_bwfdx(int64_t bwfdx)
 {
     if(bwfdx <= 0) {
