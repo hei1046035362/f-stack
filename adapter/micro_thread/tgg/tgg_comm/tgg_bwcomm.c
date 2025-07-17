@@ -13,7 +13,6 @@
 #include <mutex>
 #include <atomic>
 #include "string.h"
-#include "nlohmann/json.hpp"
 #include "comm/Encrypt.hpp"
 #include "tgg_comm/tgg_bw_cache.h"
 #include "tgg_comm/tgg_common.h"

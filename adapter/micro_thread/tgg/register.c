@@ -32,7 +32,7 @@ void signal_handler(int signum)
 			g_run = 0;
 		}
 	}
-    printf("signal num:%d\n", signum);
+    LOG_INFO("signal num:%d", signum);
 }
 void sigchld_handler(int sig) {
     int status;
@@ -58,6 +58,7 @@ void check_bwprc()
         if(tgg_checkif_bwprc_timeout(i, now)) {
             pid_t pid = tgg_get_bwprc_pid(i);
             if(pid > 0) {
+                LOG_INFO("prc_id[%d] pid[%d] heartbeat timeout, try to kill.", i, pid);
                 if (kill(pid, SIGINT) == -1) {// 不能kill -9，可能会导致其他进程死锁
                     if (errno == ESRCH) {
                         LOG_ERROR("process[%d] not exist anymore.", pid);
@@ -206,13 +207,6 @@ static void prc_dpdk_eal_init(int argc, char **argv)
     tgg_register_init();
 }
 
-void daemon()
-{
-    pid_t pid = fork();
-    if (pid < 0) exit(EXIT_FAILURE);  // 创建失败
-    if (pid > 0) exit(EXIT_SUCCESS); // 父进程退出
-}
-
 static int check_if_all_child_up()
 {
     int bwcount = TggConfigure::getInstance()->get_bwsvr_count();
@@ -233,6 +227,7 @@ static void kill_all_child()
         if(pid <= 0) {
             continue;
         }
+        LOG_INFO("prc_id[%d] pid[%d] heartbeat timeout, try to kill.", i, pid);
         if (kill(pid, SIGINT) == -1) {// 不能kill -9，可能会导致其他进程死锁
             if (errno == ESRCH) {
                 LOG_ERROR("core_id[%d] process[%d] not exist anymore.", i, pid);
@@ -324,6 +319,7 @@ int main(int argc, char *argv[])
         LOG_WARNING("connection to register is down.");
     }
 
+    kill_all_child();
     wait_all_child_exit();
 	// TODO 进程退出时要回收资源
 	tgg_process_uninit();
