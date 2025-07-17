@@ -448,7 +448,7 @@ static void gw_monitor(void* argv)
 		} else {
 			update_gwrcv_secondary_heart_beat();
 		}
-		mt_sleep(100);
+		mt_sleep(500);
 	}
 }
 
@@ -530,7 +530,7 @@ static void tgg_recv_clean_prev()
 			// 通知gwbwrcv 清理这个链接对应的缓存
 			LOG_ERROR("clean prev data coreid[%d] fd[%d] idx[%d].", g_core_id, i, idx);
 			consume_rdata(i, NULL, 0, idx, FD_CLOSE);
-			tgg_del_idx(g_core_id, idx);
+			clean_client_data(i, idx);
 		}
 	}
 	tgg_iter_del_idx(g_core_id);
