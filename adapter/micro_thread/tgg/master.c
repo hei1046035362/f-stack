@@ -41,7 +41,7 @@ void signal_handler(int signum)
 	if(signum == SIGINT || signum == SIGTERM) {
 		if(g_run_status) {
 			g_run_status = 0;
-			RTE_LOG(WARNING, USER1, "catched signal:%d\n", signum);
+			LOG_INFO("catched signal:%d", signum);
 		}
 	}
 }
@@ -63,7 +63,7 @@ void tgg_sig_init()
     }
 
     if (signal(SIGCHLD, sigchld_handler) == SIG_ERR) {
-        perror("Error setting signal handler");
+        LOG_ERROR("Error setting signal handler");
         exit(-1);
     }
 }
@@ -390,6 +390,7 @@ void check_gw_monitor()
         if(tgg_checkif_gw_monitor_timeout(i, now)) {
             pid_t pid = tgg_get_gw_monitor_pid(i);
             if(pid > 0) {
+        		LOG_INFO("core_id[%d] pid[%d] heartbeat timeout, try to kill.", i, pid);
                 if (kill(pid, SIGINT) == -1) {// 不能kill -9，可能会导致其他进程死锁
                     if (errno == ESRCH) {
                         LOG_ERROR("core_id[%d] process[%d] not exist anymore.", i, pid);
@@ -556,6 +557,7 @@ static void kill_all_child()
         if(pid <= 0) {
             continue;
         }
+        LOG_INFO("core_id[%d] pid[%d] heartbeat timeout, try to kill.", i, pid);
         if (kill(pid, SIGINT) == -1) {// 不能kill -9，可能会导致其他进程死锁
             if (errno == ESRCH) {
                 LOG_ERROR("core_id[%d] process[%d] not exist anymore.", i, pid);
@@ -640,6 +642,7 @@ int main(int argc, char *argv[])
 	}
 	tgg_gw_master();
 	if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
+		kill_all_child();
 		wait_all_child_exit();
 		LOG_INFO("-------master core[%d] exit-------", g_core_id);
 		delete[] s_pid_check_times;
