@@ -535,6 +535,55 @@ static void tgg_recv_clean_prev()
 	tgg_iter_del_idx(g_core_id);
 }
 
+static int check_if_all_child_up()
+{
+    int monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
+    for (int i = 1; i < monitor_count; ++i)// 0号进程 自己不能监控自己，由service监控 
+    {
+        if(tgg_get_gw_monitor_pid(i) <= 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void kill_all_child()
+{
+	int monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
+    for (int i = 1; i < monitor_count; ++i)// 0号进程 自己不能监控自己，由service监控 
+    {
+    	pid_t pid = tgg_get_gw_monitor_pid(i);
+        if(pid <= 0) {
+            continue;
+        }
+        if (kill(pid, SIGINT) == -1) {// 不能kill -9，可能会导致其他进程死锁
+            if (errno == ESRCH) {
+                LOG_ERROR("core_id[%d] process[%d] not exist anymore.", i, pid);
+            } else if (errno == EPERM) {
+                LOG_ERROR("Permission denied process[%d] core_id[%d].", pid, i);
+            } else {
+                LOG_ERROR("kill core_id[%d] process[%d] faild error:%d.", i, pid, errno);
+                int wait_times = 50;// 最长等待5s，还没有退出的话，就发送kill -9
+                while (kill(pid, 0) == 0) {// 进程还存在
+                    if (wait_times > 0) {
+                        usleep(100);
+                        continue;
+                    }
+                    LOG_WARNING("core_id[%d] Process %d exists. Sending SIGKILL...", i, pid);
+                    // 2. 发送 SIGKILL 信号
+                    if (kill(pid, SIGKILL) == 0) {
+                        LOG_WARNING("SIGKILL sent successfully.");
+                    } else {
+                        LOG_ERROR("kill(SIGKILL) failed");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+}
+
 int main(int argc, char *argv[])
 {
 	init_core(s_dump_file);
@@ -562,7 +611,21 @@ int main(int argc, char *argv[])
 		int monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
 		s_pid_check_times = new int[monitor_count]{0};
 		check_gw_monitor();
-		mt_sleep(3000);
+    	// 检查子进程是否已全部启动
+    	int check_times = 150;// 最多等待15s
+    	while (g_run_status && check_times > 0) {
+    	    if(check_if_all_child_up()) {
+    	        break;
+    	    }
+    	    check_times--;
+    	    usleep(100);
+    	}
+    	if(check_if_all_child_up()) {
+    		kill_all_child();
+    	    g_run_status = 0;
+    	    LOG_FATAL("not all child process is working on the beginning, exiting...");
+    	}
+		mt_sleep(10000);// 等待所有进程启动完成
 	} else {
 		LOG_INFO("-------secondary[pid:%d] core[%d] start-------", getpid(), g_core_id);
 		tgg_gwrcv_secondary_init();
