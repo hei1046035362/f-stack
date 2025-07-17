@@ -37,6 +37,8 @@ Currently, besides authorized DNS server of DNSPod, there are various products i
     yum install numactl-devel          # on Centos
     #sudo apt-get install libnuma-dev  # on Ubuntu
 
+    apt install python3-pip
+    pip3 install pyelftools --upgrade
     # Install python and modules for running DPDK python scripts
     pip3 install pyelftools --upgrade # RedHat/Centos
     sudo apt install python # On ubuntu
@@ -45,6 +47,11 @@ Currently, besides authorized DNS server of DNSPod, there are various products i
     # Install dependencies (FreeBSD only)
     #pkg install meson pkgconf py38-pyelftools
 
+    # 编译环境准备 非必要，如果编译报gcc12错误才需要执行
+    sudo apt install gcc-12 g++-12
+    sudo ln -sf /usr/bin/gcc-12 /usr/bin/gcc
+    sudo ln -sf /usr/bin/g++-12 /usr/bin/g++
+
     cd f-stack
     # Compile DPDK
     cd dpdk/
@@ -52,6 +59,10 @@ Currently, besides authorized DNS server of DNSPod, there are various products i
     meson -Denable_kmods=true build
     ninja -C build
     ninja -C build install
+    
+    # 编译完dpdk的两个ko之后要回退gcc版本
+    sudo ln -sf /usr/bin/gcc-11 /usr/bin/gcc
+    sudo ln -sf /usr/bin/g++-11 /usr/bin/g++
 
     # Set hugepage (Linux only)
     # single-node system

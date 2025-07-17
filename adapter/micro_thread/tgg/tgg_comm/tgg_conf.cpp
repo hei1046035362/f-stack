@@ -12,9 +12,10 @@
 
 TggConfigure* TggConfigure::instance = new TggConfigure;
 // 输入参数解析
-const char* tgg_short_options = "c:t:p:g:";
+const char* tgg_short_options = "c:dt:p:g:";
 struct option tgg_long_options[] = {
     { "conf", 1, NULL, 'c'},
+    { "daemon", 0, NULL, 'd'},
     { "proc-type", 1, NULL, 't'},
     { "proc-id", 1, NULL, 'p'},
     { "tgg-conf", 1, NULL, 'g'},
@@ -335,12 +336,34 @@ static void remove_option_from_argv(int& argc, char** argv, int opt_index) {
     argv[argc] = nullptr;
 }
 
+static void daemon()
+{
+    pid_t pid = fork();
+    if (pid < 0) exit(EXIT_FAILURE);  // 创建失败
+    if (pid > 0) exit(EXIT_SUCCESS); // 父进程退出
+}
+
+bool find_opt_pos(int argc, char* argv[], const char* s_opt, const char* l_opt, int& index_argv_g)
+{
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], s_opt) == 0) {
+            index_argv_g = i;
+            return true;
+        } else if(strcmp(argv[i], l_opt) == 0) {
+            index_argv_g = i;
+            break;
+        }
+    }
+    return false;
+}
+
 int tgg_init_config(int& argc, char* argv[])
 {
     int c;
     int index = 0;
     int index_argv_g = -1;
-    bool has_value = false;
+    int index_argv_d = -1;
+    bool has_value_g = false;
     std::string fstack_filename = "/etc/tgg_gw/config.ini";
     std::string tgg_filename = "/etc/tgg_gw/tgg_conf.ini";
     optind = 1;
@@ -349,30 +372,41 @@ int tgg_init_config(int& argc, char* argv[])
             case 'c':
                 fstack_filename = strdup(optarg);
                 break;
+            case 'd':
+                daemon();
+                find_opt_pos(argc, argv, "-d", "--daemon", index_argv_d);
+                break;
             case 'g':
                 tgg_filename = strdup(optarg);
                 // 找到 -g 及其值在 argv 中的位置
-                for (int i = 1; i < argc; ++i) {
-                    if (strcmp(argv[i], "-g") == 0) {
-                        index_argv_g = i;
-                        has_value = true;
-                        break;
-                    } else if(strcmp(argv[i], "--tgg-conf") == 0) {
-                        index_argv_g = i;
-                        break;
-                    }
-                }
+                has_value_g = find_opt_pos(argc, argv, "-g", "--tgg-conf", index_argv_g);
+                // for (int i = 1; i < argc; ++i) {
+                //     if (strcmp(argv[i], "-g") == 0) {
+                //         index_argv_g = i;
+                //         has_value = true;
+                //         break;
+                //     } else if(strcmp(argv[i], "--tgg-conf") == 0) {
+                //         index_argv_g = i;
+                //         break;
+                //     }
+                // }
                 break;
             default:
                 break;
         }
     }
+    // 从argv中移除-d|--deamon选项
+    if(index_argv_d > 0) {
+        // 删除 -d 选项
+        remove_option_from_argv(argc, argv, index_argv_d);
+    }
+    printf("try to remove arg\n");
     // 从argv中移除-g|--tgg-conf选项
     if(index_argv_g > 0) {
         // 删除 -g 选项
         remove_option_from_argv(argc, argv, index_argv_g);
         // 删除 -g 的值
-        if(has_value) {
+        if(has_value_g) {
             remove_option_from_argv(argc, argv, index_argv_g);
         }
     }
