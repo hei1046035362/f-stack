@@ -213,6 +213,54 @@ void daemon()
     if (pid > 0) exit(EXIT_SUCCESS); // 父进程退出
 }
 
+static int check_if_all_child_up()
+{
+    int bwcount = TggConfigure::getInstance()->get_bwsvr_count();
+    for (int i = 0; i < bwcount; ++i)
+    {
+        if(tgg_get_bwprc_pid(i) <= 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+static void kill_all_child()
+{
+    int bwcount = TggConfigure::getInstance()->get_bwsvr_count();
+    for (int i = 0; i < bwcount; ++i)
+    {
+        pid_t pid = tgg_get_bwprc_pid(i);
+        if(pid <= 0) {
+            continue;
+        }
+        if (kill(pid, SIGINT) == -1) {// 不能kill -9，可能会导致其他进程死锁
+            if (errno == ESRCH) {
+                LOG_ERROR("core_id[%d] process[%d] not exist anymore.", i, pid);
+            } else if (errno == EPERM) {
+                LOG_ERROR("Permission denied process[%d] core_id[%d].", pid, i);
+            } else {
+                LOG_ERROR("kill core_id[%d] process[%d] faild error:%d.", i, pid, errno);
+                int wait_times = 50;// 最长等待5s，还没有退出的话，就发送kill -9
+                while (kill(pid, 0) == 0) {// 进程还存在
+                    if (wait_times > 0) {
+                        usleep(100);
+                        continue;
+                    }
+                    LOG_WARNING("core_id[%d] Process %d exists. Sending SIGKILL...", i, pid);
+                    // 2. 发送 SIGKILL 信号
+                    if (kill(pid, SIGKILL) == 0) {
+                        LOG_WARNING("SIGKILL sent successfully.");
+                    } else {
+                        LOG_ERROR("kill(SIGKILL) failed");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+}
+
 int main(int argc, char *argv[])
 {
 	init_core(s_dump_file);
@@ -239,7 +287,20 @@ int main(int argc, char *argv[])
     LOG_INFO("Try to start gwbwprc");
     check_bwprc();
     LOG_INFO("started gwbwprc.....");
-    sleep(5);// 等待进程启动完成
+    // 检查子进程是否已全部启动
+    int check_times = 100;// 最多等待10s
+    while (g_run && check_times > 0) {
+        if(check_if_all_child_up()) {
+            break;
+        }
+        check_times--;
+        usleep(100);
+    }
+    if(check_if_all_child_up()) {
+        kill_all_child();
+        g_run = 0;
+        LOG_FATAL("not all gwbwrcv is working on the beginning, exiting...");
+    }
 
     unsigned int port = TggConfigure::getInstance()->get_register_port();
     const std::string& ip = TggConfigure::getInstance()->get_register_addr();
