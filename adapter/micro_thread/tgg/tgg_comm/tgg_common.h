@@ -6,7 +6,7 @@
 #include "tgg_struct.h"
 
 #define BW_PRC_HEART_BEAT 5000  // bwprc进程心跳最大5s
-#define GW_MONITOR_HEART_BEAT 5000  // bwprc进程心跳最大1s
+#define GW_MONITOR_HEART_BEAT 1000  // bwprc进程心跳最大1s
 
 void init_endians();
 
