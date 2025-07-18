@@ -75,6 +75,7 @@ void tgg_iterprint_gidsbyuid(const char* uid = NULL);
 int tgg_add_idx(int coreid, int64_t idx);
 int tgg_del_idx(int coreid, int64_t idx);
 int tgg_check_idx_exist(int coreid, int64_t idx);
+int tgg_count_idx(int coreid);
 void tgg_iter_del_idx(int coreid);
 
 int tgg_add_bwfdx(int64_t bwfdx);
