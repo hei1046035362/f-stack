@@ -879,6 +879,11 @@ int tgg_check_idx_exist(int coreid, int64_t idx)
     return rte_hash_lookup_with_hash(g_idx_hash[coreid], &idx, rte_hash_crc(&idx, sizeof(int64_t), 0));
 }
 
+int tgg_count_idx(int coreid)
+{
+    return rte_hash_count(g_idx_hash[coreid]);
+}
+
 void tgg_iter_del_idx(int coreid)
 {
     std::list<int64_t> keys_to_delete; // 预存待删键
