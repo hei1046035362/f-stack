@@ -442,9 +442,23 @@ void update_gwrcv_secondary_heart_beat() {
 
 static void gw_monitor(void* argv)
 {
+	int64_t cur_count = 0;// 记录上一次的连接总数
+	int64_t max_concurency = 0;// 记录最大并发数
+	int index = 0;// 用于计算时间，500ms一次，(index % 2) == 0 表示1s
 	while(g_run_status) {
 		if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
 			check_gw_monitor();
+
+			// 以下逻辑为计算每秒最大并发数
+			index++;
+			if((index % 2 == 0) && cur_count != tgg_count_idx(g_core_id)) {// 1s 统计一次
+				int concurency = tgg_count_idx(g_core_id) - cur_count;
+				if(max_concurency < concurency) {// 最大并发
+					max_concurency = concurency;
+					LOG_WARNING("core[%d] max concurency :%d", g_core_id, max_concurency);
+				}
+				cur_count = tgg_count_idx(g_core_id);
+			}
 		} else {
 			update_gwrcv_secondary_heart_beat();
 		}
