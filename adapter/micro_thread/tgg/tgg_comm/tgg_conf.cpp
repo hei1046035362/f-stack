@@ -293,11 +293,11 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
          __FILE__, __LINE__, gwrcv_fdlimit);
         return -1;
     }
-    // 小于10W或者大于100W就取默认值25W
-    if(gwrcv_fdlimit < 100000 || gwrcv_fdlimit > 1000000) {
+    // 小于1或者大于20W就取默认值20W
+    if(gwrcv_fdlimit < 1 || gwrcv_fdlimit > 200000) {
         RTE_LOG(INFO, USER1, "[%s][%d] gateway fd_limit[%d] is not in valid area, use default 250000.",
          __FILE__, __LINE__, gwrcv_fdlimit);
-        gwrcv_fdlimit = 250000;
+        gwrcv_fdlimit = 200000;
     }
     this->gwrcv_fd_limit = gwrcv_fdlimit;
   
