@@ -473,6 +473,7 @@ int tgg_get_valid_bwprc(int bwcount, uint64_t now)
 		if (prc->heart_beat == 0 || prc->heart_beat + 2*BW_PRC_HEART_BEAT < now) {
 			prc->heart_beat = now;
 			prc->pid = getpid();
+			prc->idx = 0;
 			return i;
 		}
 	}
@@ -485,6 +486,9 @@ void tgg_update_bwprc(int prc_id, uint64_t now)
 	SpinLock lock(get_bwprc_lock());
 	pid_data* prc = (pid_data*)g_bwprc_zone->addr + prc_id;
 	prc->heart_beat = now;
+	if(!prc->idx) {
+		prc->idx = 1;
+	}
 }
 
 // 获取指定下标的进程id
@@ -493,6 +497,14 @@ int tgg_get_bwprc_pid(int prc_id)
 	SpinLock lock(get_bwprc_lock());
 	pid_data* prc = (pid_data*)g_bwprc_zone->addr + prc_id;
 	return prc->pid;
+}
+
+// 获取指定下标的进程id
+int tgg_get_bwprc_idx(int prc_id)
+{
+	SpinLock lock(get_bwprc_lock());
+	pid_data* prc = (pid_data*)g_bwprc_zone->addr + prc_id;
+	return prc->idx;
 }
 
 // 检查指定进程是否超时

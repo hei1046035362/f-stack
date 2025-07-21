@@ -400,7 +400,6 @@ unsigned int ThreadPool::default_stack_size = DEFAULT_STACK_SIZE;   ///< 128k st
 bool ThreadPool::InitialPool(int max_num)
 {
     MicroThread *thread = NULL;
-    MTLOG_ERROR("thread size:%d", sizeof(MicroThread));
     for (unsigned int i = 0; i < default_thread_num; i++)
     {
         thread = new MicroThread();

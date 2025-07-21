@@ -84,6 +84,8 @@ int tgg_get_valid_bwprc(int bwcount, uint64_t now);
 void tgg_update_bwprc(int prc_id, uint64_t now);
 // 获取指定编号的进程的进程id
 int tgg_get_bwprc_pid(int prc_id);
+// 获取socket就绪状态
+int tgg_get_bwprc_idx(int prc_id);
 // 检查指定进程是否超时了
 int tgg_checkif_bwprc_timeout(int prc_id, uint64_t now);
 // 清理指定进程相关数据
