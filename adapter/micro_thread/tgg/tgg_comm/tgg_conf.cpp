@@ -400,7 +400,6 @@ int tgg_init_config(int& argc, char* argv[])
         // 删除 -d 选项
         remove_option_from_argv(argc, argv, index_argv_d);
     }
-    printf("try to remove arg\n");
     // 从argv中移除-g|--tgg-conf选项
     if(index_argv_g > 0) {
         // 删除 -g 选项

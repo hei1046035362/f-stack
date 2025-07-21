@@ -44,10 +44,38 @@ start_process() {
 
 # 停止进程（分阶段终止）
 stop_process() {
-    if [ ! -f $PID_FILE ]; then
-        log "❌ 未找到运行中的进程"
+    # 获取所有 gwrcv 进程的 PID 并排序
+    pids=$(pidof gwrcv | tr ' ' '\n' | sort -n)
+    
+    # 检查是否找到进程
+    if [ -z "$pids" ]; then
+        echo "未找到 gwrcv 进程，直接启动新进程"
         return 1
     fi
+    
+    # 提取最小 PID
+    min_pid=$(echo "$pids" | head -n 1)
+    echo "即将终止最小 PID 进程: $min_pid"
+    
+    # 终止目标进程
+    kill "$min_pid"
+
+    # 等待进程完全退出 (最多等待 10 秒)
+    timeout=10
+    while kill -0 "$min_pid" 2>/dev/null && [ $timeout -gt 0 ]; do
+        sleep 0.5
+        ((timeout--))
+    done
+
+    # 检查是否超时
+    if kill -0 "$min_pid" 2>/dev/null; then
+        echo "警告: 进程 $min_pid 未在预期时间内退出"
+        # 然后开始逐个kill
+    else
+        echo "进程 $min_pid 已终止"
+        return 0
+    fi
+
 
     master_pid=$(cat $PID_FILE)
     all_pids=$(find_process_tree $master_pid)

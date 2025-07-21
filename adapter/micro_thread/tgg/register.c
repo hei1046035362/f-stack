@@ -212,7 +212,7 @@ static int check_if_all_child_up()
     int bwcount = TggConfigure::getInstance()->get_bwsvr_count();
     for (int i = 0; i < bwcount; ++i)
     {
-        if(tgg_get_bwprc_pid(i) <= 0) {
+        if(tgg_get_bwprc_idx(i) <= 0) {
             return 0;
         }
     }
@@ -235,10 +235,10 @@ static void kill_all_child()
                 LOG_ERROR("Permission denied process[%d] core_id[%d].", pid, i);
             } else {
                 LOG_ERROR("kill core_id[%d] process[%d] faild error:%d.", i, pid, errno);
-                int wait_times = 50;// 最长等待5s，还没有退出的话，就发送kill -9
+                int wait_times = 500;// 最长等待5s，还没有退出的话，就发送kill -9
                 while (kill(pid, 0) == 0) {// 进程还存在
                     if (wait_times > 0) {
-                        usleep(100);
+                        usleep(10000);
                         continue;
                     }
                     LOG_WARNING("core_id[%d] Process %d exists. Sending SIGKILL...", i, pid);
@@ -285,18 +285,19 @@ int main(int argc, char *argv[])
     // 检查子进程是否已全部启动
     int check_times = 100;// 最多等待10s
     while (g_run && check_times > 0) {
-        if(check_if_all_child_up()) {
+        if(check_if_all_child_up() > 0) {
             break;
         }
         check_times--;
-        usleep(100);
+        usleep(10000);
     }
-    if(check_if_all_child_up()) {
+    LOG_INFO("start gwbwprc done, check_times:%d.", check_times);
+    if(!check_if_all_child_up()) {
         kill_all_child();
         g_run = 0;
         LOG_FATAL("not all gwbwrcv is working on the beginning, exiting...");
     }
-
+    sleep(2);// (兜底)等待gwbwprc的 socket就绪(服务端连gwbwprc的时候，一次连不上，就不连了，但是这时候gwbwprc的socket还没有完全就绪)
     unsigned int port = TggConfigure::getInstance()->get_register_port();
     const std::string& ip = TggConfigure::getInstance()->get_register_addr();
     while(g_run) {
@@ -305,7 +306,7 @@ int main(int argc, char *argv[])
             LOG_INFO("connect to register[%s:%d] failed, check if register server is alive.", ip.c_str(), port);
             int looptimes = 500; // 没连上的话，每5s重连一次注册中心
             while(g_run && looptimes > 0) {
-                usleep(10);
+                usleep(10000);
                 looptimes--;
             }
             g_register_fd = connect_tcp_socket( port, ip.c_str());
