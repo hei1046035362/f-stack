@@ -579,10 +579,10 @@ static void kill_all_child()
                 LOG_ERROR("Permission denied process[%d] core_id[%d].", pid, i);
             } else {
                 LOG_ERROR("kill core_id[%d] process[%d] faild error:%d.", i, pid, errno);
-                int wait_times = 50;// 最长等待5s，还没有退出的话，就发送kill -9
+                int wait_times = 500;// 最长等待5s，还没有退出的话，就发送kill -9
                 while (kill(pid, 0) == 0) {// 进程还存在
                     if (wait_times > 0) {
-                        usleep(100);
+                        usleep(10000);
                         continue;
                     }
                     LOG_WARNING("core_id[%d] Process %d exists. Sending SIGKILL...", i, pid);
@@ -628,15 +628,15 @@ int main(int argc, char *argv[])
 		s_pid_check_times = new int[monitor_count]{0};
 		check_gw_monitor();
     	// 检查子进程是否已全部启动
-    	int check_times = 150;// 最多等待15s
+    	int check_times = 1500;// 最多等待15s
     	while (g_run_status && check_times > 0) {
     	    if(check_if_all_child_up()) {
     	        break;
     	    }
     	    check_times--;
-    	    usleep(100);
+    	    usleep(10000);
     	}
-    	if(check_if_all_child_up()) {
+    	if(!check_if_all_child_up()) {
     		kill_all_child();
     	    g_run_status = 0;
     	    LOG_FATAL("not all child process is working on the beginning, exiting...");
