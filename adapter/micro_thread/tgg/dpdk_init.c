@@ -40,7 +40,7 @@ uint32_t g_gate_ip = 0;
 int g_core_id;// 记录当前core_id
 
 /// 连接管理的fd数组
-uint32_t g_fd_limit = 250000; // 默认单个进程25W 个fd   可配置
+uint32_t g_fd_limit = 200000; // 默认单个进程20W 个fd   可配置(TODO 超过20万会导致primary进程出现[kqueue_proxy.cpp][517 ][KqueueCtlAdd]kqfd ref add failed, log)
 static uint32_t s_zone_size = g_fd_limit*sizeof(tgg_cli_info);
 struct rte_memzone* g_fd_zones[MAX_LCORE_COUNT] = {NULL};
 const char* fd_zone_name_prev = "tgg_fd_zone";
@@ -596,6 +596,8 @@ void tgg_master_uninit()
 
 void init_multi_for_secondary()
 {
+	g_fd_limit = TggConfigure::getInstance()->get_gwrcv_fd_limit();
+	g_bwfdx_limit = TggConfigure::getInstance()->get_gwbwrcv_fd_limit();
 	for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
 		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
 			continue;
