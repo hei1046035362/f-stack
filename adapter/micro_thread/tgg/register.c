@@ -117,8 +117,10 @@ void update_register_heart_beat() {
 int local_eventloop_fun(void* arg) {
     if (!g_run || g_register_fd <= 0)
         return -1;// 终止coroutine的eventloop
-    check_bwprc();
-    update_register_heart_beat();
+    if(TggConfigure::getInstance()->get_auto_start()) {
+        check_bwprc();
+        update_register_heart_beat();
+    }
     return 0;
 }
 
@@ -272,32 +274,35 @@ int main(int argc, char *argv[])
 	tgg_process_init();
     prc_dpdk_eal_init(argc, argv);
 
-    if (tgg_setup_gw_monitor(count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 1) < 0) {// 上一个进程尚未结束
-        LOG_INFO("-------register exit, prev instance still running-------");
-        tgg_process_uninit();
-        AsyncLogger::getInstance().shutdown();
-        return 0;
-    }
+    if(TggConfigure::getInstance()->get_auto_start()) {
 
-    LOG_INFO("Try to start gwbwprc");
-    check_bwprc();
-    LOG_INFO("started gwbwprc.....");
-    // 检查子进程是否已全部启动
-    int check_times = 100;// 最多等待10s
-    while (g_run && check_times > 0) {
-        if(check_if_all_child_up() > 0) {
-            break;
+        if (tgg_setup_gw_monitor(count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 1) < 0) {// 上一个进程尚未结束
+            LOG_INFO("-------register exit, prev instance still running-------");
+            tgg_process_uninit();
+            AsyncLogger::getInstance().shutdown();
+            return 0;
         }
-        check_times--;
-        usleep(10000);
+
+        LOG_INFO("Try to start gwbwprc");
+        check_bwprc();
+        LOG_INFO("started gwbwprc.....");
+        // 检查子进程是否已全部启动
+        int check_times = 100;// 最多等待10s
+        while (g_run && check_times > 0) {
+            if(check_if_all_child_up() > 0) {
+                break;
+            }
+            check_times--;
+            usleep(10000);
+        }
+        LOG_INFO("start gwbwprc done, check_times:%d.", check_times);
+        if(!check_if_all_child_up()) {
+            kill_all_child();
+            g_run = 0;
+            LOG_FATAL("not all gwbwrcv is working on the beginning, exiting...");
+        }
+        sleep(2);// (兜底)等待gwbwprc的 socket就绪(服务端连gwbwprc的时候，一次连不上，就不连了，但是这时候gwbwprc的socket还没有完全就绪)
     }
-    LOG_INFO("start gwbwprc done, check_times:%d.", check_times);
-    if(!check_if_all_child_up()) {
-        kill_all_child();
-        g_run = 0;
-        LOG_FATAL("not all gwbwrcv is working on the beginning, exiting...");
-    }
-    sleep(2);// (兜底)等待gwbwprc的 socket就绪(服务端连gwbwprc的时候，一次连不上，就不连了，但是这时候gwbwprc的socket还没有完全就绪)
     unsigned int port = TggConfigure::getInstance()->get_register_port();
     const std::string& ip = TggConfigure::getInstance()->get_register_addr();
     while(g_run) {
@@ -319,9 +324,11 @@ int main(int argc, char *argv[])
         
         LOG_WARNING("connection to register is down.");
     }
+    if(TggConfigure::getInstance()->get_auto_start()) {
 
-    kill_all_child();
-    wait_all_child_exit();
+        kill_all_child();
+        wait_all_child_exit();
+    }
 	// TODO 进程退出时要回收资源
 	tgg_process_uninit();
 	LOG_INFO("-----------main end----------");

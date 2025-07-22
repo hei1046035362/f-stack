@@ -471,6 +471,9 @@ int tgg_get_valid_bwprc(int bwcount, uint64_t now)
 		pid_data* prc = (pid_data*)(g_bwprc_zone->addr) + i;
 		// 如果超过两倍心跳的时间都没有更新，就视为前一个进程已退出
 		if (prc->heart_beat == 0 || prc->heart_beat + 2*BW_PRC_HEART_BEAT < now) {
+			if(prc->pid > 0 && kill(prc->pid, 0) == 0) {
+				continue;// 进程依然存在
+			}
 			prc->heart_beat = now;
 			prc->pid = getpid();
 			prc->idx = 0;
@@ -535,6 +538,10 @@ int tgg_setup_gw_monitor(int prc_id)
 	pid_data* prc = (pid_data*)(g_gw_monitor_zone->addr) + prc_id;
 	// 如果超过两倍心跳的时间都没有更新，就视为前一个进程已退出
 	if (prc->heart_beat == 0 || prc->heart_beat + 2*GW_MONITOR_HEART_BEAT < now) {
+		if(prc->pid > 0 && kill(prc->pid, 0) == 0) {
+			LOG_ERROR("prev process still alive.");
+			return -1;// 进程依然存在
+		}
 		prc->heart_beat = now;
 		prc->pid = getpid();
 		return 0;
@@ -578,8 +585,6 @@ void tgg_clean_gw_monitor(int prc_id)
 	pid_data* prc = (pid_data*)g_gw_monitor_zone->addr + prc_id;
 	memset(prc, 0, sizeof(pid_data));
 }
-
-
 
 int ringbuf_read(int core_id, int fd, std::string& dest, int len, int move_pos)
 {
