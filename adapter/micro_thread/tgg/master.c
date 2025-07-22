@@ -468,7 +468,9 @@ static void gw_monitor(void* argv)
 
 static int tgg_gw_master()
 {
-	mt_start_thread((void *)gw_monitor, NULL);
+	if(TggConfigure::getInstance()->get_auto_start()) {
+		mt_start_thread((void *)gw_monitor, NULL);
+	}
 	// 启动发送线程
 	// for(int i = 0; i < TggConfigure::getInstance()->get_gwwrite_co_count(); ++i) {
 		mt_start_thread((void *)tgg_send, NULL);
@@ -624,42 +626,48 @@ int main(int argc, char *argv[])
 	if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
 		LOG_INFO("-------master[pid:%d] core[%d] start-------", getpid(), g_core_id);
 		tgg_master_init();
-		int monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
-		s_pid_check_times = new int[monitor_count]{0};
-		check_gw_monitor();
-    	// 检查子进程是否已全部启动
-    	int check_times = 1500;// 最多等待15s
-    	while (g_run_status && check_times > 0) {
-    	    if(check_if_all_child_up()) {
-    	        break;
-    	    }
-    	    check_times--;
-    	    usleep(10000);
-    	}
-    	if(!check_if_all_child_up()) {
-    		kill_all_child();
-    	    g_run_status = 0;
-    	    LOG_FATAL("not all child process is working on the beginning, exiting...");
-    	}
-		mt_sleep(10000);// 等待所有进程启动完成
+		if(TggConfigure::getInstance()->get_auto_start()) {
+			int monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
+			s_pid_check_times = new int[monitor_count]{0};
+			check_gw_monitor();
+    		// 检查子进程是否已全部启动
+    		int check_times = 1500;// 最多等待15s
+    		while (g_run_status && check_times > 0) {
+    		    if(check_if_all_child_up()) {
+    		        break;
+    		    }
+    		    check_times--;
+    		    usleep(10000);
+    		}
+    		if(!check_if_all_child_up()) {
+    			kill_all_child();
+    		    g_run_status = 0;
+    		    LOG_FATAL("not all child process is working on the beginning, exiting...");
+    		}
+			mt_sleep(10000);// 等待所有进程启动完成
+		}
 	} else {
 		LOG_INFO("-------secondary[pid:%d] core[%d] start-------", getpid(), g_core_id);
 		tgg_gwrcv_secondary_init();
-		if (tgg_setup_gw_monitor(g_core_id) < 0) {// 上一个进程尚未结束
-			LOG_INFO("-------secondary core[%d] exit, prev coreid still running-------", g_core_id);
-			mt_uninit_frame();
-    		rte_eal_cleanup();
-    		AsyncLogger::getInstance().shutdown();
-    		return 0;
+		if(TggConfigure::getInstance()->get_auto_start()) {
+			if (tgg_setup_gw_monitor(g_core_id) < 0) {// 上一个进程尚未结束
+				LOG_INFO("-------secondary core[%d] exit, prev coreid still running-------", g_core_id);
+				mt_uninit_frame();
+    			rte_eal_cleanup();
+    			AsyncLogger::getInstance().shutdown();
+    			return 0;
+			}
 		}
 		tgg_recv_clean_prev();
 	}
 	tgg_gw_master();
 	if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
-		kill_all_child();
-		wait_all_child_exit();
-		LOG_INFO("-------master core[%d] exit-------", g_core_id);
-		delete[] s_pid_check_times;
+		if(TggConfigure::getInstance()->get_auto_start()) {
+			kill_all_child();
+			wait_all_child_exit();
+			LOG_INFO("-------master core[%d] exit-------", g_core_id);
+			delete[] s_pid_check_times;
+		}
 		tgg_master_uninit();
 	} else {
 		LOG_INFO("-------secondary core[%d] exit-------", g_core_id);
