@@ -128,7 +128,7 @@ static void* deal_trans(void*)
             // 防止满队列，死锁 没有bwfdx时，所有连接全部关闭，所有数据全部丢弃
             LOG_DEBUG("no bwfdx found, drop data.");
             Send2Fd(tdata->coreid, tdata->fd, tdata->idx, "", FD_WRITE|FD_CLOSE, 0);
-            clean_trans_data(tdata);// 前面已经清空gwbwrcv侧的hash表了，这里不需要重入队列
+            clean_trans_data(tdata);// 前面已经清空gwbwprc侧的hash表了，这里不需要重入队列
             continue;
         }
 
