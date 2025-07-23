@@ -236,11 +236,20 @@ int CmdSendToGroup::ExecCmd()
     }
 
     // 构建排除cid集合
-    std::set<std::string> setExeptCid;
-    if (ext_data.HasMember("exclude") && ext_data["exclude"].IsArray()) {
-        const rapidjson::Value& excludeArray = ext_data["exclude"];
-        for (rapidjson::SizeType i = 0; i < excludeArray.Size(); i++) {
-            setExeptCid.insert(excludeArray[i].GetString());
+    std::set<int> setExeptCid;
+    if (ext_data.HasMember("exclude") && ext_data["exclude"].IsObject()) {
+        const rapidjson::Value& excludeObj = ext_data["exclude"];
+        for (rapidjson::Value::ConstMemberIterator itr = excludeObj.MemberBegin(); 
+             itr != excludeObj.MemberEnd(); ++itr) {
+            // 提取键（需转为字符串）
+            // const char* key = itr->name.GetString();
+            // 提取值（需检查类型）
+            if (itr->value.IsInt()) {
+                // int value = itr->value.GetInt();
+                setExeptCid.insert(itr->value.GetInt());
+            } else {
+                LOG_ERROR("Invalid type of value for key:%s", itr->name.GetString());
+            }
         }
     }
 
@@ -268,7 +277,7 @@ int CmdSendToGroup::ExecCmd()
                     continue;
                 }
 
-                if (setExeptCid.find(std::to_string(cid)) == setExeptCid.end()) {
+                if (setExeptCid.find(cid) == setExeptCid.end()) {
                     lstAllFds.push_back(fdidcid);
                 }
             }
