@@ -38,10 +38,10 @@ using namespace NS_MICRO_THREAD;
 
 void signal_handler(int signum)
 {
+	printf("gwrcv coreid[%d] catched signal:%d\n", g_core_id, signum);
 	if(signum == SIGINT || signum == SIGTERM) {
 		if(g_run_status) {
 			g_run_status = 0;
-			LOG_INFO("catched signal:%d", signum);
 		}
 	}
 }
@@ -543,7 +543,7 @@ static void tgg_recv_clean_prev()
 	{// 防止secondary进程异常重启后，上一次的缓存没有清理
 		int idx = tgg_get_cli_idx(g_core_id, i);
 		if( idx > 0 && tgg_check_idx_exist(g_core_id, idx)) {
-			// 通知gwbwrcv 清理这个链接对应的缓存
+			// 通知gwbwprc 清理这个链接对应的缓存
 			LOG_ERROR("clean prev data coreid[%d] fd[%d] idx[%d].", g_core_id, i, idx);
 			consume_rdata(i, NULL, 0, idx, FD_CLOSE);
 			clean_client_data(i, idx);

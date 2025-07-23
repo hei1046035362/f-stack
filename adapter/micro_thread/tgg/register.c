@@ -20,19 +20,19 @@ static const char* s_dump_file = "/var/corefiles/";//tgg_gw_register_core
 // 目前使用输入参数-i 指定进程编号，
 // TODO 优化方向：在master中开辟一块共享内存，bwprc进程启动时去内存中查找可用的数组下标id，
                 // 对应的时间在规定时间内没有更新,就视为无人使用，同时要主动检查并结束之前占用这个id的进程
-int g_prc_id = -1;
+// int g_prc_id = -1;
 extern int g_register_fd;
 
 static void prc_dpdk_eal_init(int argc, char **argv);
 
 void signal_handler(int signum)
 {
+    printf("gwregister catched signal:%d\n", signum);
 	if(signum == SIGINT || signum == SIGTERM) {
 		if(g_run) {
 			g_run = 0;
 		}
 	}
-    LOG_INFO("signal num:%d", signum);
 }
 void sigchld_handler(int sig) {
     int status;
@@ -299,7 +299,7 @@ int main(int argc, char *argv[])
         if(!check_if_all_child_up()) {
             kill_all_child();
             g_run = 0;
-            LOG_FATAL("not all gwbwrcv is working on the beginning, exiting...");
+            LOG_FATAL("not all gwbwprc is working on the beginning, exiting...");
         }
         sleep(2);// (兜底)等待gwbwprc的 socket就绪(服务端连gwbwprc的时候，一次连不上，就不连了，但是这时候gwbwprc的socket还没有完全就绪)
     }
