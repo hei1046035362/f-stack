@@ -554,6 +554,9 @@ void tgg_update_gw_monitor(int prc_id, uint64_t now)
 {
 	WriteLock lock(get_gw_monitor_lock());
 	pid_data* prc = (pid_data*)g_gw_monitor_zone->addr + prc_id;
+	if(now - prc->heart_beat > GW_MONITOR_HEART_BEAT) {
+		LOG_WARNING("update heart_beat time delayed, PID:%d, prc_id:%d heart_beat:%ld now:%ld", prc->pid, prc_id, prc->heart_beat, now);
+	}
 	prc->heart_beat = now;
 }
 
@@ -573,6 +576,7 @@ int tgg_checkif_gw_monitor_timeout(int prc_id, uint64_t now)
 	// 如果超过两倍心跳的时间都没有更新，就视为前一个进程已退出
 	// LOG_INFO("PID:%d, prc_id:%d heart_beat:%ld now:%ld", prc->pid, prc_id, prc->heart_beat, now);
 	if (now - prc->heart_beat > 2*GW_MONITOR_HEART_BEAT) {
+		LOG_WARNING("PID:%d, prc_id:%d heart_beat:%ld now:%ld", prc->pid, prc_id, prc->heart_beat, now);
 		return 1;// 超时
 	}
 	return 0;// 没超时
