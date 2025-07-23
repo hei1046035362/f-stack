@@ -377,7 +377,7 @@ static int* s_pid_check_times;
 void check_gw_monitor()
 {
     uint64_t now = get_system_ms();
-    if(s_last_check_time + GW_MONITOR_HEART_BEAT < now) {
+    if(s_last_check_time + GW_MONITOR_HEART_BEAT <= now) {
         // 500ms检测一次
         s_last_check_time = now;
     } else {
@@ -434,7 +434,7 @@ static uint64_t s_last_update_time = 0;
 // 定时器回调函数
 void update_gwrcv_secondary_heart_beat() {
     uint64_t now = get_system_ms();
-    if(now - s_last_update_time > GW_MONITOR_HEART_BEAT) {
+    if(now - s_last_update_time >= GW_MONITOR_HEART_BEAT) {
         s_last_update_time = now;
         tgg_update_gw_monitor(rte_lcore_id(), now);
     }
