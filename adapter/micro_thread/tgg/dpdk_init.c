@@ -78,7 +78,7 @@ const char* s_bwfdx_ring_name = "tgg_bwfdx_ring";
 const char* write_ring_name_prev = "tgg_write_ring";
 const char* bwrcv_ring_name_prev = "tgg_bwrcv_ring";
 // 队列长度
-static uint32_t s_bwfdx_ring_size = 1024;  // bwfdx添加删除队列(gwbwrcv->gwcliprc)，这个数据本身就不大，且处理很快
+static uint32_t s_bwfdx_ring_size = 1024;  // bwfdx添加删除队列(gwbwprc->gwcliprc)，这个数据本身就不大，且处理很快
 static uint32_t s_trans_ring_size = 1024*32;  // 缓冲队列的长度，得是2的幂
 static uint32_t s_write_ring_size = 1024*64;  // 下行写队列长度，得是2的幂
 static uint32_t s_bwrcv_ring_size = 1024*128;  // bwprc可能处理不过来，需要长一点，得是2的幂
@@ -410,7 +410,7 @@ void tgg_master_init()
 	s_zone_size = g_fd_limit*sizeof(tgg_cli_info);
 	s_zone_bw_size = g_fd_limit*sizeof(tgg_cli_bw_info);
 
-	g_bwfdx_limit = TggConfigure::getInstance()->get_gwbwrcv_fd_limit();
+	g_bwfdx_limit = TggConfigure::getInstance()->get_gwbwprc_fd_limit();
 	s_bwzone_size = g_bwfdx_limit*sizeof(tgg_bw_info);
 	// 100W个FD  32M的空间
 	g_lock_zone = make_memzone(s_lock_zone_name, sizeof(tgg_lock));
@@ -597,7 +597,7 @@ void tgg_master_uninit()
 void init_multi_for_secondary()
 {
 	g_fd_limit = TggConfigure::getInstance()->get_gwrcv_fd_limit();
-	g_bwfdx_limit = TggConfigure::getInstance()->get_gwbwrcv_fd_limit();
+	g_bwfdx_limit = TggConfigure::getInstance()->get_gwbwprc_fd_limit();
 	for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
 		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
 			continue;
