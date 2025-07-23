@@ -301,20 +301,20 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     }
     this->gwrcv_fd_limit = gwrcv_fdlimit;
   
-    // gwbwrcv_fdlimit  
-    int gwbwrcv_fdlimit = get_int_value(&pTgg_Ini, "bwserver", "fd_limit");
-    if(gwbwrcv_fdlimit <= 0) {
+    // gwbwprc_fdlimit  
+    int gwbwprc_fdlimit = get_int_value(&pTgg_Ini, "bwserver", "fd_limit");
+    if(gwbwprc_fdlimit <= 0) {
         RTE_LOG(ERR, USER1, "[%s][%d] read config bwserver fd_limit failed:[%d].",
-         __FILE__, __LINE__, gwbwrcv_fdlimit);
+         __FILE__, __LINE__, gwbwprc_fdlimit);
         return -1;
     }
     // 小于100或者大于10W就取默认值5K
-    if(gwbwrcv_fdlimit < 100 || gwbwrcv_fdlimit > 100000) {
+    if(gwbwprc_fdlimit < 100 || gwbwprc_fdlimit > 100000) {
         RTE_LOG(INFO, USER1, "[%s][%d] bwserver fd_limit[%d] is not in valid area, use default 5000.", 
-            __FILE__, __LINE__, gwbwrcv_fdlimit);
-        gwbwrcv_fdlimit = 5000;
+            __FILE__, __LINE__, gwbwprc_fdlimit);
+        gwbwprc_fdlimit = 5000;
     }
-    this->gwbwrcv_fd_limit = gwbwrcv_fdlimit;
+    this->gwbwprc_fd_limit = gwbwprc_fdlimit;
 
     // auto_start  
     int auto_start = get_int_value(&pTgg_Ini, "gateway", "auto_start");

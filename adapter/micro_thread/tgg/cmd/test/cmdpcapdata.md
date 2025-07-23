@@ -60,4 +60,4 @@ closeclient
 2、执行python3 bw_monitor.py后，先执行workerconntest，接收
 3、准备两个客户端连接，启动客户端
 4、在bw_monitor.py的终端页面输入：testall，就会执行所有的接口，也可以执行单个命令，输入help，查询支持的命令
-5、在gwbwrcv日志中查看命令执行结果
+5、在gwbwprc日志中查看命令执行结果

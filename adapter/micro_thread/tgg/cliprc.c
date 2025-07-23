@@ -23,10 +23,10 @@ static const char* s_dump_file = "/var/corefiles/";//tgg_gw_cliprc_core
 
 void signal_handler(int signum)
 {
+	printf("gwcliprc catched signal:%d\n", signum);
 	if(signum == SIGINT || signum == SIGTERM) {
 		if(g_run) {
 			g_run = 0;
-			LOG_WARNING("catched signal:%d", signum);
 		}
 	}
 }

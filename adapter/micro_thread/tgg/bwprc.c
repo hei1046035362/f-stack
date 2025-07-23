@@ -25,12 +25,12 @@ static void prc_dpdk_eal_init(int argc, char **argv);
 
 void signal_handler(int signum)
 {
+    printf("gwbwprc coreid[%d] catched signal:%d\n", g_prc_id, signum);
 	if(signum == SIGINT || signum == SIGTERM) {
 		if(g_run) {
 			g_run = 0;
 		}
 	}
-    LOG_WARNING("signal num:%d.", signum);
 }
 
 static uint64_t s_last_update_time = 0;
