@@ -16,7 +16,7 @@
 
 int g_run = 1;
 static const char* s_dump_file = "/var/corefiles/";//tgg_gw_register_core
-
+static int s_bwcount = 0;
 // 目前使用输入参数-i 指定进程编号，
 // TODO 优化方向：在master中开辟一块共享内存，bwprc进程启动时去内存中查找可用的数组下标id，
                 // 对应的时间在规定时间内没有更新,就视为无人使用，同时要主动检查并结束之前占用这个id的进程
@@ -24,6 +24,16 @@ static const char* s_dump_file = "/var/corefiles/";//tgg_gw_register_core
 extern int g_register_fd;
 
 static void prc_dpdk_eal_init(int argc, char **argv);
+
+static void start_gwbwprc()
+{
+    char **args = (char**)malloc((2) * sizeof(char*));
+    args[0] = const_cast<char*>("gwbwprc");
+    args[1] = NULL; // 必须以 NULL 结尾
+    custom_fork("gwbwprc", args);
+    free(args);
+}
+
 
 void signal_handler(int signum)
 {
@@ -36,7 +46,26 @@ void signal_handler(int signum)
 }
 void sigchld_handler(int sig) {
     int status;
-    while (waitpid(-1, &status, WNOHANG) > 0); // 非阻塞回收所有僵尸进程[5,7](@ref)
+    pid_t pid;
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) { // 非阻塞回收所有僵尸进程[5,7](@ref)
+        // 监控到子进程退出，立刻再启动一个
+        if(g_run && TggConfigure::getInstance()->get_auto_start()) {
+            for (int i = 0; i < s_bwcount && g_run; ++i)// 0号进程 自己不能监控自己，由service监控 
+            {
+                pid_t bwprc_pid = tgg_get_bwprc_pid(i);
+                // printf("sigchild from pid:%d bwprc_pid:%d\n", pid, bwprc_pid);// 信号处理函数中不能用日志，可能导致崩溃，日志类中有可重入函数
+                if (pid == bwprc_pid) {
+                    if (WIFEXITED(status)) {
+                        printf("register child[%d] pid:%d exit normal, exit code: %d\n", i, pid, WEXITSTATUS(status));
+                    } else if (WIFSIGNALED(status)) {
+                        printf("register child[%d] pid:%d exit by signal: %d\n", i, pid, WTERMSIG(status));
+                    }
+                    tgg_clean_bwprc(i);
+                    start_gwbwprc();
+                }
+            }
+        }
+    }
 }
 
 static uint64_t s_last_check_time = 0;
@@ -52,8 +81,8 @@ void check_bwprc()
         // 没到检测时间，不检测
         return;
     }
-    int bwcount = TggConfigure::getInstance()->get_bwsvr_count();
-    for (int i = 0; i < bwcount; ++i)
+    // int bwcount = TggConfigure::getInstance()->get_bwsvr_count();
+    for (int i = 0; i < s_bwcount; ++i)
     {
         if(tgg_checkif_bwprc_timeout(i, now)) {
             pid_t pid = tgg_get_bwprc_pid(i);
@@ -87,18 +116,9 @@ void check_bwprc()
                 }
             }
             s_pid_check_times[i] = 0;
+            tgg_clean_bwprc(i);
             // 构造参数数组
-            // char* file_prefix = (char*)malloc(128);
-            // sprintf(file_prefix, "--file-prefix=gwbwprc_%d_", i);
-            // LOG_DEBUG("file prefix arg:%s", file_prefix);
-            char **args = (char**)malloc((2) * sizeof(char*));
-            args[0] = const_cast<char*>("gwbwprc");
-            // args[1] = const_cast<char*>("--single-file-segments");
-            // args[2] = file_prefix;
-            args[1] = NULL; // 必须以 NULL 结尾
-            custom_fork("gwbwprc", args);
-            // free(file_prefix);
-            free(args);
+            start_gwbwprc();
         }
     }
 }
@@ -173,8 +193,8 @@ void tgg_process_init()
 	tgg_sig_init();
 	// tgg_iterprint_gidsbyuid();
 	init_endians();
-    int bwcount = TggConfigure::getInstance()->get_bwsvr_count();
-    s_pid_check_times = new int[bwcount]{0};
+    s_bwcount = TggConfigure::getInstance()->get_bwsvr_count();
+    s_pid_check_times = new int[s_bwcount]{0};
 }
 
 void tgg_process_uninit()
@@ -211,10 +231,10 @@ static void prc_dpdk_eal_init(int argc, char **argv)
 
 static int check_if_all_child_up()
 {
-    int bwcount = TggConfigure::getInstance()->get_bwsvr_count();
-    for (int i = 0; i < bwcount; ++i)
+    // int bwcount = TggConfigure::getInstance()->get_bwsvr_count();
+    for (int i = 0; i < s_bwcount; ++i)
     {
-        if(tgg_get_bwprc_idx(i) <= 0) {
+        if(tgg_check_bwprc_up(i) <= 0) {
             return 0;
         }
     }
@@ -222,8 +242,8 @@ static int check_if_all_child_up()
 }
 static void kill_all_child()
 {
-    int bwcount = TggConfigure::getInstance()->get_bwsvr_count();
-    for (int i = 0; i < bwcount; ++i)
+    // int bwcount = TggConfigure::getInstance()->get_bwsvr_count();
+    for (int i = 0; i < s_bwcount; ++i)
     {
         pid_t pid = tgg_get_bwprc_pid(i);
         if(pid <= 0) {
@@ -255,6 +275,7 @@ static void kill_all_child()
                 }
             }
         }
+        tgg_clean_bwprc(i);
     }
 
 }
@@ -276,7 +297,7 @@ int main(int argc, char *argv[])
     prc_dpdk_eal_init(argc, argv);
 
     if(TggConfigure::getInstance()->get_auto_start()) {
-
+        kill_all_child();// 启动时，先把之前还在运行的进程杀掉
         if (tgg_setup_gw_monitor(count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 1) < 0) {// 上一个进程尚未结束
             LOG_INFO("-------register exit, prev instance still running-------");
             tgg_process_uninit();
