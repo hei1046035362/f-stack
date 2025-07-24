@@ -36,7 +36,6 @@ int get_connection_info(int fd, char* ip_str, unsigned int* ip, unsigned short* 
      inet_ntop(AF_INET, &(remote_addr.sin_addr), ip_str, INET_ADDRSTRLEN);
      *port = remote_addr.sin_port;// 网络字节序
      *ip = remote_addr.sin_addr.s_addr;// 网络字节序
-     LOG_INFO("Cmd from [%s]:[%d]", ip_str, *port);
      return 0;
 }
 

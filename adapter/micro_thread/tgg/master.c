@@ -585,6 +585,7 @@ static void kill_all_child()
                 while (kill(pid, 0) == 0) {// 进程还存在
                     if (wait_times > 0) {
                         usleep(10000);
+                        wait_times--;
                         continue;
                     }
                     LOG_WARNING("core_id[%d] Process %d exists. Sending SIGKILL...", i, pid);
