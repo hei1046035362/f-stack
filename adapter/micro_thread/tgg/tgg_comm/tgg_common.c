@@ -1056,7 +1056,7 @@ static int get_exec_path(char* exe_path, const char* exec_name)
 {
     ssize_t len = readlink("/proc/self/exe", exe_path, PATH_MAX - 1); // 读取符号链接[3,5,6](@ref)
     if (len == -1) {
-        perror("readlink failed");
+        LOG_ERROR("readlink failed");
         return -1;
     }
     exe_path[len] = '\0';
@@ -1065,10 +1065,10 @@ static int get_exec_path(char* exe_path, const char* exec_name)
     if (last_slash != NULL) {
         memcpy(last_slash+1, exec_name, strlen(exec_name));
         last_slash[(1+strlen(exec_name))] = '\0';
-    	printf("exec path[%s]\n", last_slash);
+    	LOG_INFO("exec path[%s]", last_slash);
         return 0;
     }
-    printf("invalid exec path[%s]", exe_path);
+    LOG_ERROR("invalid exec path[%s]", exe_path);
     return -1;
 }
 
