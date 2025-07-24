@@ -65,31 +65,6 @@ void CmdBaseProcessor::Send2BW(const rapidjson::Value& data, bool serialize)
     }
 }
 
-
-static int get_remote_info(int sockfd, uint32_t& ip, ushort& port)
-{
-    // 获取IP地址信息
-    struct sockaddr_in remote_addr;
-    socklen_t addrlen = sizeof(remote_addr);
-    // 获取远端地址信息
-    if (getpeername(sockfd, (struct sockaddr *)&remote_addr, &addrlen) == -1) {
-        LOG_ERROR("getpeername error:%s.", strerror(errno));
-        return -1;
-    }
-    // 获取 IP 地址
-    char ip_str[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(remote_addr.sin_addr), ip_str, INET_ADDRSTRLEN);
-    LOG_INFO("Remote IP address: %s.", ip_str);
-    // 获取 IP 地址的整数值
-    ip = remote_addr.sin_addr.s_addr;
-    // 获取端口号
-    port = ntohs(remote_addr.sin_port);
-    LOG_INFO("IP address in decimal: %u", ip);
-    LOG_INFO("Remote port: %u", port);
-    return 0;
-}
-
-
 int CmdWorkerConnect::ExecCmd()
 {
     std::string bwSeckey = TggConfigure::getInstance()->get_secret_key();// tgg_get_bwfdx_seckey(this->prc_id, this->fd);
@@ -104,7 +79,7 @@ int CmdWorkerConnect::ExecCmd()
             // close(this->fd);
             return -1;
         }
-        if (!worker_info.HasMember("secret_key")) {
+        if (!worker_info.HasMember("secret_key") || !worker_info.HasMember("worker_key")) {
             LOG_ERROR("WorkerConnect: no Worker key found.");
             this->need_close = 1;
             // close(this->fd);
@@ -117,15 +92,19 @@ int CmdWorkerConnect::ExecCmd()
             // close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             return -1;
         }
-        uint32_t remote_ip; 
-        ushort remote_port;
-        if (get_remote_info(this->fd, remote_ip, remote_port) < 0) {// 获取远端ip port 失败
+        char ip_str[INET_ADDRSTRLEN];
+        struct in_addr addr;
+        addr.s_addr = ((tgg_bw_data*)data)->peer_ip; 
+        if (!inet_ntop(AF_INET, &addr, ip_str, sizeof(ip_str))) {// 获取远端ip port 失败
             LOG_ERROR("WorkerConnect: get remote info failed, fd:[%d].", this->fd);
             this->need_close = 1;
             // close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             return -1;
         }
-        std::string bwWokerkey = uint32_to_hex(remote_ip) + ":" + bwSeckey;
+        LOG_INFO("New WorkerConnect: ip:%s:%u", ip_str, ((tgg_bw_data*)data)->peer_port);
+        std::string bwWokerkey = ip_str;
+        bwWokerkey += ":";
+        bwWokerkey += worker_info["worker_key"].GetString();
         if (tgg_check_bwwkkey_exist(bwWokerkey.c_str()) >= 0) {// 在一台服务器上businessWorker->name不能相同
             this->need_close = 1;
             // close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
@@ -135,7 +114,7 @@ int CmdWorkerConnect::ExecCmd()
         }
         // tgg_add_bwwkkey(bwWokerkey.c_str());
         tgg_new_bw_session(this->prc_id, this->fd, GatewayProtocal::CMD_WORKER_CONNECT
-            , bwWokerkey.c_str(), remote_ip, remote_port);
+            , bwWokerkey.c_str(), ((tgg_bw_data*)data)->peer_ip, ((tgg_bw_data*)data)->peer_port);
         // 初始化完成后，加入到客户端可选服务池中以便网关能将客户端连接绑定到该bw
         if (tgg_add_bwfdx(generate_bwfdx(this->prc_id, this->fd)) < 0) {
             // 如果加入失败，就要销毁连接，否则这个服务就没有人使用
@@ -162,15 +141,19 @@ int CmdGatewayClientConnect::ExecCmd()
 {
     std::string bwSeckey = tgg_get_bwfdx_seckey(this->prc_id, this->fd);
     try {
-        uint32_t remote_ip; 
-        ushort remote_port;
-        if (get_remote_info(this->fd, remote_ip, remote_port) < 0) {// 获取远端ip port 失败
+        // uint32_t remote_ip; 
+        // ushort remote_port;
+        char ip_str[INET_ADDRSTRLEN];
+        struct in_addr addr;
+        addr.s_addr = ((tgg_bw_data*)data)->peer_ip; 
+        if (!inet_ntop(AF_INET, &addr, ip_str, sizeof(ip_str))) {// 获取远端ip port 失败
             LOG_ERROR("GatewayClientConnect:get remote info failed, fd:%d.", this->fd);
             this->need_close = 1;
             // close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             return -1;
         }
         // printf("jdata:%s\n", jdata.dump(4).c_str());
+        LOG_INFO("New GatewayClientConnect: ip:%s:%u", ip_str, ((tgg_bw_data*)data)->peer_port);
         std::string body;
         get_body_string(jdata, body);
         LOG_INFO("GatewayClientConnect:JSON parse:%s", body.c_str());

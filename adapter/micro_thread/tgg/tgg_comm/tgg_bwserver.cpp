@@ -312,7 +312,7 @@ void *read_routine( void *arg )
             close(fd);
             return 0;
         }
-        LOG_INFO("accept new connection ip[%s], port[%u].", ip_str, ntohs(port));
+        LOG_INFO("new read routine ip[%s], port[%u].", ip_str, ntohs(port));
         char recv_buffer[ MAX_PACKET_SIZE ];
         int exec_ret = 0;
         // std::vector<char> recv_buffer;
@@ -462,7 +462,6 @@ void *accept_routine( void * )
         co->fd = fd;
         g_read_stack.pop();
         co_resume( co->co );
-        LOG_INFO("accept new connection fd[%d].", fd);
     }
     return 0;
 }
