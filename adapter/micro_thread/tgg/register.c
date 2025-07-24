@@ -4,6 +4,7 @@
 #include <rte_debug.h>
 #include <sys/wait.h>
 #include <sys/prctl.h>
+#include <sys/fcntl.h>
 #include <unistd.h>
 #include <limits.h>
 #include <sys/stat.h>
@@ -25,6 +26,8 @@ extern int g_register_fd;
 
 static void prc_dpdk_eal_init(int argc, char **argv);
 
+static int sig_pipe[2];
+
 static void start_gwbwprc()
 {
     char **args = (char**)malloc((2) * sizeof(char*));
@@ -45,28 +48,54 @@ void signal_handler(int signum)
 	}
 }
 void sigchld_handler(int sig) {
+    int saved_errno = errno;
+    char buf[16];
     int status;
     pid_t pid;
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) { // 非阻塞回收所有僵尸进程[5,7](@ref)
-        // 监控到子进程退出，立刻再启动一个
         if(g_run && TggConfigure::getInstance()->get_auto_start()) {
+            // 监控到子进程退出，立刻再启动一个
+            int len = snprintf(buf, sizeof(buf), "%d\n", pid);
+            write(sig_pipe[1], buf, len);
+            if (WIFEXITED(status)) {
+                printf("register child %d exit normal, exit code: %d\n", pid, WEXITSTATUS(status));
+            } else if (WIFSIGNALED(status)) {
+                printf("register child %d exit by signal: %d\n", pid, WTERMSIG(status));
+            }
+        }
+    }
+    errno = saved_errno;
+}
+
+int deal_sigchild(void* arg) {
+    struct pollfd pfds[1];
+    pfds[0].fd = sig_pipe[0]; // 管道读端
+    pfds[0].events = POLLIN;  // 监听可读事件
+    // 非阻塞检查管道（超时=0立即返回）
+    int ret = poll(pfds, 1, 0);
+    if (ret > 0 && (pfds[0].revents & POLLIN)) {
+        // stCoEpoll_t* ctx = (stCoEpoll_t*)arg;
+        char pid_buf[32];
+        ssize_t nread;
+
+        // 检查管道是否有数据（非阻塞读取）
+        while (g_run && (nread = read(sig_pipe[0], pid_buf, sizeof(pid_buf)-1)) > 0) {
+            pid_buf[nread] = '\0';
+            pid_t dead_pid = atoi(pid_buf);
             for (int i = 0; i < s_bwcount && g_run; ++i)// 0号进程 自己不能监控自己，由service监控 
             {
                 pid_t bwprc_pid = tgg_get_bwprc_pid(i);
-                // printf("sigchild from pid:%d bwprc_pid:%d\n", pid, bwprc_pid);// 信号处理函数中不能用日志，可能导致崩溃，日志类中有可重入函数
-                if (pid == bwprc_pid) {
-                    if (WIFEXITED(status)) {
-                        printf("register child[%d] pid:%d exit normal, exit code: %d\n", i, pid, WEXITSTATUS(status));
-                    } else if (WIFSIGNALED(status)) {
-                        printf("register child[%d] pid:%d exit by signal: %d\n", i, pid, WTERMSIG(status));
-                    }
+                LOG_WARNING("sigchild from register[%d] pid:%d bwprc_pid:%d\n", i, dead_pid, bwprc_pid);// 信号处理函数中不能用日志，可能导致崩溃，日志类中有可重入函数
+                if (dead_pid == bwprc_pid) {
                     tgg_clean_bwprc(i);
                     start_gwbwprc();
                 }
             }
         }
     }
+    return 0;
 }
+
 
 static uint64_t s_last_check_time = 0;
 static int* s_pid_check_times;
@@ -140,6 +169,7 @@ int local_eventloop_fun(void* arg) {
     if(TggConfigure::getInstance()->get_auto_start()) {
         check_bwprc();
         update_register_heart_beat();
+        deal_sigchild(arg);
     }
     return 0;
 }
@@ -249,7 +279,7 @@ static void kill_all_child()
         if(pid <= 0) {
             continue;
         }
-        LOG_INFO("prc_id[%d] pid[%d] heartbeat timeout, try to kill.", i, pid);
+        LOG_INFO("try to kill prc_id[%d] pid[%d].", i, pid);
         if (kill(pid, SIGINT) == -1) {// 不能kill -9，可能会导致其他进程死锁
             if (errno == ESRCH) {
                 LOG_ERROR("core_id[%d] process[%d] not exist anymore.", i, pid);
@@ -297,6 +327,7 @@ int main(int argc, char *argv[])
     prc_dpdk_eal_init(argc, argv);
 
     if(TggConfigure::getInstance()->get_auto_start()) {
+        pipe2(sig_pipe, O_NONBLOCK | O_CLOEXEC);
         kill_all_child();// 启动时，先把之前还在运行的进程杀掉
         if (tgg_setup_gw_monitor(count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 1) < 0) {// 上一个进程尚未结束
             LOG_INFO("-------register exit, prev instance still running-------");
@@ -339,7 +370,7 @@ int main(int argc, char *argv[])
             g_register_fd = connect_tcp_socket( port, ip.c_str());
         }
         if(g_register_fd > 0) {
-            LOG_INFO("connected to register %s:%d.\n", ip.c_str(), port);
+            LOG_INFO("connected to register %s:%d.", ip.c_str(), port);
         }
 
         main_register_proc();

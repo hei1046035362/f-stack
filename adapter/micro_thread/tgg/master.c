@@ -35,6 +35,7 @@ extern int g_core_id;
 int g_run_status = 1;
 int g_monitor_count = 0;
 using namespace NS_MICRO_THREAD;
+static int sig_pipe[2];
 
 static void start_gwrcv_sendary(int lcore_id)
 {
@@ -78,21 +79,47 @@ void signal_handler(int signum)
 }
 
 void sigchld_handler(int sig) {
+    int saved_errno = errno;
+    char buf[16];
     int status;
     pid_t pid;
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) { // 非阻塞回收所有僵尸进程[5,7](@ref)
         if(g_run_status && TggConfigure::getInstance()->get_auto_start()) {
             // 监控到子进程退出，立刻再启动一个
+            int len = snprintf(buf, sizeof(buf), "%d\n", pid);
+            write(sig_pipe[1], buf, len);
+            if (WIFEXITED(status)) {
+                printf("gwrcv child %d exit normal, exit code: %d\n", pid, WEXITSTATUS(status));
+            } else if (WIFSIGNALED(status)) {
+                printf("gwrcv child %d exit by signal: %d\n", pid, WTERMSIG(status));
+            }
+        }
+    }
+    errno = saved_errno;
+}
+// 不在信号函数中左复杂的操作，改为管道传递给主线程
+static void deal_sigchild() {
+    struct pollfd pfds[1];
+    pfds[0].fd = sig_pipe[0]; // 管道读端
+    pfds[0].events = POLLIN;  // 监听可读事件
+    // 非阻塞检查管道（超时=0立即返回）
+    int ret = poll(pfds, 1, 0);
+    if (ret > 0 && (pfds[0].revents & POLLIN)) {
+        // stCoEpoll_t* ctx = (stCoEpoll_t*)arg;
+        char pid_buf[32];
+        ssize_t nread;
+
+        // 检查管道是否有数据（非阻塞读取）
+        while (g_run_status && (nread = read(sig_pipe[0], pid_buf, sizeof(pid_buf)-1)) > 0) {
+            pid_buf[nread] = '\0';
+            pid_t dead_pid = atoi(pid_buf);
+            // 监控到子进程退出，立刻再启动一个
             for (int i = 1; i < g_monitor_count; ++i)// 0号进程 自己不能监控自己，由service监控 
             {
                 pid_t monitor_pid = tgg_get_gw_monitor_pid(i);
                 // printf("sigchild from pid:%d monitor_pid:%d\n", pid, monitor_pid);
-                if (pid == monitor_pid) {
-                    if (WIFEXITED(status)) {
-                        printf("gwrcv child[%d] pid:%d exit normal, exit code: %d\n", i, pid, WEXITSTATUS(status));
-                    } else if (WIFSIGNALED(status)) {
-                        printf("gwrcv child[%d] pid:%d exit by signal: %d\n", i, pid, WTERMSIG(status));
-                    }
+                if (dead_pid == monitor_pid) {
+                    LOG_WARNING("gwrcv child[%d] pid:%d exit.", i, dead_pid);
                     tgg_clean_gw_monitor(i);
                     if(i < g_monitor_count-2) {
                         start_gwrcv_sendary(i);
@@ -453,6 +480,7 @@ static void gw_monitor(void* argv)
     int64_t cur_count = 0;// 记录上一次的连接总数
     int64_t max_concurency = 0;// 记录最大并发数
     int index = 0;// 用于计算时间，500ms一次，(index % 2) == 0 表示1s
+    int check_times = 10;
     while(g_run_status) {
         if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
             check_gw_monitor();
@@ -470,7 +498,13 @@ static void gw_monitor(void* argv)
         } else {
             update_gwrcv_secondary_heart_beat();
         }
-        mt_sleep(500);
+        while(g_run_status && check_times-- > 0) {
+            if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
+                deal_sigchild();
+            }
+            mt_sleep(50);            
+        }
+        check_times = 10;
     }
 }
 
@@ -634,6 +668,7 @@ int main(int argc, char *argv[])
     }
     g_core_id = rte_lcore_id();
     if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
+        pipe2(sig_pipe, O_NONBLOCK | O_CLOEXEC);
         LOG_INFO("-------master[pid:%d] core[%d] start-------", getpid(), g_core_id);
         tgg_master_init();
         if(TggConfigure::getInstance()->get_auto_start()) {
