@@ -474,9 +474,9 @@ int tgg_get_valid_bwprc(int bwcount, uint64_t now)
 			if(prc->pid > 0 && kill(prc->pid, 0) == 0) {
 				continue;// 进程依然存在
 			}
-			prc->heart_beat = now;
+			// prc->heart_beat = now;
 			prc->pid = getpid();
-			prc->idx = 0;
+			// prc->idx = 0;
 			return i;
 		}
 	}
@@ -489,9 +489,9 @@ void tgg_update_bwprc(int prc_id, uint64_t now)
 	SpinLock lock(get_bwprc_lock());
 	pid_data* prc = (pid_data*)g_bwprc_zone->addr + prc_id;
 	prc->heart_beat = now;
-	if(!prc->idx) {
-		prc->idx = 1;
-	}
+	// if(!prc->idx) {
+	// 	prc->idx = 1;
+	// }
 }
 
 // 获取指定下标的进程id
@@ -503,11 +503,14 @@ int tgg_get_bwprc_pid(int prc_id)
 }
 
 // 获取指定下标的进程id
-int tgg_get_bwprc_idx(int prc_id)
+int tgg_check_bwprc_up(int prc_id)
 {
 	SpinLock lock(get_bwprc_lock());
 	pid_data* prc = (pid_data*)g_bwprc_zone->addr + prc_id;
-	return prc->idx;
+	if(prc->pid > 0 && prc->heart_beat > 0) {
+		return 1;
+	}
+	return 0;
 }
 
 // 检查指定进程是否超时
@@ -542,7 +545,7 @@ int tgg_setup_gw_monitor(int prc_id)
 			LOG_ERROR("prev process still alive.");
 			return -1;// 进程依然存在
 		}
-		prc->heart_beat = now;
+		// prc->heart_beat = now;
 		prc->pid = getpid();
 		return 0;
 	}
@@ -554,7 +557,7 @@ void tgg_update_gw_monitor(int prc_id, uint64_t now)
 {
 	WriteLock lock(get_gw_monitor_lock());
 	pid_data* prc = (pid_data*)g_gw_monitor_zone->addr + prc_id;
-	if(now - prc->heart_beat > 2*GW_MONITOR_HEART_BEAT) {
+	if(prc->heart_beat != 0 && now - prc->heart_beat > 2*GW_MONITOR_HEART_BEAT) {
 		LOG_WARNING("update heart_beat time delayed, PID:%d, prc_id:%d heart_beat:%ld now:%ld diff:%d",
 		 prc->pid, prc_id, prc->heart_beat, now, now - prc->heart_beat);
 	}
@@ -568,6 +571,17 @@ int tgg_get_gw_monitor_pid(int prc_id)
 	pid_data* prc = (pid_data*)g_gw_monitor_zone->addr + prc_id;
 	return prc->pid;
 }
+
+int tgg_check_gw_monitor_up(int prc_id)
+{
+	ReadLock lock(get_gw_monitor_lock());
+	pid_data* prc = (pid_data*)g_gw_monitor_zone->addr + prc_id;
+	if(prc->pid > 0 && prc->heart_beat > 0) {
+		return 1;
+	}
+	return 0;
+}
+
 
 // 检查指定进程是否超时
 int tgg_checkif_gw_monitor_timeout(int prc_id, uint64_t now)
@@ -1051,10 +1065,10 @@ static int get_exec_path(char* exe_path, const char* exec_name)
     if (last_slash != NULL) {
         memcpy(last_slash+1, exec_name, strlen(exec_name));
         last_slash[(1+strlen(exec_name))] = '\0';
-    	LOG_INFO("exec path[%s]", last_slash);
+    	printf("exec path[%s]\n", last_slash);
         return 0;
     }
-    LOG_ERROR("invalid exec path[%s]", exe_path);
+    printf("invalid exec path[%s]", exe_path);
     return -1;
 }
 
@@ -1066,7 +1080,7 @@ void custom_fork(const char* exec_name, char** args)
     }
     pid_t pid = fork();
     if (pid < 0) {
-        LOG_ERROR("fork failed.");
+        printf("fork failed.\n");
     }
 
     if (pid == 0) {  // 子进程  不能在子进程中调用日志函数，会导致日志线程死锁
