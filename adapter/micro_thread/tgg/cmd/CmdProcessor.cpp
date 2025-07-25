@@ -244,7 +244,7 @@ int CmdSendToGroup::ExecCmd()
             const char* gid = groupArray[i].GetString();
             std::list<int64_t> lstFds;
             if (tgg_get_fdsbygid(gid, lstFds) < 0) {
-                LOG_WARNING("gid[%s] not exist.", gid);
+                LOG_DEBUG("gid[%s] not exist.", gid);
                 continue;
             }
 
@@ -840,7 +840,7 @@ int CmdSendToUid::ExecCmd()
     for (auto& it : vec_uids) {
         std::list<int64_t> lst_fd;
         if (tgg_get_fdsbyuid(it.c_str(), lst_fd) < 0) {
-            LOG_WARNING("SendToUid: no fd found for uid[%s]", it.c_str());
+            LOG_DEBUG("SendToUid: no fd found for uid[%s]", it.c_str());
             continue;
         }
         lst_fds.splice(lst_fds.end(), lst_fd);
@@ -851,7 +851,7 @@ int CmdSendToUid::ExecCmd()
         BatchSend2ClientByfds(lst_fds, body, FD_WRITE, !raw);
         LOG_DEBUG("SendToUid: cmd exec success. Sent to %zu fds", lst_fds.size());
     } else {
-        LOG_WARNING("SendToUid: no fd found for all uids[%s]", ext_data_str.c_str());
+        LOG_DEBUG("SendToUid: no fd found for all uids[%s]", ext_data_str.c_str());
     }
     return 0;
 }
