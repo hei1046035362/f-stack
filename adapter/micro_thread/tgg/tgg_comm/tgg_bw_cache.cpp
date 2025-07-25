@@ -96,7 +96,7 @@ static void* tgg_hash_get_value(const rte_hash* hash, const char* key, int key_l
     void* pdata = NULL;
     int ret = rte_hash_lookup_with_hash_data(hash, key, rte_hash_crc(key, key_len, 0), &pdata);
     if (ret < 0) {
-        LOG_INFO("Get key[%s] data failed:%d", key, ret);
+        LOG_DEBUG("Get key[%s] data failed:%d", key, ret);
         return NULL;
     }
     return pdata;
@@ -596,7 +596,7 @@ int tgg_get_fdsbyuid(const char* uid, std::list<int64_t>& lst_fd)
     // ReadLock lock(get_uidfd_lock());
     tgg_uid_data* value = (tgg_uid_data*)tgg_hash_get_value(g_uid_hash, _key, TGG_UID_LEN);
     if(!value) {
-        LOG_INFO("get fdidcid by uid[%s] failed.", uid);
+        LOG_DEBUG("get fdidcid by uid[%s] failed.", uid);
         return -1;
     }
     ReadLock lock(&value->lock);
