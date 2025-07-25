@@ -338,24 +338,81 @@ Websocket::_GetWsFrame(unsigned char *in_buffer, size_t buf_len,
         return opcode;
 }
 
-static int check_if_http_end(const char* data, int len)
-{
-    if(len < 4) {
-        return 0;
-    }
-    int index = 0;
-    while (len - index >= 4) {
-        if(data[index] == '\r' && data[index+2] == '\r' && data[index+1] == '\n' && data[index+3] == '\n') {
-            break;
+// #if defined(__i386__) || defined(__x86_64__)
+// #include <smmintrin.h>
+// static int check_if_http_end(const char* data, int len) {
+//     if (len < 4) return 0;
+//     // 加载4字节常量：\r\n\r\n
+//     const __m128i pattern = _mm_set1_epi32(0x0A0D0A0D); // 小端序：\r\n\r\n
+//     for (int i = 0; i <= len - 16; i += 4) {
+//         __m128i chunk = _mm_loadu_si128((const __m128i*)(data + i));
+//         __m128i cmp = _mm_cmpeq_epi32(chunk, pattern);
+//         if (!_mm_testz_si128(cmp, cmp)) {
+//             // 找到匹配位置
+//             for (int j = i; j < i + 16; j++) {
+//                 if (j + 3 < len && 
+//                     data[j]=='\r' && data[j+1]=='\n' && 
+//                     data[j+2]=='\r' && data[j+3]=='\n') 
+//                     return j + 4;
+//             }
+//         }
+//     }
+//     return 0;
+// }
+// #else
+// typedef struct {
+//     int state;  // 0:初始 1:收到\r 2:收到\r\n 3:收到\r\n\r
+// } ParserState;
+
+static int check_if_http_end(const char* data, int len) {
+    int state = 0;
+    for (int i = 0; i < len; i++) {
+        switch (state) {
+            case 0: if (data[i] == '\r') state = 1; break;
+            case 1: 
+                if (data[i] == '\n') state = 2; 
+                else state = 0;
+                break;
+            case 2: 
+                if (data[i] == '\r') state = 3; 
+                else state = 0;
+                break;
+            case 3: 
+                if (data[i] == '\n') return i + 1; // 返回结束位置
+                state = 0;
+                break;
         }
-        index++;
-    }
-    if(index < len) {
-        index += 4;
-        return index;
     }
     return 0;
 }
+// #endif
+
+// static int check_if_http_end(const char* data, int len) {
+//     if (len < 2) {
+//         return 0; // 长度不足时直接返回
+//     }
+
+//     int index = 0;
+//     while (index < len - 1) { // 确保剩余长度至少2字节
+//         // 优先检查标准结束符 \r\n\r\n (4字节)
+//         if (index + 3 < len && 
+//             data[index] == '\r' && 
+//             data[index+1] == '\n' && 
+//             data[index+2] == '\r' && 
+//             data[index+3] == '\n') {
+//             return index + 4; // 返回结束位置后4字节
+//         }
+
+//         // 检查非标准结束符 \n\n (2字节)
+//         if (data[index] == '\n' && data[index+1] == '\n') {
+//             return index + 2; // 返回结束位置后2字节
+//         }
+
+//         index++;
+//     }
+//     return 0; // 未找到结束符
+// }
+
 // websocket的解析逻辑，只有毁掉函数和返回值是自定义的，其余都是ai提供的解析代码，目前(2025/07/01)验证结果是正常的
 // return  -1 缓存失败，要关闭连接并删除源数据data 0 缓存数据，本次不处理  1 消息处理完成，需要清理缓存
 // 缓存区域换成环形缓冲区了，连接建立时创建，关闭时销毁，不再每次缓冲数据时分配
