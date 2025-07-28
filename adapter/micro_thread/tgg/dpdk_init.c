@@ -103,6 +103,7 @@ const char* s_pool_trans_data_name = "tgg_pl_tdata";// 客户端下行
 const char* s_pool_write_data_name = "tgg_pl_wdata";// 客户端下行
 const char* s_pool_bwrcv_data_name = "tgg_pl_bwdata";// 客户端上行透传 和 bw上行共用
 const char* s_pool_large_data_name = "tgg_pl_large_data";// 客户端上行透传 和 bw上行共用
+const char* s_pool_ws_buffer_name = "tgg_pl_ws_buffer";// 缓存ws大包使用(处理分包粘包)
 const char* s_pool_clifdlist_data_name = "tgg_pl_fdlst_data";// 下行发送fd列表的队列
 
 // 内存池大小 TODO 大小根据队列长度设置
@@ -117,6 +118,7 @@ static uint32_t s_bwrcv_data_mempool_size;// 尽量设置成2^n  上行发送 �
 // 超过正常大小的数据，大包的情况，需要申请稍大的空间   单个缓存大小为8192，有些网络框架中最大mtu会设置到8192
 static uint32_t s_large_data_mempool_size;// 尽量设置成2^n  上行发送 数据 内存
 
+static uint32_t s_ws_buffer_mempool_size;// 尽量设置成2^n  ws缓存 数据 内存
 
 // 每个内存池单个内存块儿的大小
 static uint32_t s_mempool_trans_cache = sizeof(tgg_trans_data);// 单个缓存的大小待定
@@ -138,8 +140,7 @@ struct rte_mempool* g_mempool_clifdlist_data = NULL;
 
 struct rte_mempool* g_mempool_large_data = NULL;
 
-/// 调用rte_malloc使用的名称
-const char* g_rte_malloc_type = "tgg_dpdk_malloc";
+struct rte_mempool* g_mempool_ws_buffer = NULL;
 
 /// 五个hash表
 // 存储uid -> fd 的hash表 
@@ -404,6 +405,8 @@ void tgg_master_init()
 
 	s_large_data_mempool_size = 1024*32*lcore_count;// 大块数据，本来就很少，大多是连接创建的时候会有，但是这个是上下行三个队列都会用到
 
+	s_ws_buffer_mempool_size = 1024*32*lcore_count;// ws缓存，基于单个进程并发而定，暂时限定为3W一个进程
+
 	s_write_mempool_size = s_write_ring_size * TggConfigure::getInstance()->get_lcore_mask();
 
 	g_fd_limit = TggConfigure::getInstance()->get_gwrcv_fd_limit();
@@ -505,9 +508,10 @@ void tgg_master_init()
 
 	g_mempool_trans_data = make_mempool(s_pool_trans_data_name, s_trans_data_mempool_size, COMMON_PACKET_LEN);
 	g_mempool_write_data = make_mempool(s_pool_write_data_name, s_write_data_mempool_size, COMMON_PACKET_LEN);
-	g_mempool_bwrcv_data = make_mempool(s_pool_bwrcv_data_name, s_write_data_mempool_size, COMMON_PACKET_LEN);
+	g_mempool_bwrcv_data = make_mempool(s_pool_bwrcv_data_name, s_bwrcv_data_mempool_size, COMMON_PACKET_LEN);
 	g_mempool_large_data = make_mempool(s_pool_large_data_name, s_large_data_mempool_size, MAX_PACKET_LEN);
 	g_mempool_clifdlist_data = make_mempool(s_pool_clifdlist_data_name, s_clifdlist_mempool_size, sizeof(tgg_fd_id_list));
+	g_mempool_ws_buffer = make_mempool(s_pool_ws_buffer_name, s_ws_buffer_mempool_size, BUFFER_PACKET_LEN);
 
 	LOG_INFO("Init dpdk master for tgg done.");
 }
@@ -557,6 +561,8 @@ void tgg_master_uninit()
 
 	rte_mempool_free(g_mempool_large_data);
 	g_mempool_large_data = NULL;
+	rte_mempool_free(g_mempool_ws_buffer);
+	g_mempool_ws_buffer = NULL;
 
 	rte_ring_free(g_ring_trans);
 	g_ring_trans = NULL;
@@ -651,6 +657,7 @@ void tgg_secondary_init()
 	g_mempool_bwrcv_data = find_mempool(s_pool_bwrcv_data_name);
 	g_mempool_large_data = find_mempool(s_pool_large_data_name);
 	g_mempool_clifdlist_data = find_mempool(s_pool_clifdlist_data_name);
+	g_mempool_ws_buffer = find_mempool(s_pool_ws_buffer_name);
 	g_gid_hash = get_hash_byname(s_gid_hash_name);
 	g_uid_hash = get_hash_byname(s_uid_hash_name);
 	g_cid_hash = get_hash_byname(s_cid_hash_name);
