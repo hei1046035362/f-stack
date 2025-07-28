@@ -41,6 +41,7 @@ extern struct rte_mempool* g_mempool_write_data;
 extern struct rte_mempool* g_mempool_bwrcv_data;
 extern struct rte_mempool* g_mempool_large_data;
 extern struct rte_mempool* g_mempool_clifdlist_data;
+extern struct rte_mempool* g_mempool_ws_buffer;
 
 tgg_stats g_tgg_stats = {0};
 static bool s_big_endian = false;
@@ -629,21 +630,26 @@ int ringbuf_read(int core_id, int fd, std::string& dest, int len, int move_pos)
     }
     if(move_pos) {
     	wsdata->read_pos = (wsdata->read_pos + len) % wsdata->capacity;
+    	if (wsdata->read_pos == wsdata->write_pos) {
+    		release_ws_buffer(core_id, fd);
+    		LOG_DEBUG("release ws buffer for fd: %d coreid: %d after full consumption", fd, core_id);
+        }
     }
     return len;
 }
 
+int64_t s_buffer_count = 0;
 int ringbuf_write(int core_id, int fd, const char* data, int len)
 {
 	tgg_ws_data* wsdata = &((&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data);
     if (!wsdata->data) {// 第一次缓存
-    	wsdata->data = dpdk_rte_malloc(DEFAULT_WSDATA_LEN);
-    	if (!wsdata->data) {
+    	if (rte_mempool_get(g_mempool_ws_buffer, &wsdata->data) < 0) {
     		LOG_ERROR("malloc memery failed.");
     		return -1;
     	}
-    	memset(wsdata->data, 0, DEFAULT_WSDATA_LEN);
-    	wsdata->capacity = DEFAULT_WSDATA_LEN;
+    	s_buffer_count++;
+    	memset(wsdata->data, 0, BUFFER_PACKET_LEN);
+    	wsdata->capacity = BUFFER_PACKET_LEN;
     	wsdata->read_pos = 0;
     	wsdata->write_pos = 0;
     }
@@ -725,7 +731,8 @@ void release_ws_buffer(int core_id, int fd)
         return;
     }
     // 释放内存
-    dpdk_rte_free(wsdata->data);
+    rte_mempool_put(g_mempool_ws_buffer, wsdata->data);
+    s_buffer_count--;
     memset(wsdata, 0, sizeof(tgg_ws_data));
 }
 
@@ -1049,6 +1056,7 @@ void print_mem_statistics()
 	for(auto iter : s_hi_freq_free) {
 		LOG_WARNING("pool[%s] hi_free times: %d", iter.first.c_str(), iter.second);	
 	}
+	LOG_WARNING("ws buffer left count:%ld", s_buffer_count);
 }
 
 

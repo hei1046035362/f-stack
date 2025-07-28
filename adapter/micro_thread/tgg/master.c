@@ -23,7 +23,6 @@ static const char* s_dump_file = "/var/corefiles/";//tgg_gw_master_core
 // 1、心跳检测间隔，没收到数据就会结束fd，
 // 2、freebsd底层销毁并回收fd的时间是30s，这个时间最好是大于30
 static int s_fd_timeout = 60*1000;
-extern const char* g_rte_malloc_type;
 extern struct rte_mempool* g_mempool_write;
 extern struct rte_mempool* g_mempool_write_data;
 extern ushort g_gateway_port;

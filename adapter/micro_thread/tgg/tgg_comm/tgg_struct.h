@@ -24,7 +24,10 @@
 #define TGG_FD_NOTEXIST -3
 
 #define COMMON_PACKET_LEN 1024
-#define MAX_PACKET_LEN 8192
+#define MAX_PACKET_LEN 8192  // 目前已知的情况：需要在ws的GET请求中加入一些其他信息，再传给服务端，所以这里要比ws缓存数据大一些
+
+#define BUFFER_PACKET_LEN 4096 // ws默认缓存是4k，超过4k的连接  10w个连接就是400M，
+#define MAX_WSDATA_LEN 10*1024*1024   // websocket最多缓存10M的数据  暂时不器用，后续如果真的有超过4096的数据包
 
 // fdid:fd << 8 & coreid
 // 从fdid中取出coreid和fd   // 确保不同进程中fd的唯一性
@@ -91,9 +94,6 @@ enum FD_STATUS
     FD_STATUS_CLOSED = 32,    // 这个状态下或者为0才能接收新的连接
     FD_STATUS_DISCONNECTED = 64,  // 连接已断开
 };
-
-#define DEFAULT_WSDATA_LEN 4096   // ws默认缓存是4k，超过4k的连接  10w个连接就是400M，
-#define MAX_WSDATA_LEN 10*1024*1024   // websocket最多缓存10M的数据  暂时不器用，后续如果真的有超过4096的数据包
 
 // websocket的缓存结构，新接入一个客户端连接时会创建
 typedef struct st_ws_data {
