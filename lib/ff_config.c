@@ -972,6 +972,12 @@ dpdk_args_setup(struct ff_config *cfg)
     if (cfg->dpdk.no_huge) {
         dpdk_argv[n++] = strdup("--no-huge");
     }
+    // sprintf(temp, "--in-memory");
+    // dpdk_argv[n++] = strdup(temp);
+    // 解决大页内存占用文件句柄超过1024时，read失败的问题
+    sprintf(temp, "--single-file-segments");
+    dpdk_argv[n++] = strdup(temp);
+
     if (cfg->dpdk.proc_mask) {
         sprintf(temp, "-c%s", cfg->dpdk.proc_mask);
         dpdk_argv[n++] = strdup(temp);
