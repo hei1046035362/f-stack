@@ -36,7 +36,7 @@ int g_monitor_count = 0;
 using namespace NS_MICRO_THREAD;
 static int sig_pipe[2];
 
-static void start_gwrcv_sendary(int lcore_id)
+static pid_t start_gwrcv_sendary(int lcore_id)
 {
     // 构造参数数组
     char* proc_id = (char*)malloc(24);
@@ -45,26 +45,29 @@ static void start_gwrcv_sendary(int lcore_id)
     args[0] = const_cast<char*>("gwrcv");
     args[1] = proc_id;
     args[2] = NULL; // 必须以 NULL 结尾
-    custom_fork("gwrcv", args);
+    pid_t pid = custom_fork("gwrcv", lcore_id, args);
     free(args);
+    return pid;
 }
 
-static void start_gwcliprc()
+static pid_t start_gwcliprc(int lcore_id)
 {
     char **args = (char**)calloc(2, sizeof(char*));
     args[0] = const_cast<char*>("gwcliprc");
     args[1] = NULL; // 必须以 NULL 结尾
-    custom_fork("gwcliprc", args);
+    pid_t pid = custom_fork("gwcliprc", lcore_id, args);
     free(args);
+    return pid;
 }
 
-static void start_register()
+static pid_t start_register(int lcore_id)
 {
     char **args = (char**)calloc(2, sizeof(char*));
     args[0] = const_cast<char*>("gwregister");
     args[1] = NULL; // 必须以 NULL 结尾
-    custom_fork("gwregister", args);// gwbwserver由register管理，会先启动gwbwserver,然后向注册中心发起连接请求
+    pid_t pid = custom_fork("gwregister", lcore_id, args);// gwbwserver由register管理，会先启动gwbwserver,然后向注册中心发起连接请求
     free(args);
+    return pid;
 }
 
 void signal_handler(int signum)
@@ -120,12 +123,19 @@ static void deal_sigchild() {
                 if (dead_pid == monitor_pid) {
                     LOG_WARNING("gwrcv child[%d] pid:%d exit.", i, dead_pid);
                     tgg_clean_gw_monitor(i);
+                    pid_t pid = -1;
                     if(i < g_monitor_count-2) {
-                        start_gwrcv_sendary(i);
+                        pid = start_gwrcv_sendary(i);
                     } else if (i == g_monitor_count-2) {
-                        start_gwcliprc();
+                        pid = start_gwcliprc(i);
                     } else if (i == g_monitor_count - 1) {
-                        start_register();
+                        pid = start_register(i);
+                    }
+                    if(pid < 0) {
+                        LOG_ERROR("fork for lcore[%d] failed", i);
+                    }
+                    if(tgg_setup_gw_monitor(i, pid) < 0) {
+                        LOG_ERROR("setup monitor for lcore[%d] failed, pid:%d", i, pid);
                     }
                 }
             }
@@ -432,33 +442,44 @@ void check_gw_monitor()
                         continue;
                     } else {
                         LOG_ERROR("kill core_id[%d] process[%d] faild error:%d.", i, pid, errno);
-                        // TODO 上线后这段代码要放开，防止死锁导致无法启动新的进程
-                        if (kill(pid, 0) == 0) {
-                            if(s_pid_check_times[i] < 3) {// 重试三次，不方便sleep，如果三个周期都没有退出，就强制结束
-                                s_pid_check_times[i]++;
-                                continue;
-                            }
-                            LOG_WARNING("core_id[%d] Process %d exists. Sending SIGKILL...", i, pid);
-                            // 2. 发送 SIGKILL 信号
-                            if (kill(pid, SIGKILL) == 0) {
-                                LOG_WARNING("SIGKILL sent successfully.");
-                            } else {
-                                LOG_ERROR("kill(SIGKILL) failed");
-                                continue;
-                            }
-                        }
                         // continue;
+                    }
+                }
+                // TODO 上线后这段代码要放开，防止死锁导致无法启动新的进程
+                if (kill(pid, 0) == 0) {
+                    if(i < g_monitor_count-2) { // gwrcv 强制结束会导致rte_timer_reset死锁,
+                                                //      但是通常死锁时并不会在mt_sleep中，所以这里任然待观察
+                        continue;
+                    }
+                    if(s_pid_check_times[i] < 3) {// 重试三次，不方便sleep，如果三个周期都没有退出，就强制结束
+                        s_pid_check_times[i]++;
+                        continue;
+                    }
+                    LOG_WARNING("core_id[%d] Process %d exists. Sending SIGKILL...", i, pid);
+                    // 2. 发送 SIGKILL 信号  理论上死锁发生时，是整个dpdk都死锁住了，杀掉一个进程并不起作用，应该要整个程序重启了
+                    if (kill(pid, SIGKILL) == 0) {
+                        LOG_WARNING("SIGKILL sent successfully.");
+                    } else {
+                        LOG_ERROR("kill(SIGKILL) failed");
+                        continue;
                     }
                 }
             }
             tgg_clean_gw_monitor(i);
             s_pid_check_times[i] = 0;
+            pid = -1;
             if(i < g_monitor_count-2) {
-                start_gwrcv_sendary(i);
+                pid = start_gwrcv_sendary(i);
             } else if (i == g_monitor_count-2) {
-                start_gwcliprc();
+                pid = start_gwcliprc(i);
             } else if (i == g_monitor_count - 1) {
-                start_register();
+                pid = start_register(i);
+            }
+            if(pid < 0) {
+                LOG_ERROR("fork for lcore[%d] failed", i);
+            }
+            if(tgg_setup_gw_monitor(i, pid) < 0) {
+                LOG_ERROR("setup monitor for lcore[%d] failed, pid:%d", i, pid);
             }
         }
     }
@@ -622,24 +643,25 @@ static void kill_all_child()
                 LOG_ERROR("Permission denied process[%d] core_id[%d].", pid, i);
             } else {
                 LOG_ERROR("kill core_id[%d] process[%d] faild error:%d.", i, pid, errno);
-                int wait_times = 500;// 最长等待5s，还没有退出的话，就发送kill -9
-                while (kill(pid, 0) == 0) {// 进程还存在
-                    if (wait_times > 0) {
-                        usleep(10000);
-                        wait_times--;
-                        continue;
-                    }
-                    LOG_WARNING("core_id[%d] Process %d exists. Sending SIGKILL...", i, pid);
-                    // 2. 发送 SIGKILL 信号
-                    if (kill(pid, SIGKILL) == 0) {
-                        LOG_WARNING("SIGKILL sent successfully.");
-                    } else {
-                        LOG_ERROR("kill(SIGKILL) failed");
-                    }
-                    break;
-                }
             }
         }
+        int wait_times = 500;// 最长等待5s，还没有退出的话，就发送kill -9
+        while (kill(pid, 0) == 0) {// 进程还存在
+            if (wait_times > 0) {
+                usleep(10000);
+                wait_times--;
+                continue;
+            }
+            LOG_WARNING("core_id[%d] Process %d exists. Sending SIGKILL...", i, pid);
+            // 2. 发送 SIGKILL 信号
+            if (kill(pid, SIGKILL) == 0) {
+                LOG_WARNING("SIGKILL sent successfully.");
+            } else {
+                LOG_ERROR("kill(SIGKILL) failed");
+            }
+            break;
+        }
+
         tgg_clean_gw_monitor(i);
     }
 
@@ -694,7 +716,7 @@ int main(int argc, char *argv[])
         LOG_INFO("-------secondary[pid:%d] core[%d] start-------", getpid(), g_core_id);
         tgg_gwrcv_secondary_init();
         if(TggConfigure::getInstance()->get_auto_start()) {
-            if (tgg_setup_gw_monitor(g_core_id) < 0) {// 上一个进程尚未结束
+            if (tgg_check_gw_monitor_up(g_core_id)) {// 上一个进程尚未结束
                 LOG_INFO("-------secondary core[%d] exit, prev coreid still running-------", g_core_id);
                 mt_uninit_frame();
                 rte_eal_cleanup();

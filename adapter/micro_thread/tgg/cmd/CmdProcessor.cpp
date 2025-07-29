@@ -1036,7 +1036,7 @@ int CmdGetClientIdByUid::ExecCmd()
             itFd++;
         }
     } else {
-        LOG_ERROR("no session found for uid[%s].", suid.c_str());
+        LOG_INFO("no session found for uid[%s].", suid.c_str());
     }
 
     Send2BW(result);
