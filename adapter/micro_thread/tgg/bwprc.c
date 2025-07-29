@@ -170,7 +170,12 @@ int main(int argc, char *argv[])
 
 
     g_need_authorize = TggConfigure::getInstance()->get_secret_key().empty() ? 0 : 1;
-    g_prc_id = tgg_get_valid_bwprc(TggConfigure::getInstance()->get_bwsvr_count(), get_system_ms());
+    if(TggConfigure::getInstance()->get_auto_start()) {
+        g_prc_id = tgg_get_bwprc_id(TggConfigure::getInstance()->get_bwsvr_count());
+    } else {
+        g_prc_id = tgg_get_valid_bwprc(TggConfigure::getInstance()->get_bwsvr_count(), get_system_ms());
+
+    }
     if(g_prc_id < 0) {
         close(g_listen_fd);
         LOG_ERROR("-----------main end: no valid bwprc-id avalible----------");

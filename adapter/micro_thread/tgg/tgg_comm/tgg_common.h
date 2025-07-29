@@ -78,8 +78,14 @@ int tgg_get_bw_prcstatus(int prc_id);
 int tgg_set_bw_prcstatus(int prc_id, int status);
 int tgg_clean_bwfdx(int prc_id, int fd);
 
-// 获取一个有效的bw进程编号
+
+// 获取有效的进程序号  手动启动时需要用
 int tgg_get_valid_bwprc(int bwcount, uint64_t now);
+
+// 获取当前进程的id  自动启动使用
+int tgg_get_bwprc_id(int bwcount);
+// 设置bwprc进程
+int tgg_setup_bwprc_monitor(int prc_id, pid_t pid);
 // 更新进程编号对应的时间戳
 void tgg_update_bwprc(int prc_id, uint64_t now);
 // 获取指定编号的进程的进程id
@@ -91,7 +97,7 @@ int tgg_checkif_bwprc_timeout(int prc_id, uint64_t now);
 // 清理指定进程相关数据
 void tgg_clean_bwprc(int prc_id);
 
-int tgg_setup_gw_monitor(int prc_id);
+int tgg_setup_gw_monitor(int prc_id, pid_t pid);
 // 更新进程编号对应的时间戳
 void tgg_update_gw_monitor(int prc_id, uint64_t now);
 // 获取指定编号的进程的进程id
@@ -179,6 +185,6 @@ int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, in
 int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx, int fdopt);
 
 
-void custom_fork(const char* exec_name, char** args);
+pid_t custom_fork(const char* exec_name, int lcore_id, char** args);
 
 #endif  // _TGG_COMMON_H_
