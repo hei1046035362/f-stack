@@ -27,6 +27,8 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <errno.h>
+#include <sys/prctl.h>
+#include <sys/wait.h>
 
 #include <rte_common.h>
 #include <rte_byteorder.h>
@@ -1189,6 +1191,62 @@ fdir_add_tcp_flow(uint16_t port_id, uint16_t queue, uint16_t dir,
 
 #endif
 
+static struct rte_memzone *
+find_memzone(const char *name)
+{
+    unsigned int socket_id = rte_socket_id();
+    char mz_name[RTE_MEMZONE_NAMESIZE];
+    struct rte_memzone *memzone;
+
+    snprintf(mz_name, RTE_MEMZONE_NAMESIZE, "%s_%d_%u", name, rte_lcore_id(),socket_id);
+    memzone = (struct rte_memzone *)rte_memzone_lookup(mz_name);
+    if (!memzone) {
+        printf("memzone[%s] not found.\n", mz_name);
+        return NULL;
+    }
+    return memzone;
+}
+
+static struct rte_memzone *
+make_memzone(const char *name, size_t size)
+{
+    unsigned int socket_id = rte_socket_id();
+    struct rte_memzone *memzone;
+    char mz_name[RTE_MEMZONE_NAMESIZE];
+
+    snprintf(mz_name, RTE_MEMZONE_NAMESIZE, "%s_%d_%u", name, rte_lcore_id(),socket_id);
+    memzone = (struct rte_memzone *)rte_memzone_reserve_aligned(mz_name, size, socket_id,
+            RTE_MEMZONE_2MB, RTE_CACHE_LINE_SIZE);
+    if (memzone == NULL){
+        printf("Can't allocate memory zone %s, error:%s.\n", mz_name, rte_strerror(rte_errno));
+        rte_exit(EXIT_FAILURE,
+            "[%s][%d] Can't allocate memory zone %s, error:%s.\n", __FILE__, __LINE__,
+            mz_name, rte_strerror(rte_errno));
+    }
+    memset(memzone->addr, 0, size);
+    printf("New zone allocated: %s.\n", mz_name);
+    return memzone;
+}
+static struct rte_memzone* s_mz_prc_ready = NULL;
+
+static void check_if_lcore_in_use()
+{
+    s_mz_prc_ready = find_memzone("mz_prc_ready");
+    if(s_mz_prc_ready) {// 先把前面的资源清理了
+        pid_t prev = *((pid_t*)(s_mz_prc_ready->addr));
+        if(prev > 0 && kill(prev, 0) == 0) {
+            rte_eal_cleanup();
+            // prev process is still alive
+            rte_exit(EXIT_FAILURE,
+                "[%s][%d] rte_timer_reset faild, prev process[%d] is still alive.\n", __FILE__, __LINE__, prev);
+
+        }
+    } else {
+        s_mz_prc_ready = make_memzone("mz_prc_ready", sizeof(pid_t));
+    }
+    *((pid_t*)(s_mz_prc_ready->addr)) = getpid();
+}
+
 int
 ff_dpdk_init(int argc, char **argv)
 {
@@ -1206,6 +1264,8 @@ ff_dpdk_init(int argc, char **argv)
     if (ret < 0) {
         rte_exit(EXIT_FAILURE, "Error with EAL initialization\n");
     }
+
+    check_if_lcore_in_use();
 
     numa_on = ff_global_cfg.dpdk.numa_on;
 
@@ -1273,6 +1333,10 @@ ff_dpdk_init(int argc, char **argv)
 void ff_dpdk_release(void)
 {
     release_clock();
+    if(s_mz_prc_ready) {
+        rte_memzone_free(s_mz_prc_ready);
+        s_mz_prc_ready = NULL;
+    }
 }
 
 static void
