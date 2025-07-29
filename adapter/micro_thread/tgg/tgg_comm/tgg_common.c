@@ -484,6 +484,29 @@ int tgg_get_valid_bwprc(int bwcount, uint64_t now)
 	return -1;
 }
 
+int tgg_get_bwprc_id(int bwcount)
+{
+	pid_t pid = getpid();
+	for (int i = 0; i < bwcount; i++) {
+		SpinLock lock(get_bwprc_lock());
+		pid_data* prc = (pid_data*)(g_bwprc_zone->addr) + i;
+		if (prc->heart_beat == 0 && pid == prc->pid) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+// 获取有效的进程序号
+int tgg_setup_bwprc_monitor(int prc_id, pid_t pid)
+{
+	SpinLock lock(get_bwprc_lock());
+	pid_data* prc = (pid_data*)(g_bwprc_zone->addr) + prc_id;
+	prc->pid = pid;
+	prc->heart_beat = 0;// 心跳由被监控进程填入，为0只代表启动者以启动进程
+	return 0;
+}
+
 // 更新心跳
 void tgg_update_bwprc(int prc_id, uint64_t now)
 {
@@ -535,22 +558,24 @@ void tgg_clean_bwprc(int prc_id)
 }
 
 // 获取有效的进程序号
-int tgg_setup_gw_monitor(int prc_id)
+int tgg_setup_gw_monitor(int prc_id, pid_t pid)
 {
-	uint64_t now = get_system_ms();
+	// uint64_t now = get_system_ms();
 	WriteLock lock(get_gw_monitor_lock());
 	pid_data* prc = (pid_data*)(g_gw_monitor_zone->addr) + prc_id;
+	prc->pid = pid;
+	prc->heart_beat = 0;
 	// 如果超过两倍心跳的时间都没有更新，就视为前一个进程已退出
-	if (prc->heart_beat == 0 || prc->heart_beat + 2*GW_MONITOR_HEART_BEAT < now) {
-		if(prc->pid > 0 && kill(prc->pid, 0) == 0) {
-			LOG_ERROR("prev process still alive.");
-			return -1;// 进程依然存在
-		}
-		// prc->heart_beat = now;
-		prc->pid = getpid();
-		return 0;
-	}
-	return -1;
+	// if (prc->heart_beat == 0 || prc->heart_beat + 2*GW_MONITOR_HEART_BEAT < now) {
+	// 	if(prc->pid > 0 && kill(prc->pid, 0) == 0) {
+	// 		LOG_ERROR("prev process still alive.");
+	// 		return -1;// 进程依然存在
+	// 	}
+	// 	// prc->heart_beat = now;
+	// 	prc->pid = getpid();
+	// 	return 0;
+	// }
+	return 0;
 }
 
 // 更新心跳
@@ -1080,15 +1105,16 @@ static int get_exec_path(char* exe_path, const char* exec_name)
     return -1;
 }
 
-void custom_fork(const char* exec_name, char** args)
+pid_t custom_fork(const char* exec_name, int prc_id, char** args)
 {
     char exe_path[PATH_MAX] = {0};
     if(get_exec_path(exe_path, exec_name) < 0) {
-        return;
+        return -1;
     }
     pid_t pid = fork();
     if (pid < 0) {
         printf("fork failed.\n");
+        return -1;
     }
 
     if (pid == 0) {  // 子进程  不能在子进程中调用日志函数，会导致日志线程死锁
@@ -1110,5 +1136,7 @@ void custom_fork(const char* exec_name, char** args)
         // LOG_ERROR("execv failed.");
         // free(args);
         exit(EXIT_FAILURE);
+    } else {
+    	return pid;
     }
 }

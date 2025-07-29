@@ -126,17 +126,17 @@ int tgg_exit_group(const char* gid, int cid)
 {
 	int64_t fdidcid = tgg_get_fdbycid(cid);
 	if (fdidcid <= 0) {
-		LOG_ERROR("connection invalid, cid[%d] not found.", cid);
+		LOG_INFO("connection invalid, cid[%d] not found.", cid);
 		return -1;
 	}
 	// 从 hash<gid, list<fdid>>移除cid对应的fd
 	if (tgg_del_fd4gid(gid, fdidcid) < 0){
-		LOG_ERROR("exit group failed, add gid not found, gid[%s] cid[%d].", gid, cid);
+		LOG_DEBUG("exit group failed, gid not found, gid[%s] cid[%d].", gid, cid);
 		return -1;
 	}
 	// 从 hash<cid, list<gid>> 中移除gid
 	if (tgg_del_gid_cidgid(cid, gid) < 0) {
-		LOG_ERROR("exit group failed, gid[%s] cid[%d].", gid, cid);
+		LOG_DEBUG("exit group failed, del gid[%s] cid[%d].", gid, cid);
 		return -1;
 	}
 	return 0;
