@@ -101,7 +101,7 @@ int main(int argc, char *argv[])
 	// mt_init_frame(argc, argv);
     LOG_INFO("-----------cliprc[pid:%d] start-----------", getpid());
 	tgg_process_init();
-	if (tgg_setup_gw_monitor(count_ones(TggConfigure::getInstance()->get_lcore_mask())) < 0) {// 上一个进程尚未结束
+	if (TggConfigure::getInstance()->get_auto_start() && tgg_check_gw_monitor_up(count_ones(TggConfigure::getInstance()->get_lcore_mask()))) {// 上一个进程尚未结束
 		LOG_INFO("-------gwcliprc exit, prev instance still running-------");
 		tgg_process_uninit();
     	AsyncLogger::getInstance().shutdown();

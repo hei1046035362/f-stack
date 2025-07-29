@@ -28,13 +28,14 @@ static void prc_dpdk_eal_init(int argc, char **argv);
 
 static int sig_pipe[2];
 
-static void start_gwbwprc()
+static pid_t start_gwbwprc(int prc_id)
 {
     char **args = (char**)malloc((2) * sizeof(char*));
     args[0] = const_cast<char*>("gwbwprc");
     args[1] = NULL; // 必须以 NULL 结尾
-    custom_fork("gwbwprc", args);
+    pid_t pid = custom_fork("gwbwprc", prc_id, args);
     free(args);
+    return pid;
 }
 
 
@@ -88,7 +89,13 @@ int deal_sigchild(void* arg) {
                 LOG_WARNING("sigchild from register[%d] pid:%d bwprc_pid:%d\n", i, dead_pid, bwprc_pid);// 信号处理函数中不能用日志，可能导致崩溃，日志类中有可重入函数
                 if (dead_pid == bwprc_pid) {
                     tgg_clean_bwprc(i);
-                    start_gwbwprc();
+                    pid_t pid = start_gwbwprc(i);
+                    if(pid < 0) {
+                        LOG_ERROR("fork for prc_id[%d] failed", i);
+                    }
+                    if(tgg_setup_bwprc_monitor(i, pid) < 0) {
+                        LOG_ERROR("setup monitor for gwbwprc prc_id[%d] failed, pid:%d", i, pid);
+                    }
                 }
             }
         }
@@ -125,29 +132,36 @@ void check_bwprc()
                         continue;
                     } else {
                         LOG_ERROR("kill process[%d] faild error:%d.", pid, errno);
-                        // TODO 上线后这段代码要放开，防止死锁导致无法启动新的进程
-                        if (kill(pid, 0) == 0) {
-                            if(s_pid_check_times[i] < 3) {// 重试三次，不方便sleep，如果三个周期都没有退出，就强制结束
-                                s_pid_check_times[i]++;
-                                continue;
-                            }
-                            LOG_WARNING("Process %d exists. Sending SIGKILL...", pid);
-                            // 2. 发送 SIGKILL 信号
-                            if (kill(pid, SIGKILL) == 0) {
-                                LOG_WARNING("SIGKILL sent successfully.");
-                            } else {
-                                LOG_ERROR("kill(SIGKILL) failed");
-                                continue;
-                            }
-                        }
                         // continue;
+                    }
+                }
+                // TODO 上线后这段代码要放开，防止死锁导致无法启动新的进程
+                if (kill(pid, 0) == 0) {
+                    if(s_pid_check_times[i] < 3) {// 重试三次，不方便sleep，如果三个周期都没有退出，就强制结束
+                        s_pid_check_times[i]++;
+                        continue;
+                    }
+                    LOG_WARNING("Process %d exists. Sending SIGKILL...", pid);
+                    // 2. 发送 SIGKILL 信号
+                    if (kill(pid, SIGKILL) == 0) {
+                        LOG_WARNING("SIGKILL sent successfully.");
+                    } else {
+                        LOG_ERROR("kill(SIGKILL) failed");
+                        continue;
                     }
                 }
             }
             s_pid_check_times[i] = 0;
             tgg_clean_bwprc(i);
             // 构造参数数组
-            start_gwbwprc();
+            pid = start_gwbwprc(i);
+            if(pid < 0) {
+                LOG_ERROR("fork for prc_id[%d] failed", i);
+            }
+            if(tgg_setup_bwprc_monitor(i, pid) < 0) {
+                LOG_ERROR("setup monitor for gwbwprc prc_id[%d] failed, pid:%d", i, pid);
+            }
+
         }
     }
 }
@@ -287,24 +301,25 @@ static void kill_all_child()
                 LOG_ERROR("Permission denied process[%d] core_id[%d].", pid, i);
             } else {
                 LOG_ERROR("kill core_id[%d] process[%d] faild error:%d.", i, pid, errno);
-                int wait_times = 500;// 最长等待5s，还没有退出的话，就发送kill -9
-                while (kill(pid, 0) == 0) {// 进程还存在
-                    if (wait_times > 0) {
-                        usleep(10000);
-                        wait_times--;
-                        continue;
-                    }
-                    LOG_WARNING("core_id[%d] Process %d exists. Sending SIGKILL...", i, pid);
-                    // 2. 发送 SIGKILL 信号
-                    if (kill(pid, SIGKILL) == 0) {
-                        LOG_WARNING("SIGKILL sent successfully.");
-                    } else {
-                        LOG_ERROR("kill(SIGKILL) failed");
-                    }
-                    break;
-                }
             }
         }
+        int wait_times = 500;// 最长等待5s，还没有退出的话，就发送kill -9
+        while (kill(pid, 0) == 0) {// 进程还存在
+            if (wait_times > 0) {
+                usleep(10000);
+                wait_times--;
+                continue;
+            }
+            LOG_WARNING("core_id[%d] Process %d exists. Sending SIGKILL...", i, pid);
+            // 2. 发送 SIGKILL 信号
+            if (kill(pid, SIGKILL) == 0) {
+                LOG_WARNING("SIGKILL sent successfully.");
+            } else {
+                LOG_ERROR("kill(SIGKILL) failed");
+            }
+            break;
+        }
+
         tgg_clean_bwprc(i);
     }
 
@@ -327,15 +342,14 @@ int main(int argc, char *argv[])
     prc_dpdk_eal_init(argc, argv);
 
     if(TggConfigure::getInstance()->get_auto_start()) {
-        pipe2(sig_pipe, O_NONBLOCK | O_CLOEXEC);
-        kill_all_child();// 启动时，先把之前还在运行的进程杀掉
-        if (tgg_setup_gw_monitor(count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 1) < 0) {// 上一个进程尚未结束
+        if (tgg_check_gw_monitor_up(count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 1)) {// 上一个进程尚未结束
             LOG_INFO("-------register exit, prev instance still running-------");
             tgg_process_uninit();
             AsyncLogger::getInstance().shutdown();
             return 0;
         }
-
+        pipe2(sig_pipe, O_NONBLOCK | O_CLOEXEC);
+        kill_all_child();// 启动时，先把之前还在运行的进程杀掉
         LOG_INFO("Try to start gwbwprc");
         check_bwprc();
         LOG_INFO("started gwbwprc.....");
