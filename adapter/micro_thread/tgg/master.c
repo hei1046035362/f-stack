@@ -423,7 +423,7 @@ static int* s_pid_check_times;
 void check_gw_monitor()
 {
     uint64_t now = get_system_ms();
-    if(s_last_check_time + GW_MONITOR_HEART_BEAT <= now) {
+    if(s_last_check_time + GW_MONITOR_HEART_BEAT_CHECK < now) {
         // 500ms检测一次
         s_last_check_time = now;
     } else {
@@ -489,18 +489,16 @@ void check_gw_monitor()
 }
 
 static uint64_t s_last_update_time = 0;
-static uint64_t s_check_times = 0;// 函数进入次数
+// static uint64_t s_check_times = 0;// 函数进入次数
 // 定时器回调函数
 void update_gwrcv_secondary_heart_beat() {
     uint64_t now = get_system_ms();
-    s_check_times++;
-    if(now - s_last_update_time >= GW_MONITOR_HEART_BEAT) {
-        LOG_DEBUG("check_times:%ld, time interval:%ld, current interval:%ld", s_check_times, now - s_last_update_time, get_system_ms()-now);
+    // s_check_times++;
+    if(now - s_last_update_time >= GW_MONITOR_HEART_BEAT_UPDATE) {
+        // LOG_DEBUG("check_times:%ld, time interval:%ld, current interval:%ld", s_check_times, now - s_last_update_time, get_system_ms()-now);
         s_last_update_time = now;
         tgg_update_gw_monitor(rte_lcore_id(), now);
-        // s_update_times++;
-        s_check_times = 0;
-
+        // s_check_times = 0;
     }
 }
 
