@@ -89,7 +89,7 @@ int tgg_setup_bwprc_monitor(int prc_id, pid_t pid);
 // 更新进程编号对应的时间戳
 void tgg_update_bwprc(int prc_id, uint64_t now);
 // 获取指定编号的进程的进程id
-int tgg_get_bwprc_pid(int prc_id);
+pid_t tgg_get_bwprc_pid(int prc_id);
 // 获取socket就绪状态
 int tgg_check_bwprc_up(int prc_id);
 // 检查指定进程是否超时了
@@ -101,7 +101,7 @@ int tgg_setup_gw_monitor(int prc_id, pid_t pid);
 // 更新进程编号对应的时间戳
 void tgg_update_gw_monitor(int prc_id, uint64_t now);
 // 获取指定编号的进程的进程id
-int tgg_get_gw_monitor_pid(int prc_id);
+pid_t tgg_get_gw_monitor_pid(int prc_id);
 // 获取指定编号的进程的进程id
 int tgg_check_gw_monitor_up(int prc_id);
 // 检查指定进程是否超时了

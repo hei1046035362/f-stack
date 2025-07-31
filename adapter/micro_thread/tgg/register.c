@@ -86,7 +86,7 @@ int deal_sigchild(void* arg) {
             for (int i = 0; i < s_bwcount && g_run; ++i)// 0号进程 自己不能监控自己，由service监控 
             {
                 pid_t bwprc_pid = tgg_get_bwprc_pid(i);
-                LOG_WARNING("sigchild from register[%d] pid:%d bwprc_pid:%d\n", i, dead_pid, bwprc_pid);// 信号处理函数中不能用日志，可能导致崩溃，日志类中有可重入函数
+                LOG_WARNING("sigchild from register[%d] pid:%d bwprc_pid:%d", i, dead_pid, bwprc_pid);// 信号处理函数中不能用日志，可能导致崩溃，日志类中有可重入函数
                 if (dead_pid == bwprc_pid) {
                     tgg_clean_bwprc(i);
                     pid_t pid = start_gwbwprc(i);
