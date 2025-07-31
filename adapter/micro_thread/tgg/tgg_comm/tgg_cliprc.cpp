@@ -74,7 +74,7 @@ static uint64_t s_last_update_time = 0;
 // 定时器回调函数
 void update_gwcliprc_heart_beat() {
     uint64_t now = get_system_ms();
-    if(now - s_last_update_time > GW_MONITOR_HEART_BEAT) {
+    if(now - s_last_update_time > GW_MONITOR_HEART_BEAT_UPDATE) {
         // printf("update heart beat for [PID:%d][prc_id:%d]\n", getpid(), g_prc_id);
         s_last_update_time = now;
         tgg_update_gw_monitor(count_ones(TggConfigure::getInstance()->get_lcore_mask()), now);
