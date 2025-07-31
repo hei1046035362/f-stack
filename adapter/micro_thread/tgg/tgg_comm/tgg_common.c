@@ -471,7 +471,7 @@ int tgg_get_valid_bwprc(int bwcount, uint64_t now)
 		SpinLock lock(get_bwprc_lock());
 		pid_data* prc = (pid_data*)(g_bwprc_zone->addr) + i;
 		// 如果超过两倍心跳的时间都没有更新，就视为前一个进程已退出
-		if (prc->heart_beat == 0 || prc->heart_beat + 2*BW_PRC_HEART_BEAT < now) {
+		if (prc->heart_beat == 0 || prc->heart_beat + BW_PRC_HEART_BEAT_CHECK*2 < now) {
 			if(prc->pid > 0 && kill(prc->pid, 0) == 0) {
 				continue;// 进程依然存在
 			}
@@ -543,7 +543,7 @@ int tgg_checkif_bwprc_timeout(int prc_id, uint64_t now)
 	SpinLock lock(get_bwprc_lock());
 	pid_data* prc = (pid_data*)(g_bwprc_zone->addr) + prc_id;
 	// 如果超过两倍心跳的时间都没有更新，就视为前一个进程已退出
-	if (now - prc->heart_beat > 2*BW_PRC_HEART_BEAT) {
+	if (now - prc->heart_beat > BW_PRC_HEART_BEAT_CHECK) {
 		return 1;// 超时
 	}
 	return 0;// 没超时
@@ -583,7 +583,7 @@ void tgg_update_gw_monitor(int prc_id, uint64_t now)
 {
 	WriteLock lock(get_gw_monitor_lock());
 	pid_data* prc = (pid_data*)g_gw_monitor_zone->addr + prc_id;
-	if(prc->heart_beat != 0 && now - prc->heart_beat > 2*GW_MONITOR_HEART_BEAT) {
+	if(prc->heart_beat != 0 && now - prc->heart_beat > GW_MONITOR_HEART_BEAT_CHECK) {// 调试代码，更新时间超过心跳时打印日志
 		LOG_WARNING("update heart_beat time delayed, PID:%d, prc_id:%d heart_beat:%ld now:%ld diff:%d, curr_diff:%ld",
 		 prc->pid, prc_id, prc->heart_beat, now, now - prc->heart_beat, get_system_ms() - now);
 	}
@@ -616,7 +616,7 @@ int tgg_checkif_gw_monitor_timeout(int prc_id, uint64_t now)
 	pid_data* prc = (pid_data*)(g_gw_monitor_zone->addr) + prc_id;
 	// 如果超过两倍心跳的时间都没有更新，就视为前一个进程已退出
 	// LOG_INFO("PID:%d, prc_id:%d heart_beat:%ld now:%ld", prc->pid, prc_id, prc->heart_beat, now);
-	if (now - prc->heart_beat > 2*GW_MONITOR_HEART_BEAT) {
+	if (now - prc->heart_beat > GW_MONITOR_HEART_BEAT_CHECK) {
 		LOG_WARNING("PID:%d, prc_id:%d heart_beat:%ld now:%ld interval:%d", prc->pid, prc_id, prc->heart_beat, now, now - prc->heart_beat);
 		return 1;// 超时
 	}

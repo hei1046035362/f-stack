@@ -5,8 +5,10 @@
 #include <map>
 #include "tgg_struct.h"
 
-#define BW_PRC_HEART_BEAT 5000  // bwprc进程心跳最大5s
-#define GW_MONITOR_HEART_BEAT 5000  // gw进程心跳最大5s
+#define BW_PRC_HEART_BEAT_CHECK 5000  // bwprc进程心跳检测间隔5s
+#define BW_PRC_HEART_BEAT_UPDATE 1000  // bwprc进程心跳更新间隔1s
+#define GW_MONITOR_HEART_BEAT_CHECK 5000  // gw进程心跳检测间隔5s
+#define GW_MONITOR_HEART_BEAT_UPDATE 1000 // gw进程心跳更新间隔1s
 
 void init_endians();
 
