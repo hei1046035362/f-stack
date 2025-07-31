@@ -34,7 +34,8 @@ extern int g_core_id;
 int g_run_status = 1;
 int g_monitor_count = 0;
 using namespace NS_MICRO_THREAD;
-static int sig_pipe[2];
+static int sig_pipe[2];// 信号处理放入主函数异步处理，信号函数中很多系统函数不能调用，会崩溃死锁
+static uint64_t s_left_fd = 0;// 剩余客户端连接数
 
 static pid_t start_gwrcv_sendary(int lcore_id)
 {
@@ -228,6 +229,7 @@ static void clean_client_data(int cli_fd, int idx)
 
 static void tgg_recv(void *arg)
 {
+    s_left_fd++;
     int ret, consume_ret = 0;
     int cli_fd = *((int *)arg);
     delete (int *)arg;
@@ -324,7 +326,8 @@ static void tgg_recv(void *arg)
     }
     close(cli_fd);// 这里不能使用mt_close,mt_close只设置标记，不会发送fin包，fd依然还存在
     clean_client_data(cli_fd, idx);
-    LOG_WARNING("client coreid[%d] fd[%d] idx[%d] closed.", g_core_id, cli_fd, idx);
+    s_left_fd--;
+    LOG_WARNING("client coreid[%d] fd[%d] idx[%d] closed, left_fd:%ld.", g_core_id, cli_fd, idx, s_left_fd);
 }
 
 static void tgg_do_send(tgg_write_data* wdata)
@@ -401,7 +404,7 @@ static void tgg_send(void *arg)
         tgg_write_data* wdata = NULL;
         if (tgg_dequeue_write(g_core_id, &wdata) < 0) {
             // 队列空
-            mt_sleep(5);
+            mt_sleep(1);
             continue;
         }
         if (!wdata) {
@@ -486,12 +489,18 @@ void check_gw_monitor()
 }
 
 static uint64_t s_last_update_time = 0;
+static uint64_t s_check_times = 0;// 函数进入次数
 // 定时器回调函数
 void update_gwrcv_secondary_heart_beat() {
     uint64_t now = get_system_ms();
+    s_check_times++;
     if(now - s_last_update_time >= GW_MONITOR_HEART_BEAT) {
+        LOG_DEBUG("check_times:%ld, time interval:%ld, current interval:%ld", s_check_times, now - s_last_update_time, get_system_ms()-now);
         s_last_update_time = now;
         tgg_update_gw_monitor(rte_lcore_id(), now);
+        // s_update_times++;
+        s_check_times = 0;
+
     }
 }
 
@@ -741,6 +750,7 @@ int main(int argc, char *argv[])
     print_mem_statistics();
     mt_uninit_frame();
     rte_eal_cleanup();
+    LOG_WARNING("gwrcv left fd count:%ld", s_left_fd);
     AsyncLogger::getInstance().shutdown();
     return 0;
 }

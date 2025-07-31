@@ -519,7 +519,7 @@ void tgg_update_bwprc(int prc_id, uint64_t now)
 }
 
 // 获取指定下标的进程id
-int tgg_get_bwprc_pid(int prc_id)
+pid_t tgg_get_bwprc_pid(int prc_id)
 {
 	SpinLock lock(get_bwprc_lock());
 	pid_data* prc = (pid_data*)g_bwprc_zone->addr + prc_id;
@@ -584,14 +584,14 @@ void tgg_update_gw_monitor(int prc_id, uint64_t now)
 	WriteLock lock(get_gw_monitor_lock());
 	pid_data* prc = (pid_data*)g_gw_monitor_zone->addr + prc_id;
 	if(prc->heart_beat != 0 && now - prc->heart_beat > 2*GW_MONITOR_HEART_BEAT) {
-		LOG_WARNING("update heart_beat time delayed, PID:%d, prc_id:%d heart_beat:%ld now:%ld diff:%d",
-		 prc->pid, prc_id, prc->heart_beat, now, now - prc->heart_beat);
+		LOG_WARNING("update heart_beat time delayed, PID:%d, prc_id:%d heart_beat:%ld now:%ld diff:%d, curr_diff:%ld",
+		 prc->pid, prc_id, prc->heart_beat, now, now - prc->heart_beat, get_system_ms() - now);
 	}
 	prc->heart_beat = now;
 }
 
 // 获取指定下标的进程id
-int tgg_get_gw_monitor_pid(int prc_id)
+pid_t tgg_get_gw_monitor_pid(int prc_id)
 {
 	ReadLock lock(get_gw_monitor_lock());
 	pid_data* prc = (pid_data*)g_gw_monitor_zone->addr + prc_id;
@@ -1046,13 +1046,18 @@ int high_freq_malloc(struct rte_mempool* pool, void** data, int size)
 		LOG_INFO("invalid size[%d] to malloc.", size);
 		return -1;
 	}
-	s_hi_freq_malloc[pool->name]++;
+	int ret = -1;
 	if(size > COMMON_PACKET_LEN) {
 		LOG_INFO("recieved an large packet, size:%d", size);
-		return rte_mempool_get(g_mempool_large_data, data);
+		ret = rte_mempool_get(g_mempool_large_data, data);
+		if(!ret)
+			s_hi_freq_malloc[g_mempool_large_data->name]++;
 	} else {
-		return rte_mempool_get(pool, data);
+		ret = rte_mempool_get(pool, data);
+		if(!ret)
+			s_hi_freq_malloc[pool->name]++;
 	}
+	return ret;
 }
 
 static std::map<std::string, int> s_hi_freq_free;
@@ -1062,12 +1067,14 @@ void high_freq_free(struct rte_mempool* pool, void* data, int size)
 		LOG_INFO("invalid size[%d] to free.", size);
 		return ;
 	}
-	s_hi_freq_free[pool->name]++;
+	// s_hi_freq_free[pool->name]++;
 	if(size > COMMON_PACKET_LEN) {
 		LOG_INFO("free an large packet, size:%d", size);
 		rte_mempool_put(g_mempool_large_data, data);
+		s_hi_freq_free[g_mempool_large_data->name]++;
 	} else {
 		rte_mempool_put(pool, data);
+		s_hi_freq_free[pool->name]++;
 	}
 }
 
