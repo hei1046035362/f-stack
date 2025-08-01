@@ -496,6 +496,9 @@ void check_gw_monitor()
             if(tgg_setup_gw_monitor(i, pid) < 0) {
                 LOG_ERROR("setup monitor for lcore[%d] failed, pid:%d", i, pid);
             }
+        } else {
+            if(s_pid_check_times[i])
+                s_pid_check_times[i] = 0;
         }
     }
 }
