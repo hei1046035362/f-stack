@@ -13,94 +13,6 @@
 
 static const size_t WS_MAX_RECV_FRAME_SZ = 10485760;
 
-// URL解码函数（参考网页[9][10]）
-std::string url_decode(const std::string &src) {
-    std::string decoded;
-    for (size_t i = 0; i < src.size(); ++i) {
-        if (src[i] == '%' && i + 2 < src.size()) {
-            int hex_val;
-            std::istringstream hex_stream(src.substr(i+1, 2));
-            if (hex_stream >> std::hex >> hex_val) {
-                decoded += static_cast<char>(hex_val);
-                i += 2;
-            }
-        } else if (src[i] == '+') {
-            decoded += ' ';
-        } else {
-            decoded += src[i];
-        }
-    }
-    return decoded;
-}
-
-// 解析HTTP请求（参考网页[7][11]的握手处理）
-void parse_http_request(const std::string &raw_request, HttpRequest& req) {
-    std::istringstream stream(raw_request);
-    std::string line;
-
-    // 解析请求行
-    if (std::getline(stream, line)) {
-        std::istringstream line_stream(line);
-        line_stream >> req.method >> req.uri >> req.protocol;
-        req.protocol = req.protocol.substr(5); // 去除"HTTP/"
-    }
-
-    // 解析请求头
-    while (std::getline(stream, line) && line != "\r") {
-        size_t colon_pos = line.find(':');
-        if (colon_pos != std::string::npos) {
-            std::string key = line.substr(0, colon_pos);
-            std::transform(key.begin(), key.end(), key.begin(), ::tolower);
-            std::string value = line.substr(colon_pos + 2); // 跳过": "
-            value.erase(std::remove(value.begin(), value.end(), '\r'), value.end());
-            req.headers[key] = value;
-        }
-    }
-
-    // 解析QUERY_STRING（参考网页[9]的URL参数处理）
-    size_t query_start = req.uri.find('?');
-    if (query_start != std::string::npos) {
-        std::string query_str = req.uri.substr(query_start + 1);
-        std::istringstream query_stream(query_str);
-        std::string pair;
-        while (std::getline(query_stream, pair, '&')) {
-            size_t eq_pos = pair.find('=');
-            std::string key = (eq_pos != std::string::npos) ? 
-                url_decode(pair.substr(0, eq_pos)) : url_decode(pair);
-            std::string value = (eq_pos != std::string::npos) ? 
-                url_decode(pair.substr(eq_pos + 1)) : "";
-            req.query[key] = value;
-        }
-    }
-
-    // 新增：解析 Cookies（需在请求头解析完成后添加）
-    if (req.headers.find("cookie") != req.headers.end()) {
-        std::string cookieStr = req.headers["cookie"];
-        std::istringstream cookieStream(cookieStr);
-        std::string cookiePair;
-
-        while (std::getline(cookieStream, cookiePair, ';')) {
-            // 去除首尾空格（网页4提到的清理逻辑）
-            cookiePair.erase(cookiePair.begin(), 
-                std::find_if(cookiePair.begin(), cookiePair.end(), 
-                    [](int ch) { return !std::isspace(ch); }));
-            cookiePair.erase(std::find_if(cookiePair.rbegin(), cookiePair.rend(),
-                [](int ch) { return !std::isspace(ch); }).base(), cookiePair.end());
-
-            // 分割键值对（类似查询参数处理）
-            size_t eqPos = cookiePair.find('=');
-            if (eqPos != std::string::npos) {
-                std::string key = url_decode(cookiePair.substr(0, eqPos));
-                std::string value = url_decode(
-                    cookiePair.substr(eqPos + 1)
-                );
-                req.cookies[key] = value;  // 需在 HttpRequest 结构体中定义 cookies 成员
-            }
-        }
-    }
-}
-
-
 bool is_valid_websocket_handshake(const HttpRequest &req) {
     // 检查必需的头字段
     if (req.headers.find("upgrade") == req.headers.end() ||
@@ -141,7 +53,7 @@ int Websocket::_HandleHandshake(const std::string& request, HttpRequest& req, st
         response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid request method or path";
         return -1;
     }
-    parse_http_request(request, req);
+    parse_http_request(request, req, false);
 
     if (!is_valid_websocket_handshake(req)) {
         LOG_ERROR("Invalid WebSocket handshake:%s", request.c_str());
@@ -458,13 +370,14 @@ int Websocket::ReadData(void* data, int len)
                 }
             }
             HttpRequest req;
+            std::string request((char*)input, in_len);
             std::string response;
-            if (_HandleHandshake(std::string((char*)input, in_len), req, response) < 0) {
+            if (_HandleHandshake(request, req, response) < 0) {
                 OnSend(response, FD_WRITE);
                 LOG_ERROR("handle shake check failed.");
                 return -1;
             }
-            OnHandShake(response.c_str(), req);
+            OnHandShake(request, response, req);
             cur_pos += in_len;
             continue;
         }

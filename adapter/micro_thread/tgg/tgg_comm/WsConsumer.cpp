@@ -11,7 +11,6 @@
 #include "comm/common.hpp"
 #include "comm/log.hpp"
 #include "mt_api.h"
-#include <algorithm>
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -188,110 +187,6 @@ static bool tgg_request_valid_check(const HttpRequest &req, std::string& propert
     return true;
 }
 
-#include "rapidjson/document.h"
-#include "rapidjson/stringbuffer.h"
-#include "rapidjson/writer.h"
-
-// 封装发送给bw的握手请求数据
-static std::string build_server_data(const HttpRequest &req, const std::string& ip_str, 
-                             ushort port) {
-    rapidjson::Document data;
-    // 确保data是对象类型
-    data.SetObject();
-    rapidjson::Document::AllocatorType& allocator = data.GetAllocator();
-
-    // 1. 构建server_vars对象
-    rapidjson::Value server_vars(rapidjson::kObjectType);
-    // 添加基础字段（深拷贝字符串）
-    server_vars.AddMember("REQUEST_METHOD", 
-                         rapidjson::Value(req.method.c_str(), allocator).Move(), 
-                         allocator);
-    server_vars.AddMember("REQUEST_URI", 
-                         rapidjson::Value(req.uri.c_str(), allocator).Move(), 
-                         allocator);
-    server_vars.AddMember("SERVER_PROTOCOL", 
-                         rapidjson::Value(("HTTP/" + req.protocol).c_str(), allocator).Move(), 
-                         allocator);
-
-    // 条件添加Host和Content-Type
-    const auto& host_iter = req.headers.find("Host");
-    server_vars.AddMember("SERVER_NAME", 
-                         host_iter != req.headers.end() ? 
-                         rapidjson::Value(host_iter->second.c_str(), allocator).Move() : 
-                         rapidjson::Value("unknown", allocator).Move(), 
-                         allocator);
-
-    const auto& content_iter = req.headers.find("Content-Type");
-    server_vars.AddMember("CONTENT_TYPE", 
-                         content_iter != req.headers.end() ? 
-                         rapidjson::Value(content_iter->second.c_str(), allocator).Move() : 
-                         rapidjson::Value("", allocator).Move(), 
-                         allocator);
-
-    // 处理QUERY_STRING
-    size_t query_pos = req.uri.find('?');
-    if (query_pos != std::string::npos) {
-        std::string query_str = req.uri.substr(query_pos + 1);
-        server_vars.AddMember("QUERY_STRING", 
-                            rapidjson::Value(query_str.c_str(), allocator).Move(), 
-                            allocator);
-    } else {
-        server_vars.AddMember("QUERY_STRING", "", allocator);
-    }
-
-    // 添加网络信息
-    server_vars.AddMember("REMOTE_ADDR", 
-                         rapidjson::Value(ip_str.c_str(), allocator).Move(), 
-                         allocator);
-    server_vars.AddMember("REMOTE_PORT", port, allocator);
-    server_vars.AddMember("SERVER_PORT", 
-                         TggConfigure::getInstance()->get_gateway_port(), 
-                         allocator);
-
-    // 2. 处理HTTP头（转换格式：Header-Name -> HTTP_HEADER_NAME）
-    for (const auto& [key, value] : req.headers) {
-        std::string upperKey = key;
-        std::transform(upperKey.begin(), upperKey.end(), upperKey.begin(), ::toupper);
-        std::replace(upperKey.begin(), upperKey.end(), '-', '_');
-        
-        std::string header_key = "HTTP_" + upperKey;
-        server_vars.AddMember(
-            rapidjson::Value(header_key.c_str(), allocator).Move(),
-            rapidjson::Value(value.c_str(), allocator).Move(),
-            allocator
-        );
-    }
-
-    // 3. 构建GET参数对象
-    rapidjson::Value query_params(rapidjson::kObjectType);
-    for (const auto& [key, value] : req.query) {
-        query_params.AddMember(
-            rapidjson::Value(key.c_str(), allocator).Move(),
-            rapidjson::Value(value.c_str(), allocator).Move(),
-            allocator
-        );
-    }
-
-    // 4. 构建Cookies对象
-    rapidjson::Value cookies(rapidjson::kObjectType);
-    for (const auto& [key, value] : req.cookies) {
-        cookies.AddMember(
-            rapidjson::Value(key.c_str(), allocator).Move(),
-            rapidjson::Value(value.c_str(), allocator).Move(),
-            allocator
-        );
-    }
-
-    // 5. 组装最终数据结构
-    data.AddMember("get", query_params, allocator);
-    data.AddMember("server", server_vars, allocator);
-    data.AddMember("cookie", cookies, allocator);
-
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    data.Accept(writer);
-    return buffer.GetString();
-}
 bool WsConsumer::_CheckToken(const std::string& token)
 {
     rapidjson::Document jtoken;
@@ -314,7 +209,7 @@ bool WsConsumer::_CheckToken(const std::string& token)
 }
 
 // 握手
-void WsConsumer::OnHandShake(const std::string& response, struct HttpRequest& req)
+void WsConsumer::OnHandShake(const std::string& request, const std::string& response, struct HttpRequest& req)
 {
     std::string properties;
     if(!tgg_request_valid_check(req, properties)) {
@@ -328,18 +223,18 @@ void WsConsumer::OnHandShake(const std::string& response, struct HttpRequest& re
     //     return;
     // }
     // nlohmann::json data;
-    std::string ip_str = tgg_get_cli_ip_str(this->core_id, this->fd);
-    ushort port = tgg_get_cli_port(this->core_id, this->fd);
-    std::string result = build_server_data(req, ip_str, port);
+    // std::string ip_str = tgg_get_cli_ip_str(this->core_id, this->fd);
+    // ushort port = tgg_get_cli_port(this->core_id, this->fd);
+    // std::string result = build_server_data(req, ip_str, port);
     tgg_set_cli_authorized(this->core_id, this->fd, AUTH_TYPE_HANDLESHAKED);
     OnSend(response, FD_WRITE);// 响应客户端的http请求
     // 通知服务端websocket 握手完成
-    LOG_INFO("OnHandShake:%s.", result.c_str());
+    LOG_INFO("OnHandShake:%s.", request.c_str());
     // if(_Send2Server(result, FD_HANDLESHAKE) == NO_BW_AVALIABLE) {
     //     SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     // }
     // 通知服务端连接已建立  这里的连接是业务侧连接校验完成，  原本是要发完205之后要再发送一个1，现在只发1了
-    if (_Send2Server(result, FD_NEW) == NO_BW_AVALIABLE) {
+    if (_Send2Server(request, FD_NEW) == NO_BW_AVALIABLE) {
         SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     }
 }
