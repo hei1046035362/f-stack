@@ -522,16 +522,17 @@ static void gw_monitor(void* argv)
                 }
                 cur_count = tgg_count_idx(g_core_id);
             }
+            // 子进程信号处理
+            while(g_run_status && check_times-- > 0) {
+                deal_sigchild();
+                mt_sleep(50);
+            }
+            check_times = 10;
+
         } else {
             update_gwrcv_secondary_heart_beat();
+            mt_sleep(200);
         }
-        while(g_run_status && check_times-- > 0) {
-            if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
-                deal_sigchild();
-            }
-            mt_sleep(50);            
-        }
-        check_times = 10;
     }
 }
 
