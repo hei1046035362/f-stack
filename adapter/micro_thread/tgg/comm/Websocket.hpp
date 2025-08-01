@@ -3,16 +3,7 @@
 
 #include <string>
 #include <vector>
-#include <map>
-struct HttpRequest {
-    std::string method;          // REQUEST_METHOD (e.g. "GET")
-    std::string uri;             // REQUEST_URI (e.g. "/?locale=zh-CN...")
-    std::string protocol;        // SERVER_PROTOCOL (e.g. "HTTP/1.1")
-    std::map<std::string, std::string> headers; // 所有请求头
-    std::map<std::string, std::string> query;   // QUERY_STRING 解析后的键值对
-    std::map<std::string, std::string> cookies;
-};
-
+#include "common.hpp"
 enum WebSocketFrameType {
     ERROR_FRAME = 0xFF,
     INCOMPLETE_DATA = 0xFE,
@@ -64,7 +55,7 @@ protected:
 public:
     // 所有发送数据都在子类执行，这里只做websocket相关的公共操作
     virtual void OnConnect() = 0;
-    virtual void OnHandShake(const std::string& response, struct HttpRequest& req) = 0;
+    virtual void OnHandShake(const std::string& request, const std::string& response, struct HttpRequest& req) = 0;
     virtual void OnMessage(const std::string& msg) = 0;
     virtual void OnClose() = 0;// 子类继承后要执行clean_buffer清理缓存
     virtual void OnPing(const std::string& response) {};
