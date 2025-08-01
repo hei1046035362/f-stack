@@ -35,7 +35,7 @@ int g_run_status = 1;
 int g_monitor_count = 0;
 using namespace NS_MICRO_THREAD;
 static int sig_pipe[2];// 信号处理放入主函数异步处理，信号函数中很多系统函数不能调用，会崩溃死锁
-static uint64_t s_left_fd = 0;// 剩余客户端连接数
+static int64_t s_left_fd = 0;// 剩余客户端连接数
 
 static pid_t start_gwrcv_sendary(int lcore_id)
 {
@@ -437,6 +437,13 @@ void check_gw_monitor()
             pid_t pid = tgg_get_gw_monitor_pid(i);
             if(pid > 0) {
                 LOG_INFO("core_id[%d] pid[%d] heartbeat timeout, try to kill.", i, pid);
+                if(i < g_monitor_count-2) { // gwrcv 强制结束会导致rte_timer_reset死锁,
+                                            //      但是通常死锁时并不会在mt_sleep中，所以这里任然待观察
+                    if(s_pid_check_times[i] < 3) {// gwrcv由于自身框架限制，更新并不及时，重试三次，不方便sleep，如果三个周期都没有退出，再结束
+                        s_pid_check_times[i]++;
+                        continue;
+                    }
+                }
                 if (kill(pid, SIGINT) == -1) {// 不能kill -9，可能会导致其他进程死锁
                     if (errno == ESRCH) {
                         LOG_ERROR("core_id[%d] process[%d] not exist anymore.", i, pid);
@@ -448,10 +455,15 @@ void check_gw_monitor()
                         // continue;
                     }
                 }
+                if(i < g_monitor_count-2) {// gwrcv不管进程在不在我们都不会重启，因此检测次数要重置
+                    LOG_ERROR("check_times[%d] beyond max check_times[3]", s_pid_check_times[i]);
+                    s_pid_check_times[i] = 0;
+                }
                 // TODO 上线后这段代码要放开，防止死锁导致无法启动新的进程
                 if (kill(pid, 0) == 0) {
                     if(i < g_monitor_count-2) { // gwrcv 强制结束会导致rte_timer_reset死锁,
                                                 //      但是通常死锁时并不会在mt_sleep中，所以这里任然待观察
+                        LOG_ERROR("kill gwrcv[%d] failed, pid[%d] still exist.", i, pid);
                         continue;
                     }
                     if(s_pid_check_times[i] < 3) {// 重试三次，不方便sleep，如果三个周期都没有退出，就强制结束
@@ -489,16 +501,21 @@ void check_gw_monitor()
 }
 
 static uint64_t s_last_update_time = 0;
-// static uint64_t s_check_times = 0;// 函数进入次数
+static uint64_t s_check_times = 0;// 函数进入次数
 // 定时器回调函数
 void update_gwrcv_secondary_heart_beat() {
     uint64_t now = get_system_ms();
-    // s_check_times++;
+    s_check_times++;
     if(now - s_last_update_time >= GW_MONITOR_HEART_BEAT_UPDATE) {
-        // LOG_DEBUG("check_times:%ld, time interval:%ld, current interval:%ld", s_check_times, now - s_last_update_time, get_system_ms()-now);
-        s_last_update_time = now;
+        if(now - s_last_update_time > GW_MONITOR_HEART_BEAT_CHECK) {
+            LOG_WARNING("check over time before, check_times:%ld, time interval:%ld, current interval:%ld", s_check_times, now - s_last_update_time, get_system_ms()-now);
+        }
         tgg_update_gw_monitor(rte_lcore_id(), now);
-        // s_check_times = 0;
+        if(now - s_last_update_time > GW_MONITOR_HEART_BEAT_CHECK) {
+            LOG_WARNING("check over time after, check_times:%ld, time interval:%ld, current interval:%ld", s_check_times, now - s_last_update_time, get_system_ms()-now);
+        }
+        s_last_update_time = now;
+        s_check_times = 0;
     }
 }
 
