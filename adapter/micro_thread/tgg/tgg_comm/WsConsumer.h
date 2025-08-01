@@ -22,7 +22,7 @@ protected:
     virtual void OnConnect();
 
     // 握手
-    virtual void OnHandShake(const std::string& response, struct HttpRequest& req);
+    virtual void OnHandShake(const std::string& request, const std::string& response, struct HttpRequest& req);
 
     virtual void OnPing(const std::string& response);
 
