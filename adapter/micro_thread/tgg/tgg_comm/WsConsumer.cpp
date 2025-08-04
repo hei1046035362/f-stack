@@ -166,7 +166,7 @@ void WsConsumer::OnConnect()
 }
 
 // 检查请求是否符合tgg的要求，不符合直接断开连接
-static bool tgg_request_valid_check(const HttpRequest &req, std::string& token, std::string& properties)
+static bool tgg_request_valid_check(const HttpRequest &req, std::string& properties)
 {
     // 检查必需的头字段
     std::map<std::string, std::string>::const_iterator ittoken = req.query.find("token");
@@ -177,13 +177,13 @@ static bool tgg_request_valid_check(const HttpRequest &req, std::string& token, 
         return false;
     }
     // token 是否能解析出来
-    Encrypt encryptor = GetEncryptor();
-    token = encryptor.Aes128Decrypt(ittoken->second);
-    if (token.empty()) {
-        LOG_ERROR("token[%s] decrypted error.", ittoken->second.c_str());
-        return false;
-    }
-    LOG_INFO("OnHandShake ok, token:%s.\n", token.c_str());
+    // Encrypt encryptor = GetEncryptor();
+    // token = encryptor.Aes128Decrypt(ittoken->second);
+    // if (token.empty()) {
+    //     LOG_ERROR("token[%s] decrypted error.", ittoken->second.c_str());
+    //     return false;
+    // }
+    LOG_INFO("OnHandShake ok.\n");
     properties = itproperties->second;
     return true;
 }
@@ -316,17 +316,17 @@ bool WsConsumer::_CheckToken(const std::string& token)
 // 握手
 void WsConsumer::OnHandShake(const std::string& response, struct HttpRequest& req)
 {
-    std::string token, properties;
-    if(!tgg_request_valid_check(req, token, properties)) {
+    std::string properties;
+    if(!tgg_request_valid_check(req, properties)) {
         LOG_ERROR("tgg ws request[%s] check failed.", req.uri.c_str());
         _CleanAndClose();
         return;
     }
-    if(!_CheckToken(token)) {
-        LOG_ERROR("check token[%s] failed.", token.c_str());
-        _CleanAndClose();
-        return;
-    }
+    // if(!_CheckToken(token)) {
+    //     LOG_ERROR("check token[%s] failed.", token.c_str());
+    //     _CleanAndClose();
+    //     return;
+    // }
     // nlohmann::json data;
     std::string ip_str = tgg_get_cli_ip_str(this->core_id, this->fd);
     ushort port = tgg_get_cli_port(this->core_id, this->fd);
