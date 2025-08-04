@@ -19,7 +19,7 @@ PREFIX=/usr/local
 PREFIX_LIB=${PREFIX}/lib
 PREFIX_INCLUDE=/usr/local/include
 PREFIX_BIN=/usr/local/bin
-F-STACK_CONF=/etc/f-stack.conf
+F-STACK_CONF=/usr/local/tgg_gateway/conf
 F-STACK_VERSION=1.24
 TGT_OS=$(shell uname)
 ifeq ($(TGT_OS),FreeBSD)
@@ -735,7 +735,8 @@ install:
 	cp -f ff_errno.h ${PREFIX_INCLUDE}/ff_errno.h
 	cp -f ff_epoll.h ${PREFIX_INCLUDE}/ff_epoll.h
 	cp -f ${TOPDIR}/start.sh ${PREFIX_BIN}/ff_start
-	test -f '${F-STACK_CONF}' || cp -f ${TOPDIR}/config.ini ${F-STACK_CONF}
+	mkdir -p $(F-STACK_CONF)
+	test -f '${F-STACK_CONF}/config.ini' || cp -f ${TOPDIR}/config.ini ${F-STACK_CONF}/config.ini
 
 uninstall:
 	rm -rf ${PREFIX_LIB}/libfstack.a.${F-STACK_VERSION}
@@ -746,5 +747,5 @@ uninstall:
 	rm -rf ${PREFIX_INCLUDE}/ff_errno.h
 	rm -rf ${PREFIX_INCLUDE}/ff_epoll.h
 	rm -rf ${PREFIX_BIN}/ff_start
-	rm -rf ${F-STACK_CONF}
+	rm -rf ${F-STACK_CONF}/config.ini
 
