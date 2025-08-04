@@ -38,7 +38,7 @@
 #include "ff_ini_parser.h"
 #include "ff_log.h"
 
-#define DEFAULT_CONFIG_FILE   "/etc/tgg_gw/config.ini"
+#define DEFAULT_CONFIG_FILE   "/usr/local/tgg_gateway/conf/config.ini"
 
 #define BITS_PER_HEX 4
 
