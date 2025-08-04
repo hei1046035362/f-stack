@@ -346,7 +346,7 @@ void WsConsumer::OnHandShake(const std::string& response, struct HttpRequest& re
 
 void WsConsumer::OnPing(const std::string& response)
 {
-    std::string result = std::move(EncodeWebsocketMessage(PONG_FRAME, response));
+    std::string result = EncodeWebsocketMessage(PONG_FRAME, response);
     OnSend(result, FD_WRITE);
 }
 
