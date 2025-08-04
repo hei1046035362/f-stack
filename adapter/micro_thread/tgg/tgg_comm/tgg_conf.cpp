@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <stdexcept>
 
 #ifndef MAX_LCORE_COUNT
 #define MAX_LCORE_COUNT 32
@@ -372,8 +373,8 @@ int tgg_init_config(int& argc, char* argv[])
     int index_argv_g = -1;
     int index_argv_d = -1;
     bool has_value_g = false;
-    std::string fstack_filename = "/etc/tgg_gw/config.ini";
-    std::string tgg_filename = "/etc/tgg_gw/tgg_conf.ini";
+    std::string fstack_filename = "/usr/local/tgg_gateway/conf/config.ini";
+    std::string tgg_filename = "/usr/local/tgg_gateway/conf/tgg_conf.ini";
     optind = 1;
     while((c = getopt_long(argc, argv, tgg_short_options, tgg_long_options, &index)) != -1) {
         switch (c) {

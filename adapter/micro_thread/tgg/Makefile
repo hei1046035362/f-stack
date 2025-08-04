@@ -8,17 +8,19 @@ $(error "no installation of DPDK found, maybe you shuld export environment varia
 endif
 
 PKGCONF ?= pkg-config
-
+TGG_CONF_PATH = /usr/local/tgg_gateway/conf
+TGG_CONF = $(TGG_CONF_PATH)/tgg_conf.ini
 DEBUG= -g
 BINARY = gwrcv gwcliprc gwbwprc gwredis gwregister
 FF_LIBS+= $(shell $(PKGCONF) --static --libs libdpdk)
 FF_LIBS+= -L${FF_PATH}/lib -Wl,--whole-archive,-lfstack,--no-whole-archive \
 		-L${FF_PATH}/app/libco/lib
-FF_LIBS+= -Wl,--no-whole-archive -lrt -lm -ldl -lcrypto -lpthread -lnuma -lhiredis -lstdc++
+FF_LIBS+= -Wl,--no-whole-archive -lrt -lm -ldl -lcrypto -lpthread -lnuma -lstdc++ -z noexecstack
+INSTALL_PATH = /usr/local/tgg_gateway/bin
 
 # Comment the following line if you are not using the gnu c compiler
 #C_ARGS = -Wall -g -fPIC -D_DEBUG
-C_ARGS = -Wall -g -fPIC -O0 -DMT_REAL_TIME -Wno-register
+C_ARGS = -Wall -g -fPIC -O0 -DMT_REAL_TIME -Wno-register -Wa,--noexecstack
 #.SUFFIXES: .o .cpp
 
 ifeq ($(ARCH),32)
@@ -114,3 +116,12 @@ gwregister: $(REGISTER_OBJ)
 	@$(CC) -O -gdwarf-2 -o $@ $^  -ldl -lz -lcolib -lssl $(FF_LIBS) $(CRESET)
 
 all: gwrcv gwcliprc gwbwprc gwregister
+
+install:
+	mkdir -p $(INSTALL_PATH)
+	cp -f gwrcv $(INSTALL_PATH)/gwrcv
+	cp -f gwcliprc $(INSTALL_PATH)/gwcliprc
+	cp -f gwbwprc $(INSTALL_PATH)/gwbwprc
+	cp -f gwregister $(INSTALL_PATH)/gwregister
+	mkdir -p $(TGG_CONF_PATH)
+	test -f '${TGG_CONF}' || cp -f ${FF_PATH}/adapter/micro_thread/tgg/config/tgg_conf.ini ${TGG_CONF}
