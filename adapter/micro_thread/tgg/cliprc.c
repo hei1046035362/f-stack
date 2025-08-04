@@ -61,7 +61,7 @@ void tgg_process_uninit()
 static void prc_dpdk_eal_init(int argc, char **argv)
 {
 	char c_flag[24] = {0};
-	sprintf(c_flag, "-c%d", TggConfigure::getInstance()->get_ccore_mask());
+	sprintf(c_flag, "-c%x", TggConfigure::getInstance()->get_ccore_mask());
 	char n_flag[] = "-n4";
 	char mp_flag[] = "--proc-type=secondary";
 	char log_flag[] = "--log-level=6";
