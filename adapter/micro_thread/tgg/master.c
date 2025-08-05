@@ -513,7 +513,7 @@ void update_gwrcv_secondary_heart_beat() {
         if(now - s_last_update_time > GW_MONITOR_HEART_BEAT_CHECK) {
             LOG_WARNING("check over time before, check_times:%ld, time interval:%ld, current interval:%ld", s_check_times, now - s_last_update_time, get_system_ms()-now);
         }
-        tgg_update_gw_monitor(rte_lcore_id(), now);
+        tgg_update_gw_monitor(g_core_id, now);
         if(now - s_last_update_time > GW_MONITOR_HEART_BEAT_CHECK) {
             LOG_WARNING("check over time after, check_times:%ld, time interval:%ld, current interval:%ld", s_check_times, now - s_last_update_time, get_system_ms()-now);
         }
@@ -715,7 +715,7 @@ int main(int argc, char *argv[])
         LOG_ERROR("mt frame init failed.");
         return -1;
     }
-    g_core_id = rte_lcore_id();
+    g_core_id = rte_lcore_to_cpu_id(rte_lcore_id());
     if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
         pipe2(sig_pipe, O_NONBLOCK | O_CLOEXEC);
         LOG_INFO("-------master[pid:%d] core[%d] start-------", getpid(), g_core_id);
