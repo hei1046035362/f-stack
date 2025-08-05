@@ -117,8 +117,11 @@ static void deal_sigchild() {
             pid_buf[nread] = '\0';
             pid_t dead_pid = atoi(pid_buf);
             // 监控到子进程退出，立刻再启动一个
-            for (int i = 1; i < g_monitor_count; ++i)// 0号进程 自己不能监控自己，由service监控 
+            for (int i = 0; i < g_monitor_count; ++i)// 0号进程 自己不能监控自己，由service监控 
             {
+                if(i == g_core_id) {// primary进程 自己不能监控自己，由service监控 
+                    continue;
+                }
                 pid_t monitor_pid = tgg_get_gw_monitor_pid(i);
                 // printf("sigchild from pid:%d monitor_pid:%d\n", pid, monitor_pid);
                 if (dead_pid == monitor_pid) {
@@ -431,8 +434,11 @@ void check_gw_monitor()
         return;
     }
     // int monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
-    for (int i = 1; i < g_monitor_count; ++i)// 0号进程 自己不能监控自己，由service监控 
+    for (int i = 0; i < g_monitor_count; ++i)
     {
+        if(i == g_core_id) {// primary进程 自己不能监控自己，由service监控 
+            continue;
+        }
         if(tgg_checkif_gw_monitor_timeout(i, now)) {
             pid_t pid = tgg_get_gw_monitor_pid(i);
             if(pid > 0) {
@@ -645,8 +651,11 @@ static void tgg_recv_clean_prev()
 static int check_if_all_child_up()
 {
     // int monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
-    for (int i = 1; i < g_monitor_count; ++i)// 0号进程 自己不能监控自己，由service监控 
+    for (int i = 0; i < g_monitor_count; ++i)// 0号进程 自己不能监控自己，由service监控 
     {
+        if(i == g_core_id) {// primary进程 自己不能监控自己，由service监控 
+            continue;
+        }
         if(tgg_check_gw_monitor_up(i) <= 0) {
             return 0;
         }
@@ -657,8 +666,11 @@ static int check_if_all_child_up()
 static void kill_all_child()
 {
     // int monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
-    for (int i = 1; i < g_monitor_count; ++i)// 0号进程 自己不能监控自己，由service监控 
+    for (int i = 0; i < g_monitor_count; ++i)// 0号进程 自己不能监控自己，由service监控 
     {
+        if(i == g_core_id) {// primary进程 自己不能监控自己，由service监控 
+            continue;
+        }
         pid_t pid = tgg_get_gw_monitor_pid(i);
         if(pid <= 0) {
             continue;
@@ -715,7 +727,7 @@ int main(int argc, char *argv[])
         LOG_ERROR("mt frame init failed.");
         return -1;
     }
-    g_core_id = rte_lcore_to_cpu_id(rte_lcore_id());
+    g_core_id = mt_get_proc_id();//rte_lcore_to_cpu_id(rte_lcore_id());
     if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
         pipe2(sig_pipe, O_NONBLOCK | O_CLOEXEC);
         LOG_INFO("-------master[pid:%d] core[%d] start-------", getpid(), g_core_id);

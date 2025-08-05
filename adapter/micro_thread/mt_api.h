@@ -31,6 +31,8 @@ using std::vector;
 
 namespace NS_MICRO_THREAD {
 
+int mt_get_proc_id();
+
 int mt_udpsendrcv(struct sockaddr_in* dst, void* pkg, int len, void* rcv_buf, int& buf_size, int timeout);
 
 typedef int (*MtFuncTcpMsgLen)(void* buf, int len);
