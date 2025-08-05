@@ -27,8 +27,13 @@
 #include "mt_api.h"
 #include "ff_api.h"
 #include "mt_sys_hook.h"
-
+#include "ff_config.h"
 namespace NS_MICRO_THREAD {
+
+int mt_get_proc_id()
+{
+    return ff_global_cfg.dpdk.proc_id;
+}
 
 int mt_udpsendrcv(struct sockaddr_in* dst, void* pkg, int len, void* rcv_buf, int& buf_size, int timeout)
 {
