@@ -112,6 +112,11 @@ int tgg_checkif_gw_monitor_timeout(int prc_id, uint64_t now);
 void tgg_clean_gw_monitor(int prc_id);
 
 
+pid_t start_gwrcv_sendary(int lcore_id);
+pid_t start_gwcliprc(int lcore_id);
+pid_t start_register(int lcore_id);
+pid_t start_gwbwprc(int prc_id);
+
 // 给ws操作缓存的函数  
 // int cache_ws_buffer(int core_id, int fd, void* data, int len, int pos = 0, int iscomplete = 1);
 std::string get_one_frame_buffer(int core_id, int fd, void* data, int len);
@@ -185,8 +190,5 @@ void clean_fdidlist(tgg_fd_id_list* fdiddata);
 tgg_write_data* format_send_data(int core_id, const std::string& sdata, std::map<int, int>& mapfdidx, int fdopt);
 int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, int>& mapfdidx, int fdopt);
 int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx, int fdopt);
-
-
-pid_t custom_fork(const char* exec_name, int lcore_id, char** args);
 
 #endif  // _TGG_COMMON_H_

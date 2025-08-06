@@ -28,17 +28,6 @@ static void prc_dpdk_eal_init(int argc, char **argv);
 
 static int sig_pipe[2];
 
-static pid_t start_gwbwprc(int prc_id)
-{
-    char **args = (char**)malloc((2) * sizeof(char*));
-    args[0] = const_cast<char*>("gwbwprc");
-    args[1] = NULL; // 必须以 NULL 结尾
-    pid_t pid = custom_fork("gwbwprc", prc_id, args);
-    free(args);
-    return pid;
-}
-
-
 void signal_handler(int signum)
 {
     printf("gwregister catched signal:%d\n", signum);
