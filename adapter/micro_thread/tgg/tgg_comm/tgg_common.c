@@ -1112,7 +1112,7 @@ static int get_exec_path(char* exe_path, const char* exec_name)
     return -1;
 }
 
-pid_t custom_fork(const char* exec_name, int prc_id, char** args)
+static pid_t custom_fork(const char* exec_name, int prc_id, char** args)
 {
     char exe_path[PATH_MAX] = {0};
     if(get_exec_path(exe_path, exec_name) < 0) {
@@ -1147,3 +1147,48 @@ pid_t custom_fork(const char* exec_name, int prc_id, char** args)
     	return pid;
     }
 }
+
+pid_t start_gwrcv_sendary(int lcore_id)
+{
+    // 构造参数数组
+    char* proc_id = (char*)malloc(24);
+    sprintf(proc_id, "--proc-id=%d", lcore_id);
+    char **args = (char**)calloc(3, sizeof(char*));
+    args[0] = const_cast<char*>("gwrcv");
+    args[1] = proc_id;
+    args[2] = NULL; // 必须以 NULL 结尾
+    pid_t pid = custom_fork("gwrcv", lcore_id, args);
+    free(args);
+    return pid;
+}
+
+pid_t start_gwcliprc(int lcore_id)
+{
+    char **args = (char**)calloc(2, sizeof(char*));
+    args[0] = const_cast<char*>("gwcliprc");
+    args[1] = NULL; // 必须以 NULL 结尾
+    pid_t pid = custom_fork("gwcliprc", lcore_id, args);
+    free(args);
+    return pid;
+}
+
+pid_t start_register(int lcore_id)
+{
+    char **args = (char**)calloc(2, sizeof(char*));
+    args[0] = const_cast<char*>("gwregister");
+    args[1] = NULL; // 必须以 NULL 结尾
+    pid_t pid = custom_fork("gwregister", lcore_id, args);// gwbwserver由register管理，会先启动gwbwserver,然后向注册中心发起连接请求
+    free(args);
+    return pid;
+}
+
+pid_t start_gwbwprc(int prc_id)
+{
+    char **args = (char**)malloc((2) * sizeof(char*));
+    args[0] = const_cast<char*>("gwbwprc");
+    args[1] = NULL; // 必须以 NULL 结尾
+    pid_t pid = custom_fork("gwbwprc", prc_id, args);
+    free(args);
+    return pid;
+}
+
