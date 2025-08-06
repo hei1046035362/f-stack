@@ -7,6 +7,7 @@
 #include "micro_thread.h"
 #include <rte_mempool.h>
 #include <rte_malloc.h>
+#include <rte_timer.h>
 #include "tgg_comm/tgg_common.h"
 #include "tgg_comm/tgg_struct.h"
 #include "dpdk_init.h"
@@ -101,7 +102,7 @@ void sigchld_handler(int sig) {
     errno = saved_errno;
 }
 // 不在信号函数中左复杂的操作，改为管道传递给主线程
-static void deal_sigchild() {
+static void deal_sigchild(struct rte_timer* tim, void* arg) {
     struct pollfd pfds[1];
     pfds[0].fd = sig_pipe[0]; // 管道读端
     pfds[0].events = POLLIN;  // 监听可读事件
@@ -420,20 +421,12 @@ static void tgg_send(void *arg)
 }
 
 
-static uint64_t s_last_check_time = 0;
+// static uint64_t s_last_check_time = 0;
 static int* s_pid_check_times;
 // 定时器回调函数
-void check_gw_monitor()
+void check_gw_monitor(struct rte_timer* tm, void* arg)
 {
     uint64_t now = get_system_ms();
-    if(s_last_check_time + GW_MONITOR_HEART_BEAT_CHECK < now) {
-        // 500ms检测一次
-        s_last_check_time = now;
-    } else {
-        // 没到检测时间，不检测
-        return;
-    }
-    // int monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
     for (int i = 0; i < g_monitor_count; ++i)
     {
         if(i == g_core_id) {// primary进程 自己不能监控自己，由service监控 
@@ -512,7 +505,7 @@ void check_gw_monitor()
 static uint64_t s_last_update_time = 0;
 static uint64_t s_check_times = 0;// 函数进入次数
 // 定时器回调函数
-void update_gwrcv_secondary_heart_beat() {
+void update_gwrcv_secondary_heart_beat(struct rte_timer* tm, void* arg) {
     uint64_t now = get_system_ms();
     s_check_times++;
     if(now - s_last_update_time >= GW_MONITOR_HEART_BEAT_UPDATE) {
@@ -528,45 +521,64 @@ void update_gwrcv_secondary_heart_beat() {
     }
 }
 
-static void gw_monitor(void* argv)
+static uint64_t s_max_concurency = 0;
+static uint64_t s_last_fd_count = 0;
+static void concurrency_stat(struct rte_timer* tm, void* arg)
 {
-    int64_t cur_count = 0;// 记录上一次的连接总数
-    int64_t max_concurency = 0;// 记录最大并发数
-    int index = 0;// 用于计算时间，500ms一次，(index % 2) == 0 表示1s
-    int check_times = 10;
-    while(g_run_status) {
+    uint64_t cur_count = tgg_count_idx(g_core_id);
+    uint64_t concurency = cur_count - s_last_fd_count;
+    if(s_max_concurency < concurency) {// 最大并发
+        s_max_concurency = concurency;
+        LOG_WARNING("core[%d] max concurency :%d", g_core_id, s_max_concurency);
+    }
+    s_last_fd_count = cur_count;
+}
+
+// 定时任务
+struct rte_timer timer_task_sigchild;// 处理子进程信号
+struct rte_timer timer_task_monitor;// 监控管理子进程
+struct rte_timer timer_task_update_heartbeat;// secondary更新心跳
+struct rte_timer timer_task_concurrency;// 计算最高并发
+
+static void init_timer()
+{
+    uint64_t hz = rte_get_timer_hz();
+    uint64_t ticks_50ms = (hz * 50) / 1000;  // 以毫秒为单位
+
+    rte_timer_init(&timer_task_concurrency);// 统计并发 周期1s
+    rte_timer_reset(&timer_task_concurrency, hz, PERIODICAL, 
+            rte_lcore_id(), concurrency_stat, NULL);
+    if(TggConfigure::getInstance()->get_auto_start()) {
         if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
-            check_gw_monitor();
-
-            // 以下逻辑为计算每秒最大并发数
-            index++;
-            if((index % 2 == 0) && cur_count != tgg_count_idx(g_core_id)) {// 1s 统计一次
-                int concurency = tgg_count_idx(g_core_id) - cur_count;
-                if(max_concurency < concurency) {// 最大并发
-                    max_concurency = concurency;
-                    LOG_WARNING("core[%d] max concurency :%d", g_core_id, max_concurency);
-                }
-                cur_count = tgg_count_idx(g_core_id);
-            }
-            // 子进程信号处理
-            while(g_run_status && check_times-- > 0) {
-                deal_sigchild();
-                mt_sleep(50);
-            }
-            check_times = 10;
-
+            rte_timer_init(&timer_task_sigchild);//  信号处理轮训周期50ms
+            rte_timer_reset(&timer_task_sigchild, ticks_50ms, PERIODICAL, 
+                    rte_lcore_id(), deal_sigchild, NULL);
+            rte_timer_init(&timer_task_monitor);// 心跳检查周期 5s
+            rte_timer_reset(&timer_task_monitor, hz * GW_MONITOR_HEART_BEAT_CHECK, PERIODICAL, 
+                    rte_lcore_id(), check_gw_monitor, NULL);
         } else {
-            update_gwrcv_secondary_heart_beat();
-            mt_sleep(200);
+            rte_timer_init(&timer_task_update_heartbeat);// 心跳更新周期 1s
+            rte_timer_reset(&timer_task_update_heartbeat, hz, PERIODICAL, 
+                    rte_lcore_id(), update_gwrcv_secondary_heart_beat, NULL);
+        }
+    }
+
+}
+static void stop_timer()
+{
+    rte_timer_stop_sync(&timer_task_concurrency);
+    if(TggConfigure::getInstance()->get_auto_start()) {
+        if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
+            rte_timer_stop_sync(&timer_task_sigchild);
+            rte_timer_stop_sync(&timer_task_monitor);
+        } else {
+            rte_timer_stop_sync(&timer_task_update_heartbeat);
         }
     }
 }
 
 static int tgg_gw_master()
 {
-    if(TggConfigure::getInstance()->get_auto_start()) {
-        mt_start_thread((void *)gw_monitor, NULL);
-    }
     // 启动发送线程
     // for(int i = 0; i < TggConfigure::getInstance()->get_gwwrite_co_count(); ++i) {
         mt_start_thread((void *)tgg_send, NULL);
@@ -735,7 +747,7 @@ int main(int argc, char *argv[])
         if(TggConfigure::getInstance()->get_auto_start()) {
             g_monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
             s_pid_check_times = new int[g_monitor_count]{0};
-            check_gw_monitor();
+            check_gw_monitor(NULL, NULL);
             // 检查子进程是否已全部启动
             int check_times = 1500;// 最多等待15s
             while (g_run_status && check_times > 0) {
@@ -766,7 +778,14 @@ int main(int argc, char *argv[])
         }
         tgg_recv_clean_prev();
     }
+    // 启动定时器
+    init_timer();
+
+    // 主循环
     tgg_gw_master();
+
+    // 停止定时器
+    stop_timer();
     if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
         if(TggConfigure::getInstance()->get_auto_start()) {
             kill_all_child();
