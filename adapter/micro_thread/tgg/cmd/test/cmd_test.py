@@ -1,3 +1,6 @@
+"""
+    模拟bw给网关发送所有支持的cmd(单元测试脚本)
+"""
 import socket
 import time
 import io
