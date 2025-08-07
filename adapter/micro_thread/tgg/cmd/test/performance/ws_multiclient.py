@@ -1,3 +1,6 @@
+"""
+    模拟批量客户端同时发起连接
+"""
 import asyncio
 import websockets
 import logging
