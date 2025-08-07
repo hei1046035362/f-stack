@@ -370,7 +370,7 @@ void *read_routine( void *arg )
                     parsed_pos += pack_len;
                     header = reinterpret_cast<tgg_bw_protocal*>(recv_buffer + parsed_pos);
                     pack_len = htonl(header->pack_len);
-                } while (left_len >= pack_len && left_len > 0);// 处理粘包
+                } while (left_len >= pack_len && left_len > sizeof(tgg_bw_protocal));// 处理粘包
 
                 if(left_len > 0) {
                     // 把剩余数据移动到前面去,数据提供了长度，因此不需要置空操作
