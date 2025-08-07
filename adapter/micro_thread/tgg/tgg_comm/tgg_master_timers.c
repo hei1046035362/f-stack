@@ -160,13 +160,13 @@ static void update_gwrcv_secondary_heart_beat(struct rte_timer* tm, void* arg) {
     }
 }
 
-static uint64_t s_max_concurency = 0;
-static uint64_t s_last_fd_count = 0;
+static int64_t s_max_concurency = 0;
+static int64_t s_last_fd_count = 0;
 static void concurrency_stat(struct rte_timer* tm, void* arg)
 {
-    uint64_t cur_count = tgg_count_idx(g_core_id);
-    uint64_t concurency = cur_count - s_last_fd_count;
-    if(s_max_concurency < concurency) {// 最大并发
+    int64_t cur_count = tgg_count_idx(g_core_id);
+    int64_t concurency = cur_count - s_last_fd_count;
+    if(concurency > 0 && s_max_concurency < concurency) {// 最大并发
         s_max_concurency = concurency;
         LOG_WARNING("core[%d] max concurency :%ld", g_core_id, s_max_concurency);
     }
