@@ -28,14 +28,18 @@ static void deal_sigchild(struct rte_timer* tim, void* arg)
     // 非阻塞检查管道（超时=0立即返回）
     int ret = poll(pfds, 1, 0);
     if (ret > 0 && (pfds[0].revents & POLLIN)) {
-        // stCoEpoll_t* ctx = (stCoEpoll_t*)arg;
-        char pid_buf[32];
+        char pid_buf[64];
         ssize_t nread;
 
         // 检查管道是否有数据（非阻塞读取）
         while (g_run_status && (nread = read(sig_pipe[0], pid_buf, sizeof(pid_buf)-1)) > 0) {
             pid_buf[nread] = '\0';
-            pid_t dead_pid = atoi(pid_buf);
+            pid_t dead_pid = 0, sig_num = 0;
+            if (sscanf(pid_buf, "%d_%d", &dead_pid, &sig_num) == 2) {
+                LOG_WARNING("deal signo[%d] for pid[%d].", sig_num, dead_pid);
+            } else {
+                LOG_FATAL("error format[%s] for sig_pip", pid_buf);
+            }
             // 监控到子进程退出，立刻再启动一个
             for (int i = 0; i < g_monitor_count; ++i)// 0号进程 自己不能监控自己，由service监控 
             {
@@ -49,6 +53,11 @@ static void deal_sigchild(struct rte_timer* tim, void* arg)
                     tgg_clean_gw_monitor(i);
                     pid_t pid = -1;
                     if(i < g_monitor_count-2) {
+                        if(sig_num == 9) {// gwrcv进程收到信号9时，所有进程都退出，未正常退出的gwrcv无法正常启动
+                            g_run_status = 0;
+                            LOG_FATAL("core_id[%d] pid[%d] catched an sigkill, all process will exit.", i, dead_pid);
+                            return;
+                        }
                         pid = start_gwrcv_sendary(i);
                     } else if (i == g_monitor_count-2) {
                         pid = start_gwcliprc(i);
@@ -102,6 +111,7 @@ void check_gw_monitor(struct rte_timer* tm, void* arg)
                 if(i < g_monitor_count-2) {// gwrcv不管进程在不在我们都不会重启，因此检测次数要重置
                     LOG_ERROR("check_times[%d] beyond max check_times[3]", g_pid_check_times[i]);
                     g_pid_check_times[i] = 0;
+                    g_run_status = 0;// gwrcv的子进程超过三个检测周期了，主进程直接退出，让服务重启
                 }
                 // TODO 上线后这段代码要放开，防止死锁导致无法启动新的进程
                 if (kill(pid, 0) == 0) {
