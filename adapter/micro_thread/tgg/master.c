@@ -52,13 +52,13 @@ void signal_handler(int signum)
 
 void sigchld_handler(int sig) {
     int saved_errno = errno;
-    char buf[16];
+    char buf[32];
     int status;
     pid_t pid;
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) { // 非阻塞回收所有僵尸进程[5,7](@ref)
         if(g_run_status && TggConfigure::getInstance()->get_auto_start()) {
             // 监控到子进程退出，立刻再启动一个
-            int len = snprintf(buf, sizeof(buf), "%d\n", pid);
+            int len = snprintf(buf, sizeof(buf), "%d_%d\n", pid, WTERMSIG(status));
             write(sig_pipe[1], buf, len);
             if (WIFEXITED(status)) {
                 printf("gwrcv child %d exit normal, exit code: %d\n", pid, WEXITSTATUS(status));
