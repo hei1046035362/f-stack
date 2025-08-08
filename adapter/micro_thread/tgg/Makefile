@@ -8,15 +8,14 @@ $(error "no installation of DPDK found, maybe you shuld export environment varia
 endif
 
 PKGCONF ?= pkg-config
-TGG_CONF_PATH = /usr/local/tgg_gateway/conf
-TGG_CONF = $(TGG_CONF_PATH)/tgg_conf.ini
+INSTALL_PATH = /usr/local/tgg_gateway
+TGG_CONF = $(INSTALL_PATH)/conf/tgg_conf.ini
 DEBUG= -g
 BINARY = gwrcv gwcliprc gwbwprc gwredis gwregister
 FF_LIBS+= $(shell $(PKGCONF) --static --libs libdpdk)
 FF_LIBS+= -L${FF_PATH}/lib -Wl,--whole-archive,-lfstack,--no-whole-archive \
 		-L${FF_PATH}/app/libco/lib
 FF_LIBS+= -Wl,--no-whole-archive -lrt -lm -ldl -lcrypto -lpthread -lnuma -lstdc++ -z noexecstack
-INSTALL_PATH = /usr/local/tgg_gateway/bin
 
 # Comment the following line if you are not using the gnu c compiler
 #C_ARGS = -Wall -g -fPIC -D_DEBUG
@@ -119,10 +118,20 @@ gwregister: $(REGISTER_OBJ)
 all: gwrcv gwcliprc gwbwprc gwregister
 
 install:
-	mkdir -p $(INSTALL_PATH)
-	cp -f gwrcv $(INSTALL_PATH)/gwrcv
-	cp -f gwcliprc $(INSTALL_PATH)/gwcliprc
-	cp -f gwbwprc $(INSTALL_PATH)/gwbwprc
-	cp -f gwregister $(INSTALL_PATH)/gwregister
-	mkdir -p $(TGG_CONF_PATH)
+	mkdir -p $(INSTALL_PATH)/bin
+	cp -f gwrcv $(INSTALL_PATH)/bin/gwrcv
+	cp -f gwcliprc $(INSTALL_PATH)/bin/gwcliprc
+	cp -f gwbwprc $(INSTALL_PATH)/bin/gwbwprc
+	cp -f gwregister $(INSTALL_PATH)/bin/gwregister
+	# 拷贝服务和脚本
+	cp -f scripts/service/tgg_gateway.service /etc/systemd/system/tgg_gateway.service
+	cp -f scripts/service/gw-force-kill.sh $(INSTALL_PATH)/bin/gw-force-kill.sh
+	cp -f scripts/service/gw-graceful-stop.sh $(INSTALL_PATH)/bin/gw-graceful-stop.sh
+	cp -f scripts/service/gw-pre-start.sh $(INSTALL_PATH)/bin/gw-pre-start.sh
+	cp -f scripts/service/gw-start.sh $(INSTALL_PATH)/bin/gw-start.sh
+	cp -f scripts/dpdk_init.sh $(INSTALL_PATH)/bin/dpdk_init.sh
+	chmod a+x $(INSTALL_PATH)/bin/*
+	systemctl daemon-reload
+	systemctl enable tgg_gateway
+	mkdir -p $(INSTALL_PATH)/conf
 	test -f '${TGG_CONF}' || cp -f ${FF_PATH}/adapter/micro_thread/tgg/config/tgg_conf.ini ${TGG_CONF}
