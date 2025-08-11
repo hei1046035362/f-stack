@@ -89,6 +89,7 @@ int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
 static int s_enqueued_to_server_count = 0;
 int WsConsumer::_Send2Server(const std::string& data, int fd_opt)
 {
+    return SEND_SUCCESS;
     // 在透传中判断，这里不需要去管业务侧是否在线，只管上传
     // if(tgg_get_bwfdx_count() <= 0) {
     //     LOG_ERROR("Send data to server Failed: no bw found.");
@@ -211,12 +212,12 @@ bool WsConsumer::_CheckToken(const std::string& token)
 // 握手
 void WsConsumer::OnHandShake(const std::string& request, const std::string& response, struct HttpRequest& req)
 {
-    std::string properties;
-    if(!tgg_request_valid_check(req, properties)) {
-        LOG_ERROR("tgg ws request[%s] check failed.", req.uri.c_str());
-        _CleanAndClose();
-        return;
-    }
+    // std::string properties;
+    // if(!tgg_request_valid_check(req, properties)) {
+    //     LOG_ERROR("tgg ws request[%s] check failed.", req.uri.c_str());
+    //     _CleanAndClose();
+    //     return;
+    // }
     // if(!_CheckToken(token)) {
     //     LOG_ERROR("check token[%s] failed.", token.c_str());
     //     _CleanAndClose();

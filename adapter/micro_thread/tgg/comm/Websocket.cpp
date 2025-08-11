@@ -38,8 +38,44 @@ bool is_valid_websocket_handshake(const HttpRequest &req) {
 // 生成websocket连接的唯一键
 std::string Websocket::_GenerateAcceptKey(const std::string& key)
 {
-    std::string concat_key = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";    
+    std::string concat_key = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     return Encrypt::Base64Encode(Encrypt::sha1(concat_key));
+}
+
+std::string_view extract_websocket_key(const char* buffer, size_t len) {
+    // 1. 定位字段名（固定19字节）
+    constexpr char key_header[] = "Sec-WebSocket-Key:";
+    constexpr size_t key_header_len = sizeof(key_header) - 1;  // 去掉末尾\0
+    
+    // 2. 内存扫描（避免使用strstr）
+    const char* pos = buffer;
+    const char* end = buffer + len - key_header_len;
+    
+    for (; pos < end; ++pos) {
+        // 快速跳过首字符不匹配的位置
+        if (*pos != 'S') continue;  
+        
+        // 批量比较剩余字符（减少分支预测失败）
+        if (memcmp(pos, key_header, key_header_len) == 0) {
+            pos += key_header_len;
+            break;
+        }
+    }
+    
+    // 3. 未找到直接返回
+    if (pos >= end) return {};
+    
+    // 4. 提取值（直到遇到\r\n）
+    const char* value_start = pos;
+    while (*value_start == ' ') ++value_start;  // 跳过空格
+    
+    const char* value_end = value_start;
+    while (value_end < buffer + len - 1) {
+        if ((value_end[0] == '\r' && value_end[1] == '\n') || value_end[0] == '\n') break;
+        ++value_end;
+    }
+    
+    return std::string_view(value_start, value_end - value_start);
 }
 
 int Websocket::_HandleHandshake(const std::string& request, HttpRequest& req, std::string& response)
@@ -53,14 +89,15 @@ int Websocket::_HandleHandshake(const std::string& request, HttpRequest& req, st
         response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid request method or path";
         return -1;
     }
-    parse_http_request(request, req, false);
+    // parse_http_request(request, req, false);
 
-    if (!is_valid_websocket_handshake(req)) {
-        LOG_ERROR("Invalid WebSocket handshake:%s", request.c_str());
-        response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid WebSocket handshake headers";
-        return -1;
-    }
-    std::string accept_key = _GenerateAcceptKey(req.headers["sec-websocket-key"]);
+    // if (!is_valid_websocket_handshake(req)) {
+    //     LOG_ERROR("Invalid WebSocket handshake:%s", request.c_str());
+    //     response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid WebSocket handshake headers";
+    //     return -1;
+    // }
+    std::string_view sec_key = extract_websocket_key(request.c_str(), request.length());
+    std::string accept_key = _GenerateAcceptKey(std::string(sec_key.data(), sec_key.length()));
 
     // 构建握手响应
     response.clear();
