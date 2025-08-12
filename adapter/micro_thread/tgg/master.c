@@ -242,14 +242,14 @@ static void tgg_recv(void *arg)
     }
     LOG_DEBUG("wait client[%d] close...", cli_fd);
     // 等待连接在缓存中的数据被消费完才能关闭
-    int index = 100*60;// 最长等待1分钟，关闭包会在trans队列中可能多次enqueue back，尽可能让数据包走正常流程关闭
-    while(tgg_get_cli_idx(g_core_id, cli_fd) != TGG_FD_CLOSING && index > 0 && g_run_status) {
-        mt_sleep(10);
-        index--;
-    }
-    if(index <= 0) {
-        LOG_WARNING("recv close fram from gwprc timeout, coreid[%d] fd[%d].", g_core_id, cli_fd);       
-    }
+    // int index = 100*60;// 最长等待1分钟，关闭包会在trans队列中可能多次enqueue back，尽可能让数据包走正常流程关闭
+    // while(tgg_get_cli_idx(g_core_id, cli_fd) != TGG_FD_CLOSING && index > 0 && g_run_status) {
+    //     mt_sleep(10);
+    //     index--;
+    // }
+    // if(index <= 0) {
+    //     LOG_WARNING("recv close fram from gwprc timeout, coreid[%d] fd[%d].", g_core_id, cli_fd);       
+    // }
     close(cli_fd);// 这里不能使用mt_close,mt_close只设置标记，不会发送fin包，fd依然还存在
     clean_client_data(cli_fd, idx);
     s_left_fd--;
