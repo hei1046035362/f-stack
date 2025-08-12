@@ -418,10 +418,10 @@ void tgg_master_init()
 	// 100W个FD  32M的空间
 	g_lock_zone = make_memzone(s_lock_zone_name, sizeof(tgg_lock));
 	init_locks();
-	for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
-		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
-			continue;
-		}
+	for (int i = 0; i < lcore_count; i++) {
+		// if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
+		// 	continue;
+		// }
 		char zone_name[RTE_MEMZONE_NAMESIZE] = {0};
 		sprintf(zone_name, "%s_%d", fd_zone_name_prev, i);
 		g_fd_zones[i] = make_memzone(zone_name, s_zone_size);
@@ -474,11 +474,11 @@ void tgg_master_init()
 	g_uid_hash = init_hash(s_uid_hash_name, g_fd_limit, TGG_UID_LEN);
 	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, sizeof(int64_t));
 	g_cidgid_hash = init_hash(s_cidgid_hash_name, g_fd_limit, sizeof(int64_t));
-	for (int i = 0; i < MAX_LCORE_COUNT; ++i)
+	for (int i = 0; i < lcore_count; ++i)
 	{// idx hash是每个lcore进程独享的，进程之间不共享
-		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
-			continue;
-		}
+		// if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
+		// 	continue;
+		// }
 		char idx_hash_name[128] = {0};
 		sprintf(idx_hash_name, "%s_%d", s_idx_hash_name, i);
 		g_idx_hash[i] = init_hash(idx_hash_name, g_fd_limit, sizeof(int64_t));
@@ -518,10 +518,11 @@ void tgg_master_init()
 
 void tgg_master_uninit()
 {
-	for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
-		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
-			continue;
-		}
+	int lcore_count = count_ones(TggConfigure::getInstance()->get_lcore_mask());
+	for (int i = 0; i < lcore_count; i++) {
+		// if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
+		// 	continue;
+		// }
 		rte_memzone_free(g_fd_zones[i]);
 		g_fd_zones[i] = NULL;
 
@@ -577,10 +578,10 @@ void tgg_master_uninit()
 	g_cid_hash = NULL;
 	rte_hash_free(g_cidgid_hash);
 	g_cidgid_hash = NULL;
-	for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
-		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
-			continue;
-		}
+	for (int i = 0; i < lcore_count; i++) {
+		// if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
+		// 	continue;
+		// }
 		rte_hash_free(g_idx_hash[i]);
 		g_idx_hash[i] = NULL;
 	}
@@ -604,10 +605,11 @@ void init_multi_for_secondary()
 {
 	g_fd_limit = TggConfigure::getInstance()->get_gwrcv_fd_limit();
 	g_bwfdx_limit = TggConfigure::getInstance()->get_gwbwprc_fd_limit();
-	for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
-		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
-			continue;
-		}
+	int lcore_count = count_ones(TggConfigure::getInstance()->get_lcore_mask());
+	for (int i = 0; i < lcore_count; i++) {
+		// if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
+		// 	continue;
+		// }
 		// 初始化cli数组的zones
 		char zone_name[RTE_MEMZONE_NAMESIZE] = {0};
 		sprintf(zone_name, "%s_%d", fd_zone_name_prev, i);
@@ -714,10 +716,11 @@ void tgg_unregister_rcu()
 
 void tgg_gwrcv_secondary_init()
 {
-	for (uint32_t i = 0; i < MAX_LCORE_COUNT; i++) {
-		if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
-			continue;
-		}
+	int lcore_count = count_ones(TggConfigure::getInstance()->get_lcore_mask());
+	for (int i = 0; i < lcore_count; i++) {
+		// if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
+		// 	continue;
+		// }
 		char idx_hash_name[128] = {0};
 		sprintf(idx_hash_name, "%s_%d", s_idx_hash_name, i);
 		g_idx_hash[i] = get_hash_byname(idx_hash_name);

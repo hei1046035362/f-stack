@@ -31,7 +31,7 @@ extern ushort g_gateway_port;
 extern tgg_stats g_tgg_stats;
 extern int g_fd_limit;
 extern int g_core_id;
-
+extern int64_t g_max_concurency;
 // 进程是否退出  master进程退出不需要做什么事情，但是secondary退出前必须要释放他持有的内存
 int g_run_status = 1;
 int g_monitor_count = 0;
@@ -253,6 +253,9 @@ static void tgg_recv(void *arg)
     close(cli_fd);// 这里不能使用mt_close,mt_close只设置标记，不会发送fin包，fd依然还存在
     clean_client_data(cli_fd, idx);
     s_left_fd--;
+    if(s_left_fd <= 0) {
+        g_max_concurency = 0;
+    }
     LOG_WARNING("client coreid[%d] fd[%d] idx[%d] closed, left_fd:%ld.", g_core_id, cli_fd, idx, s_left_fd);
 }
 
