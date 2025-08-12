@@ -255,6 +255,7 @@ static void tgg_recv(void *arg)
     s_left_fd--;
     if(s_left_fd <= 0) {
         g_max_concurency = 0;
+        LOG_WARNING("reset concurency:%d", g_max_concurency);
     }
     LOG_WARNING("client coreid[%d] fd[%d] idx[%d] closed, left_fd:%ld.", g_core_id, cli_fd, idx, s_left_fd);
 }
