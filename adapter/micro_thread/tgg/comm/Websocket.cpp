@@ -35,13 +35,103 @@ bool is_valid_websocket_handshake(const HttpRequest &req) {
 
 }
 
+static constexpr std::string_view WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 // 生成websocket连接的唯一键
-std::string Websocket::_GenerateAcceptKey(const std::string& key)
+std::string Websocket::_GenerateAcceptKey(std::string_view key)
 {
-    std::string concat_key = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-    return Encrypt::Base64Encode(Encrypt::sha1(concat_key));
+    // 预分配拼接内存 (key + GUID)
+    thread_local std::string concat_key;
+    concat_key.reserve(key.size() + WS_GUID.size());
+    concat_key.assign(key);
+    concat_key.append(WS_GUID);
+
+    // 计算SHA1 (复用内存)
+    thread_local std::string sha1_result;
+    sha1_result.resize(SHA_DIGEST_LENGTH);
+    SHA1(reinterpret_cast<const unsigned char*>(concat_key.data()), 
+         concat_key.size(),
+         reinterpret_cast<unsigned char*>(sha1_result.data()));
+
+    // Base64编码 (预计算长度)
+    const size_t encoded_len = (4 * ((SHA_DIGEST_LENGTH + 2) / 3));
+    thread_local std::string base64_result;
+    base64_result.resize(encoded_len);
+    
+    const int actual_len = EVP_EncodeBlock(
+        reinterpret_cast<unsigned char*>(base64_result.data()),
+        reinterpret_cast<const unsigned char*>(sha1_result.data()),
+        SHA_DIGEST_LENGTH
+    );
+
+    // 移除尾部填充的NUL字符
+    if (actual_len > 0 && static_cast<size_t>(actual_len) < base64_result.size()) {
+        base64_result.resize(actual_len);
+    }
+    return base64_result;
 }
 
+#include <immintrin.h>  // AVX2指令集
+
+std::string_view extract_websocket_key_fallback(const char* buffer, size_t len) {
+    const char* key_header = "Sec-WebSocket-Key: ";
+    size_t key_header_len = strlen(key_header);
+    
+    const char* field_start = static_cast<const char*>(
+        memmem(buffer, len, key_header, key_header_len)
+    );
+    if (!field_start) return {};
+    
+    const char* key_start = field_start + key_header_len;
+    const char* end_ptr = static_cast<const char*>(
+        memmem(key_start, len - (key_start - buffer), "\r\n", 2)
+    );
+    return (end_ptr) ? std::string_view(key_start, end_ptr - key_start) : std::string_view();
+}
+
+std::string_view extract_websocket_key(const char* buffer, size_t len) {
+    constexpr char key_header[] = "Sec-WebSocket-Key:";
+    constexpr size_t key_header_len = sizeof(key_header) - 1;  // 18字节
+    
+    if (len < key_header_len) return {};
+    
+    // 1. AVX2扫描字段名
+    const __m256i header = _mm256_loadu_si256(
+        reinterpret_cast<const __m256i*>(key_header)
+    );
+    
+    for (size_t i = 0; i <= len - 32; i += 16) {
+        __m256i block = _mm256_loadu_si256(
+            reinterpret_cast<const __m256i*>(buffer + i)
+        );
+        int mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(block, header));
+        if (mask == 0) continue;
+        
+        size_t pos = i + __builtin_ctz(mask);
+        const char* field_start = buffer + pos;
+        
+        // 2. 验证字段边界（必须满足以下条件）
+        if (pos > 0 && field_start[-1] != '\n') continue;  // 前需换行（或开头）
+        if (field_start[key_header_len] != ' ') continue; // 后需空格（标准格式）
+        
+        const char* key_start = field_start + key_header_len + 1;  // 跳过": "
+        
+        // 3. 严格检测行尾（\r\n）
+        const char* end_ptr = static_cast<const char*>(
+            memmem(key_start, len - (key_start - buffer), "\r\n", 2)  // 查找完整行尾
+        );
+        if (!end_ptr) end_ptr = buffer + len;  // 无行尾则取到末尾（防御）
+        
+        // 4. 验证键值格式（Base64长度应为24字节）
+        size_t key_len = end_ptr - key_start;
+        if (key_len != 24) continue;  // RFC标准长度
+        
+        return std::string_view(key_start, key_len);
+    }
+    
+    // 回退到纯C实现（处理剩余数据）
+    return extract_websocket_key_fallback(buffer, len);
+}
+#if 0
 std::string_view extract_websocket_key(const char* buffer, size_t len) {
     // 1. 定位字段名（固定19字节）
     constexpr char key_header[] = "Sec-WebSocket-Key:";
@@ -77,15 +167,15 @@ std::string_view extract_websocket_key(const char* buffer, size_t len) {
     
     return std::string_view(value_start, value_end - value_start);
 }
-
-int Websocket::_HandleHandshake(const std::string& request, HttpRequest& req, std::string& response)
+#endif
+int Websocket::_HandleHandshake(std::string_view request, HttpRequest& req, std::string& response)
 {
     // std::istringstream stream(request);
     // std::string line;
     // std::string web_key;
     // int check_count = 2;
     if((request.size() < 5) || (request.substr(0, 5) != "GET /")) {
-        LOG_ERROR("Invalid http request:%s", request.c_str());
+        LOG_ERROR("Invalid http request:%s", request.data());
         response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid request method or path";
         return -1;
     }
@@ -96,8 +186,8 @@ int Websocket::_HandleHandshake(const std::string& request, HttpRequest& req, st
     //     response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid WebSocket handshake headers";
     //     return -1;
     // }
-    std::string_view sec_key = extract_websocket_key(request.c_str(), request.length());
-    std::string accept_key = _GenerateAcceptKey(std::string(sec_key.data(), sec_key.length()));
+    std::string_view sec_key = extract_websocket_key(request.data(), request.size());
+    std::string accept_key = _GenerateAcceptKey(sec_key);
 
     // 构建握手响应
     response.clear();
@@ -312,7 +402,7 @@ Websocket::_GetWsFrame(unsigned char *in_buffer, size_t buf_len,
 // typedef struct {
 //     int state;  // 0:初始 1:收到\r 2:收到\r\n 3:收到\r\n\r
 // } ParserState;
-
+#if 0
 static int check_if_http_end(const char* data, int len) {
     int state = 0;
     for (int i = 0; i < len; i++) {
@@ -331,6 +421,28 @@ static int check_if_http_end(const char* data, int len) {
                 state = 0;
                 break;
         }
+    }
+    return 0;
+}
+#endif
+#include <cstring>
+static inline int check_if_http_end(const char* data, size_t len) {
+    // 快速检查最小长度
+    if (__builtin_expect(len < 4, 0)) return 0;  // 小于4字节不可能包含\r\n\r\n
+
+    const char* end = data + len;
+    const char* ptr = data;
+
+    // 快速扫描首个\r\n位置
+    while ((ptr = static_cast<const char*>(memchr(ptr, '\r', end - ptr)))) {
+        // 检查连续\r\n\r\n模式
+        if (ptr + 3 < end && 
+            ptr[1] == '\n' && 
+            ptr[2] == '\r' && 
+            ptr[3] == '\n') {
+            return ptr - data + 4;  // 返回结束位置
+        }
+        ptr++;  // 继续搜索下一个\r
     }
     return 0;
 }
@@ -407,7 +519,7 @@ int Websocket::ReadData(void* data, int len)
                 }
             }
             HttpRequest req;
-            std::string request((char*)input, in_len);
+            std::string_view request((char*)input, in_len);
             std::string response;
             if (_HandleHandshake(request, req, response) < 0) {
                 OnSend(response, FD_WRITE);

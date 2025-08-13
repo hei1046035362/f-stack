@@ -22,7 +22,7 @@ protected:
     virtual void OnConnect();
 
     // 握手
-    virtual void OnHandShake(const std::string& request, const std::string& response, struct HttpRequest& req);
+    virtual void OnHandShake(std::string_view request, const std::string& response, struct HttpRequest& req);
 
     virtual void OnPing(const std::string& response);
 
@@ -52,7 +52,7 @@ private:
     // 客户端数据转发给服务端
     /// @param --fd   客户端连接的fd，用来做随机的，发送的队列是固定的，
     ///               防止进程之间不必要的信息交换，直接用fd%队列数做负载均衡,因为fd是可回收的，所以这个均衡还是有一定保障的
-    int _Send2Server(const std::string& data, int fd_opt);
+    int _Send2Server(std::string_view data, int fd_opt);
 
 private:
     int _idx;

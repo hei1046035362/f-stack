@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <string_view>
 #include "common.hpp"
 enum WebSocketFrameType {
     ERROR_FRAME = 0xFF,
@@ -38,9 +39,9 @@ private:
     // 新的连接处理
     std::string _ClientConnect(const std::string& request);
     // 生成websocket连接的唯一键
-    std::string _GenerateAcceptKey(const std::string& key);
+    std::string _GenerateAcceptKey(std::string_view key);
 
-    int _HandleHandshake(const std::string& request, HttpRequest& req, std::string& response);
+    int _HandleHandshake(std::string_view request, HttpRequest& req, std::string& response);
         
     /* parse base frame according to
      * https://www.rfc-editor.org/rfc/rfc6455#section-5.2
@@ -55,7 +56,7 @@ protected:
 public:
     // 所有发送数据都在子类执行，这里只做websocket相关的公共操作
     virtual void OnConnect() = 0;
-    virtual void OnHandShake(const std::string& request, const std::string& response, struct HttpRequest& req) = 0;
+    virtual void OnHandShake(std::string_view request, const std::string& response, struct HttpRequest& req) = 0;
     virtual void OnMessage(const std::string& msg) = 0;
     virtual void OnClose() = 0;// 子类继承后要执行clean_buffer清理缓存
     virtual void OnPing(const std::string& response) {};

@@ -19,7 +19,7 @@ extern struct rte_mempool* g_mempool_trans;
 extern struct rte_mempool* g_mempool_trans_data;
 
 
-tgg_trans_data* format_send_server_data(int core_id, int fd, const std::string& sdata, int fdopt)
+tgg_trans_data* format_send_server_data(int core_id, int fd, std::string_view sdata, int fdopt)
 {
     if(fd <= 0) {
         LOG_ERROR("invalid fd:%d.", fd);
@@ -40,7 +40,7 @@ tgg_trans_data* format_send_server_data(int core_id, int fd, const std::string& 
             return NULL;
         }
         // bwdata->data = dpdk_rte_malloc(sdata.size());
-        memcpy(tdata->data, sdata.c_str(), sdata.size());
+        memcpy(tdata->data, sdata.data(), sdata.size());
     } else {
         tdata->data = NULL;
     }
@@ -54,7 +54,7 @@ tgg_trans_data* format_send_server_data(int core_id, int fd, const std::string& 
     return tdata;
 }
 
-int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
+int enqueue_data_trans(int core_id, int fd, std::string_view data, int fdopt)
 {
     tgg_trans_data* tdata = format_send_server_data(core_id, fd, data, fdopt);
     if (!tdata) {
@@ -87,7 +87,7 @@ int enqueue_data_trans(int core_id, int fd, const std::string& data, int fdopt)
 }
 
 static int s_enqueued_to_server_count = 0;
-int WsConsumer::_Send2Server(const std::string& data, int fd_opt)
+int WsConsumer::_Send2Server(std::string_view data, int fd_opt)
 {
     return SEND_SUCCESS;
     // 在透传中判断，这里不需要去管业务侧是否在线，只管上传
@@ -101,7 +101,7 @@ int WsConsumer::_Send2Server(const std::string& data, int fd_opt)
         return SEND_FAILED;
     }
     s_enqueued_to_server_count++;
-    LOG_DEBUG("send to server:%s.", bin2hex(data).c_str());
+    // LOG_DEBUG("send to server:%s.", bin2hex(data).c_str());
     return SEND_SUCCESS;
 }
 
@@ -210,7 +210,7 @@ bool WsConsumer::_CheckToken(const std::string& token)
 }
 
 // 握手
-void WsConsumer::OnHandShake(const std::string& request, const std::string& response, struct HttpRequest& req)
+void WsConsumer::OnHandShake(std::string_view request, const std::string& response, struct HttpRequest& req)
 {
     // std::string properties;
     // if(!tgg_request_valid_check(req, properties)) {
@@ -230,7 +230,7 @@ void WsConsumer::OnHandShake(const std::string& request, const std::string& resp
     tgg_set_cli_authorized(this->core_id, this->fd, AUTH_TYPE_HANDLESHAKED);
     OnSend(response, FD_WRITE);// 响应客户端的http请求
     // 通知服务端websocket 握手完成
-    LOG_INFO("OnHandShake:%s.", request.c_str());
+    LOG_INFO("OnHandShake:%s.", request.data());
     // if(_Send2Server(result, FD_HANDLESHAKE) == NO_BW_AVALIABLE) {
     //     SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     // }

@@ -159,14 +159,14 @@ static void tgg_recv(void *arg)
     int ret, consume_ret = 0;
     int cli_fd = *((int *)arg);
     delete (int *)arg;
-    uint32_t ip;
-    ushort port;
+    uint32_t ip = 0;
+    ushort port = 0;
     char ip_str[INET_ADDRSTRLEN] = {0};
-    if (get_remote_info(cli_fd, ip, port, ip_str) < 0) {
-        LOG_ERROR("get client remote info failed.");
-        close(cli_fd);
-        return;
-    }
+    // if (get_remote_info(cli_fd, ip, port, ip_str) < 0) {
+    //     LOG_ERROR("get client remote info failed.");
+    //     close(cli_fd);
+    //     return;
+    // }
     if(tgg_init_cli(g_core_id, cli_fd, ip_str, ip, port) < 0) {
         LOG_ERROR("init client info failed.");
         close(cli_fd);
