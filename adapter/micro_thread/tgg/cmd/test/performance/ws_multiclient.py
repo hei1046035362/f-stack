@@ -57,13 +57,13 @@ async def receive_messages(websocket, client_id: int):
 
 async def client_process_worker(start_id: int, end_id: int, uri: str):
     """单个进程的工作函数 (创建异步事件循环)"""
-    semaphore = asyncio.Semaphore(50000)  # 每进程并发控制
+    semaphore = asyncio.Semaphore(7000)  # 每进程并发控制
     tasks = []
     for i in range(start_id, end_id):
         task = asyncio.create_task(websocket_client(i, uri, semaphore))
         tasks.append(task)
-        if i % 500 == 0:
-            await asyncio.sleep(0.1)
+        # if i % 500 == 0:
+        #     await asyncio.sleep(0.1)
     await asyncio.gather(*tasks)
 
 def run_process(start_id: int, end_id: int, uri: str):
@@ -74,7 +74,7 @@ async def main():
     # 配置参数
     SERVER_URI = "ws://192.168.40.129:8058?locale=zh-CN&client_properties=eyJvcyI6ImlvcyIsInZlcnNpb24iOiIxLjAuMCIsImJ1aWxkX251bWJlciI6Ijc2MyIsImRldmljZV9pZCI6IjVEMTc1NEUxLTAzNUMtNDQ1My1BOEJDLUJBN0Q1ODdGNTQ4NyJ9&authorization=a58b6a4695401b1c1522c322dedac4730dc3ab73c9247155e412defb6be6b2ad56f5c117848523f46ecaf7f18dd99c340286425160a77616bf0b1fa3b42cd1235a3e5afc9671f625a5948f4c7c720d89b7f9a60ac83e9d8d6c4f677b5a0ae420a199ea76b55d1a89f829a3bf9328df50&token=a58b6a4695401b1c1522c322dedac4730dc3ab73c9247155e412defb6be6b2ad56f5c117848523f46ecaf7f18dd99c340286425160a77616bf0b1fa3b42cd1235a3e5afc9671f625a5948f4c7c720d89b7f9a60ac83e9d8d6c4f677b5a0ae420a199ea76b55d1a89f829a3bf9328df50"  # 替换为实际地址
     TOTAL_CLIENTS = 55000  # 总连接数
-    MAX_CONCURRENT = 10000   # 最大并发连接数（根据系统调整）
+    MAX_CONCURRENT = 25000   # 最大并发连接数（根据系统调整）
 
     num_cores = cpu_count()  # 获取CPU核心数
     clients_per_process = TOTAL_CLIENTS // num_cores
