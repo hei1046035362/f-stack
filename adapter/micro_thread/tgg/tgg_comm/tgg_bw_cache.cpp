@@ -961,12 +961,12 @@ void tgg_getall_bwfdx(std::vector<int64_t>& vec_bwfdx)
     }
 }
 
-int tgg_get_load_balance(std::vector<int64_t>& vec_bwfdx)
+int tgg_get_load_balance(std::vector<int64_t>& vec_bwfdx, int64_t ipport)
 {
-    uint64_t now = get_system_ms();
+    // uint64_t now = get_system_ms();
     size_t count = vec_bwfdx.size();
     if(count > 0) {
-        return vec_bwfdx[now % count];
+        return vec_bwfdx[ipport % count];
     }
     LOG_ERROR("Get load balance failed, no bwfdx found.");
     return -1;
