@@ -87,7 +87,7 @@ void tgg_iter_del_bwfdx(int prc_id);
 void tgg_getall_bwfdx(std::vector<int64_t>& vec_bwfdx);
 
 // 获取负载最小的bwfdx
-int tgg_get_load_balance(std::vector<int64_t>& vec_bwfdx);
+int tgg_get_load_balance(std::vector<int64_t>& vec_bwfdx, int64_t ipport);
 
 
 int tgg_check_bwwkkey_exist(const char* bwwkkey);

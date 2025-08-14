@@ -169,7 +169,7 @@ static void* deal_trans(void*)
                 // 随机取一个可用的服务端连接
                 // int pos = bdata->fd % tgg_get_bwfdx_count();
                 // bwfdx = tgg_get_bwfdx_bypos(pos);
-                bwfdx = tgg_get_load_balance(vec_bwfdx);
+                bwfdx = tgg_get_load_balance(vec_bwfdx, tdata->peer_ip + tdata->peer_port);
                 if(bwfdx == -1) {
                     LOG_ERROR("get load balance failed.");
                     usleep(10);
