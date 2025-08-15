@@ -14,8 +14,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s.%(msecs)03d [%(threa
 import ctypes
 MAX_PACKET_SIZE = 4096
 gid_base = 62205555455823872
-group_cids = dict({gid_base: 0})
+gid_count = 1000
+
+
+# group_cids = dict({gid_base: 0})
+
+# True 同一个群里面 5000个人，一千个人同时发消息   也就是一次性sendgroup一千次
+# False 5000个群，每个群一千个人，每个群同时sendgroup一次
 distinct_user_in_group = True
+
+# 发送次数  distinct_user_in_group为True才使用
+send_times = 1000
 
 class TggBwProtocal(ctypes.Structure):
     # 1字节对齐（等效C的__attribute__((packed))）
@@ -106,7 +115,7 @@ class HighPerfForwarder:
             # 1. 验证包长度有效性
             if pack_len < ctypes.sizeof(TggBwProtocal) or pack_len > MAX_PACKET_SIZE:
                 logging.error(f"Invalid packet len[{pack_len}]")
-                logging.error(f"Bin data: {bin2hex(self.recv_buffer[:64])}")
+                logging.error(f"Bin data: {self.recv_buffer[:64].hex()}")
                 self.active = False
                 return []
             
@@ -147,21 +156,12 @@ class HighPerfForwarder:
                 # print(new_header.connection_id)
                 global gid_base
                 if distinct_user_in_group :
-                    if len(group_cids) > 1000:
-                        logging.info(f"groups {len(group_cids)} over 1000")
-                    if gid_base in group_cids and group_cids[gid_base] < 1000 :
-                        group_cids[gid_base] += 1
-                    elif group_cids[gid_base] >= 1000:
-                        gid_base += 1
-                        group_cids[gid_base] = 0
-                    else:
-                        group_cids[gid_base] = 0
                     payload = str(gid_base).encode('utf-8')
                     header_data = new_header.create_full_packet(payload)
                     processed_data.append(header_data)
                 else:
                     gid_base = 62205555455823872
-                    for x in range(1000):
+                    for x in range(gid_count):
                         # parsed_header.data = str(gid_base).encode('utf-8')
                         gid_base += 1
                         payload = str(gid_base).encode('utf-8')
@@ -262,10 +262,12 @@ class HighPerfForwarder:
             time.sleep(1)
     def _get_sendgroup_frame(self, group):
         gid_hex = str(gid_base).encode('utf-8').hex()
-        cmd_data = f"0000008a16000000000000000000000000000000000100000000002e7b226578636c756465223a6e756c6c2c2267726f7570223a5b22{gid_hex}225d7d7b22636d64223a31372c2264617461223a223061313430383830613038306638633363653837353631303830613038306238656161656336363831383031227d"
+        cmd_data = f"0000017b1600000000000000000000000000000000010000000000397b226578636c756465223a7b223737383234223a37373832347d2c2267726f7570223a5b22{gid_hex}225d7dfffe0000000001260000000300000001000002011d90bd2f044118c617915c79515ef546a9d82fc72dbdc4754aedeccebb5fd999593bb3b7d9504c234a85c61542e13f4048508952a15610c9150a8942a5615cfdfc9e5f9e3c1dadef6e5f8f5e0e66bbfa4cff3c7e3ef3de2e151281f056708426250a9480b2202d0cdff5984122048521304211b2694833c204a71089baa0909291e92157108bca6052612521ac1548254aa45357c613a00c9851c4907183a0e128584b7b1db3e4fbe1fc6263613ec51279af3bb9be848ff1154c6e4ee0ebf4f870713b55aa94eb8e437dbfd9a12acf99f09ad68e0a51d3b8125cd91c95933192a074c888285239cbe8fa83d05ff58370e0876e8064cdebbb1e462b2e09fa6e60e76512ecbffdde3ffdffb1696d597a66ee0f"
+        #cmd_data = f"0000008a16000000000000000000000000000000000100000000002e7b226578636c756465223a6e756c6c2c2267726f7570223a5b22{gid_hex}225d7d7b22636d64223a31372c2264617461223a223061313430383830613038306638633363653837353631303830613038306238656161656336363831383031227d"
         return cmd_data
     def _user_input(self):
         """用户输入处理（非阻塞）"""
+        global gid_base
         while self.active:
             hex_str = input("输入HEX数据: ").strip()
             if hex_str.lower() == "exit":
@@ -273,19 +275,24 @@ class HighPerfForwarder:
                 break
             elif hex_str.lower() == "sendgroup":            
                 try:
+                    logging.info("sendgroup start")
                     if distinct_user_in_group :
-                        for x in group_cids:
-                            sendata = self._get_sendgroup_frame(x)
+                        global send_times
+                        for n in range(send_times):
+                            sendata = self._get_sendgroup_frame(gid_base)
                             data = bytes.fromhex(sendata)
                             self.send_queue.put(data)
+                        logging.info(f"send times:{send_times} for group:{gid_base}")
                     else :
                         gid_base = 62205555455823872
-                        for x in range(1000):
+                        for x in range(gid_count):
                             # parsed_header.data = str(gid_base).encode('utf-8')
                             gid_base += 1
                             sendata = self._get_sendgroup_frame(gid_base)
                             data = bytes.fromhex(sendata)
                             self.send_queue.put(data)
+                        logging.info(f"sended for group count:{gid_count}")
+                    logging.info("sendgroup end")
                 except ValueError:
                     logging.error("Invalid HEX format")
 if __name__ == "__main__":
