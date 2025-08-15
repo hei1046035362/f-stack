@@ -1438,7 +1438,10 @@ ssize_t MtFrame::send(int fd, const void *buf, size_t nbyte, int flags, int time
             if (errno == EINTR) {
                 continue;
             }
-            
+            if (errno == EAGAIN) {  // 资源暂时不可用
+                sleep(1); // 等待 1ms 重试
+                continue;
+            }
             if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) {
                 MTLOG_ERROR("write failed, errno: %d", errno);
                 return -2;
