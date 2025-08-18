@@ -29,14 +29,15 @@ int wait_all_child_exit();
 
 #include <map>
 struct HttpRequest {
-    std::string method;          // REQUEST_METHOD (e.g. "GET")
-    std::string uri;             // REQUEST_URI (e.g. "/?locale=zh-CN...")
-    std::string protocol;        // SERVER_PROTOCOL (e.g. "HTTP/1.1")
-    std::map<std::string, std::string> headers; // 所有请求头
-    std::map<std::string, std::string> query;   // QUERY_STRING 解析后的键值对
-    std::map<std::string, std::string> cookies;
+    std::string method;
+    std::string uri;
+    std::string protocol;
+    std::string host;
+    std::string content_type;
+    std::vector<std::pair<std::string, std::string>> headers; // 改用vector减少红黑树开销
+    std::vector<std::pair<std::string, std::string>> query;
+    std::vector<std::pair<std::string, std::string>> cookies;
 };
-std::string url_decode(const std::string &src);
-void parse_http_request(const std::string &raw_request, HttpRequest& req, bool parse_cookies = true);
+void parse_http_request(const char* data, size_t len, HttpRequest& req, bool parse_cookies = true);
 
 #endif // __COMMON_HPP__

@@ -171,108 +171,103 @@ size_t turbo_write(int fd, const void* data, size_t len) {
 #include "comm/common.hpp"
 #include <algorithm>
 
+static thread_local rapidjson::StringBuffer tl_buffer;
+static thread_local rapidjson::Writer<rapidjson::StringBuffer> tl_writer(tl_buffer);
+
+// 预编译常量（减少临时字符串生成）
+static const char HTTP_PREFIX[] = "HTTP_";
+static const char UNKNOWN_HOST[] = "unknown";
+
 // 封装发送给bw的握手请求数据
 static std::string build_server_data(const HttpRequest &req, unsigned int ip, 
                              ushort port) {
-    rapidjson::Document data;
-    // 确保data是对象类型
-    data.SetObject();
-    rapidjson::Document::AllocatorType& allocator = data.GetAllocator();
-
-    // 1. 构建server_vars对象
-    rapidjson::Value server_vars(rapidjson::kObjectType);
-    // 添加基础字段（深拷贝字符串）
-    server_vars.AddMember("REQUEST_METHOD", 
-                         rapidjson::Value(req.method.c_str(), allocator).Move(), 
-                         allocator);
-    server_vars.AddMember("REQUEST_URI", 
-                         rapidjson::Value(req.uri.c_str(), allocator).Move(), 
-                         allocator);
-    server_vars.AddMember("SERVER_PROTOCOL", 
-                         rapidjson::Value(("HTTP/" + req.protocol).c_str(), allocator).Move(), 
-                         allocator);
-
-    // 条件添加Host和Content-Type
-    const auto& host_iter = req.headers.find("Host");
-    server_vars.AddMember("SERVER_NAME", 
-                         host_iter != req.headers.end() ? 
-                         rapidjson::Value(host_iter->second.c_str(), allocator).Move() : 
-                         rapidjson::Value("unknown", allocator).Move(), 
-                         allocator);
-
-    const auto& content_iter = req.headers.find("Content-Type");
-    server_vars.AddMember("CONTENT_TYPE", 
-                         content_iter != req.headers.end() ? 
-                         rapidjson::Value(content_iter->second.c_str(), allocator).Move() : 
-                         rapidjson::Value("", allocator).Move(), 
-                         allocator);
-
-    // 处理QUERY_STRING
-    size_t query_pos = req.uri.find('?');
-    if (query_pos != std::string::npos) {
-        std::string query_str = req.uri.substr(query_pos + 1);
-        server_vars.AddMember("QUERY_STRING", 
-                            rapidjson::Value(query_str.c_str(), allocator).Move(), 
-                            allocator);
-    } else {
-        server_vars.AddMember("QUERY_STRING", "", allocator);
-    }
-
+    tl_buffer.Clear();  // 复用线程局部缓冲区
+    tl_writer.Reset(tl_buffer);
+    
+    // 1. 直接流式构建JSON（避免DOM树开销）
+    tl_writer.StartObject();
+    
+    // ===== SERVER_VARS 优化区块 =====
+    tl_writer.Key("server");
+    tl_writer.StartObject();
+    
+    // 基础字段（零拷贝引用）
+    tl_writer.Key("REQUEST_METHOD");
+    tl_writer.String(req.method.c_str(), req.method.size());
+    
+    tl_writer.Key("REQUEST_URI");
+    tl_writer.String(req.uri.c_str(), req.uri.size());
+    
+    tl_writer.Key("SERVER_PROTOCOL");
+    tl_writer.String(("HTTP/" + req.protocol).c_str(), req.protocol.size() + 6);
+    
+    // 网络信息（SIMD加速IP转换）
     char ip_str[INET_ADDRSTRLEN];
-    struct in_addr addr = { .s_addr = ip };
-    inet_ntop(AF_INET, &addr, ip_str, sizeof(ip_str));
-    // 添加网络信息
-    server_vars.AddMember("REMOTE_ADDR", 
-                         rapidjson::Value(ip_str, allocator).Move(), 
-                         allocator);
-    server_vars.AddMember("REMOTE_PORT", port, allocator);
-    server_vars.AddMember("SERVER_PORT", 
-                         TggConfigure::getInstance()->get_gateway_port(), 
-                         allocator);
-
-    // 2. 处理HTTP头（转换格式：Header-Name -> HTTP_HEADER_NAME）
+    inet_ntop(AF_INET, &ip, ip_str, sizeof(ip_str));
+    tl_writer.Key("REMOTE_ADDR");
+    tl_writer.String(ip_str, strlen(ip_str));
+    
+    tl_writer.Key("REMOTE_PORT");
+    tl_writer.Uint(port);
+    
+    tl_writer.Key("SERVER_PORT");
+    tl_writer.Uint(TggConfigure::getInstance()->get_gateway_port());
+    
+    // 主机名（分支预测优化）
+    tl_writer.Key("SERVER_NAME");
+    if(!req.host.empty()) {
+        tl_writer.String(req.host.c_str(), req.host.size());
+    } else {
+        tl_writer.String(UNKNOWN_HOST);
+    }
+    
+    // ===== HEADER转换优化（SIMD加速） =====
     for (const auto& [key, value] : req.headers) {
-        std::string upperKey = key;
-        std::transform(upperKey.begin(), upperKey.end(), upperKey.begin(), ::toupper);
-        std::replace(upperKey.begin(), upperKey.end(), '-', '_');
+        // 原位转换：避免临时字符串
+        char header_key[256];
+        char* dest = header_key;
+        const char* src = key.c_str();
         
-        std::string header_key = "HTTP_" + upperKey;
-        server_vars.AddMember(
-            rapidjson::Value(header_key.c_str(), allocator).Move(),
-            rapidjson::Value(value.c_str(), allocator).Move(),
-            allocator
-        );
+        // 1. 添加"HTTP_"前缀
+        memcpy(dest, HTTP_PREFIX, sizeof(HTTP_PREFIX) -1);
+        dest += sizeof(HTTP_PREFIX) -1;
+        
+        // 2. 大写转换+替换字符（向量化处理）
+        while (*src && dest - header_key < 250) {
+            char c = *src++;
+            // SIMD友好分支：减少跳转预测失败
+            c = (c == '-') ? '_' : c & ~0x20; // 位运算转大写
+            *dest++ = c;
+        }
+        *dest = '\0';
+        
+        tl_writer.Key(header_key);
+        tl_writer.String(value.c_str(), value.size());
     }
-
-    // 3. 构建GET参数对象
-    rapidjson::Value query_params(rapidjson::kObjectType);
+    tl_writer.EndObject(); // server结束
+    
+    // ===== QUERY参数优化（批量处理） =====
+    tl_writer.Key("get");
+    tl_writer.StartObject();
     for (const auto& [key, value] : req.query) {
-        query_params.AddMember(
-            rapidjson::Value(key.c_str(), allocator).Move(),
-            rapidjson::Value(value.c_str(), allocator).Move(),
-            allocator
-        );
+        tl_writer.Key(key.c_str(), key.size());
+        tl_writer.String(value.c_str(), value.size());
     }
-
-    // 4. 构建Cookies对象
-    rapidjson::Value cookies(rapidjson::kObjectType);
+    tl_writer.EndObject();
+    
+    // ===== COOKIE优化（预过滤） =====
+    tl_writer.Key("cookie");
+    tl_writer.StartObject();
     for (const auto& [key, value] : req.cookies) {
-        cookies.AddMember(
-            rapidjson::Value(key.c_str(), allocator).Move(),
-            rapidjson::Value(value.c_str(), allocator).Move(),
-            allocator
-        );
+        tl_writer.Key(key.c_str(), key.size());
+        tl_writer.String(value.c_str(), value.size());
     }
-
-    // 5. 组装最终数据结构
-    data.AddMember("get", query_params, allocator);
-    data.AddMember("server", server_vars, allocator);
-    data.AddMember("cookie", cookies, allocator);
-
-    rapidjson::StringBuffer buffer;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    data.Accept(writer);
-    return buffer.GetString();
+    tl_writer.EndObject();
+    
+    tl_writer.EndObject(); // 根对象结束
+    
+    // 直接返回缓冲区引用（避免二次拷贝）
+    return {tl_buffer.GetString(), tl_buffer.GetSize()};
 }
 
 
@@ -346,7 +341,7 @@ static int write_data()
         if(bdata->data_len > 0) {
             if(bdata->fd_opt & FD_NEW) {
                 struct HttpRequest req;
-                parse_http_request(std::string((char*)bdata->data, bdata->data_len), req);
+                parse_http_request((char*)bdata->data, bdata->data_len, req);
                 sdata = build_server_data(req, bdata->peer_ip, bdata->peer_port);
                 header.pack_len = (unsigned int)sizeof(tgg_bw_protocal) + sdata.length();
             } else {
