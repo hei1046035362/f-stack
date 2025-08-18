@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <string_view>
 #include "common.hpp"
 enum WebSocketFrameType {
     ERROR_FRAME = 0xFF,
@@ -19,7 +20,13 @@ enum WebSocketFrameType {
     PONG_FRAME = 0xA
 };
 
-
+struct ValidationResult {
+    bool valid = false;
+    std::string_view token;
+    std::string_view client_properties;
+    std::string_view sec_websocket_key;
+    std::string_view origin;
+};
 // TODO: 为了快速开发，目前websocket的缓存和握手状态都在st_cli_info中，后续需要重新封装一下
 //          方法要和数据隔离
 class Websocket
@@ -38,9 +45,9 @@ private:
     // 新的连接处理
     std::string _ClientConnect(const std::string& request);
     // 生成websocket连接的唯一键
-    std::string _GenerateAcceptKey(const std::string& key);
+    std::string _GenerateAcceptKey(std::string_view key);
 
-    int _HandleHandshake(const std::string& request, HttpRequest& req, std::string& response);
+    int _HandleHandshake(std::string_view request, ValidationResult& req, std::string& response);
         
     /* parse base frame according to
      * https://www.rfc-editor.org/rfc/rfc6455#section-5.2
@@ -55,7 +62,7 @@ protected:
 public:
     // 所有发送数据都在子类执行，这里只做websocket相关的公共操作
     virtual void OnConnect() = 0;
-    virtual void OnHandShake(const std::string& request, const std::string& response, struct HttpRequest& req) = 0;
+    virtual void OnHandShake(std::string_view request, const std::string& response, struct ValidationResult& req) = 0;
     virtual void OnMessage(const std::string& msg) = 0;
     virtual void OnClose() = 0;// 子类继承后要执行clean_buffer清理缓存
     virtual void OnPing(const std::string& response) {};

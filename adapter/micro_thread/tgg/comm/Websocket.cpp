@@ -4,63 +4,156 @@
 #include <map>
 #include <algorithm>
 #include <unordered_map>
+#include <array>
+#include <string_view>
 #include <openssl/sha.h>
 #include "Encrypt.hpp" // 需要使用 Base64 库
 #include "common.hpp"
 #include "tgg_comm/tgg_common.h"
 #include "Websocket.hpp"
 #include "log.hpp"
-
+#include <version>
 static const size_t WS_MAX_RECV_FRAME_SZ = 10485760;
 
-bool is_valid_websocket_handshake(const HttpRequest &req) {
-    // 检查必需的头字段
-    if (req.headers.find("upgrade") == req.headers.end() ||
-        req.headers.find("connection") == req.headers.end() ||
-        req.headers.find("sec-websocket-key") == req.headers.end()) {
-        LOG_ERROR("lack of nessesary key in request header: upgrade, connection, sec-websocket-key");
-        return false;
+// 判断字符串是否以子串开头，忽略大小写
+#ifdef __cpp_lib_starts_ends_with  // C++20 feature test macro
+bool strview_starts_with_insensitive(std::string_view str, std::string_view prefix) {
+    if (prefix.size() > str.size()) return false;
+    return std::equal(str.begin(), str.begin() + prefix.size(), prefix.begin(), prefix.end(),
+        [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); });
+}
+#define STRVIEW_STARTS_WITH(str, prefix) strview_starts_with_insensitive(str, prefix)
+#else
+bool strview_starts_with(std::string_view str, std::string_view prefix) {
+    if (prefix.size() > str.size()) return false;
+    return std::equal(str.begin(), str.begin() + prefix.size(), prefix.begin(), prefix.end(),
+        [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); });
+}
+#define STRVIEW_STARTS_WITH(str, prefix) strview_starts_with(str, prefix)
+#endif
+
+ValidationResult parse_websocket_request(std::string_view raw_request) {
+    ValidationResult result;
+    if (raw_request.empty()) return result;
+
+    // 1. Parse request line
+    const size_t line_end = raw_request.find("\r\n");
+    if (line_end == std::string_view::npos) return result;
+    std::string_view request_line = raw_request.substr(0, line_end);
+
+    // 2. Extract query parameters
+    size_t query_start = request_line.find('?');
+    if (query_start == std::string_view::npos) return result;
+    query_start++; // Move past '?'
+    
+    constexpr std::array<std::string_view, 2> targets = {"token=", "client_properties="};
+    std::array<size_t, 2> targets_len = {targets[0].size(), targets[1].size()};
+    bool found_token = false, found_client_properties = false;
+
+    for (size_t pos = query_start; pos < request_line.size(); ) {
+        size_t param_end = request_line.find_first_of("& ", pos);
+        if (param_end == std::string_view::npos) param_end = request_line.size();
+        std::string_view param = request_line.substr(pos, param_end - pos);
+
+        if (STRVIEW_STARTS_WITH(param, targets[0])) {
+            result.token = param.substr(targets_len[0]);
+            found_token = true;
+        } else if (STRVIEW_STARTS_WITH(param, targets[1])) {
+            result.client_properties = param.substr(targets_len[1]);
+            found_client_properties = true;
+        }
+
+        if (found_token && found_client_properties) break;
+        pos = param_end + (param_end < request_line.size() ? 1 : 0);
     }
 
-    // 验证协议升级字段
-    std::string upgrade = req.headers.at("upgrade");
-    std::string connection = req.headers.at("connection");
-    std::transform(upgrade.begin(), upgrade.end(), upgrade.begin(), ::tolower);
-    std::transform(connection.begin(), connection.end(), connection.begin(), ::tolower);
-    if(upgrade == "websocket" && connection.find("upgrade") != std::string::npos) {
-       return true;
-    }
-    LOG_ERROR("invalid upgrade[%s] or connection[%s] in headers", upgrade.c_str(), connection.c_str());
-    return false;
+    // 3. Validate headers
+    constexpr std::array<std::string_view, 3> required_headers = {
+        "upgrade: websocket",
+        "connection: upgrade",
+        "sec-websocket-version: 13"
+    };
+    std::array<bool, required_headers.size()> found_headers = {false};
 
+    size_t pos = line_end + 2; // Skip request line and \r\n
+    while (pos < raw_request.size()) {
+        size_t next_line = raw_request.find("\r\n", pos);
+        if (next_line == std::string_view::npos) break;
+        std::string_view line = raw_request.substr(pos, next_line - pos);
+        pos = next_line + 2;
+
+        if (line.empty()) break; // End of headers
+
+        // Check required headers
+        for (size_t i = 0; i < required_headers.size(); ++i) {
+            if (!found_headers[i] && STRVIEW_STARTS_WITH(line, required_headers[i])) {
+                found_headers[i] = true;
+            }
+        }
+
+        // Extract Sec-WebSocket-Key and Origin
+        if (STRVIEW_STARTS_WITH(line, "sec-websocket-key: ")) {
+            result.sec_websocket_key = line.substr(19);
+            // LOG_INFO("sec_key:%s", result.sec_websocket_key.data());
+        } else if (STRVIEW_STARTS_WITH(line, "origin: ")) {
+            result.origin = line.substr(8);
+        }
+    }
+
+    // 4. Validate result
+    result.valid = std::all_of(found_headers.begin(), found_headers.end(), [](bool v) { return v; });
+    return result;
 }
 
+static constexpr std::string_view WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 // 生成websocket连接的唯一键
-std::string Websocket::_GenerateAcceptKey(const std::string& key)
+std::string Websocket::_GenerateAcceptKey(std::string_view key)
 {
-    std::string concat_key = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";    
-    return Encrypt::Base64Encode(Encrypt::sha1(concat_key));
+    // 预分配拼接内存 (key + GUID)
+    thread_local std::string concat_key;
+    concat_key.reserve(key.size() + WS_GUID.size());
+    concat_key.assign(key);
+    concat_key.append(WS_GUID);
+
+    // 计算SHA1 (复用内存)
+    thread_local std::string sha1_result;
+    sha1_result.resize(SHA_DIGEST_LENGTH);
+    SHA1(reinterpret_cast<const unsigned char*>(concat_key.data()), 
+         concat_key.size(),
+         reinterpret_cast<unsigned char*>(sha1_result.data()));
+
+    // Base64编码 (预计算长度)
+    const size_t encoded_len = (4 * ((SHA_DIGEST_LENGTH + 2) / 3));
+    thread_local std::string base64_result;
+    base64_result.resize(encoded_len);
+    
+    const int actual_len = EVP_EncodeBlock(
+        reinterpret_cast<unsigned char*>(base64_result.data()),
+        reinterpret_cast<const unsigned char*>(sha1_result.data()),
+        SHA_DIGEST_LENGTH
+    );
+
+    // 移除尾部填充的NUL字符
+    if (actual_len > 0 && static_cast<size_t>(actual_len) < base64_result.size()) {
+        base64_result.resize(actual_len);
+    }
+    return base64_result;
 }
 
-int Websocket::_HandleHandshake(const std::string& request, HttpRequest& req, std::string& response)
+int Websocket::_HandleHandshake(std::string_view request, ValidationResult& req, std::string& response)
 {
-    // std::istringstream stream(request);
-    // std::string line;
-    // std::string web_key;
-    // int check_count = 2;
     if((request.size() < 5) || (request.substr(0, 5) != "GET /")) {
-        LOG_ERROR("Invalid http request:%s", request.c_str());
+        LOG_DEBUG("Invalid http request:%s", request.data());
         response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid request method or path";
         return -1;
     }
-    parse_http_request(request, req, false);
-
-    if (!is_valid_websocket_handshake(req)) {
-        LOG_ERROR("Invalid WebSocket handshake:%s", request.c_str());
+    req = parse_websocket_request(request);
+    if (!req.valid) {
+        LOG_DEBUG("Invalid WebSocket handshake:%s", request.data());
         response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid WebSocket handshake headers";
         return -1;
     }
-    std::string accept_key = _GenerateAcceptKey(req.headers["sec-websocket-key"]);
+    std::string accept_key = _GenerateAcceptKey(req.sec_websocket_key);
 
     // 构建握手响应
     response.clear();
@@ -73,13 +166,8 @@ int Websocket::_HandleHandshake(const std::string& request, HttpRequest& req, st
                    "Connection: Upgrade\r\n"
                    "Sec-WebSocket-Accept: ");
     response.append(accept_key);
-    response.append("\r\nServer: workerman/4.1.15\r\n\r\n");
+    response.append("\r\nServer: tgg_gateway/1.0.0\r\n\r\n");
     return 0;
-}
-
-void form_con_req_to_bw_data()
-{
-
 }
 
 // 编码关闭帧
@@ -250,80 +338,27 @@ Websocket::_GetWsFrame(unsigned char *in_buffer, size_t buf_len,
         return opcode;
 }
 
-// #if defined(__i386__) || defined(__x86_64__)
-// #include <smmintrin.h>
-// static int check_if_http_end(const char* data, int len) {
-//     if (len < 4) return 0;
-//     // 加载4字节常量：\r\n\r\n
-//     const __m128i pattern = _mm_set1_epi32(0x0A0D0A0D); // 小端序：\r\n\r\n
-//     for (int i = 0; i <= len - 16; i += 4) {
-//         __m128i chunk = _mm_loadu_si128((const __m128i*)(data + i));
-//         __m128i cmp = _mm_cmpeq_epi32(chunk, pattern);
-//         if (!_mm_testz_si128(cmp, cmp)) {
-//             // 找到匹配位置
-//             for (int j = i; j < i + 16; j++) {
-//                 if (j + 3 < len && 
-//                     data[j]=='\r' && data[j+1]=='\n' && 
-//                     data[j+2]=='\r' && data[j+3]=='\n') 
-//                     return j + 4;
-//             }
-//         }
-//     }
-//     return 0;
-// }
-// #else
-// typedef struct {
-//     int state;  // 0:初始 1:收到\r 2:收到\r\n 3:收到\r\n\r
-// } ParserState;
+#include <cstring>
+static inline int check_if_http_end(const char* data, size_t len) {
+    // 快速检查最小长度
+    if (__builtin_expect(len < 4, 0)) return 0;  // 小于4字节不可能包含\r\n\r\n
 
-static int check_if_http_end(const char* data, int len) {
-    int state = 0;
-    for (int i = 0; i < len; i++) {
-        switch (state) {
-            case 0: if (data[i] == '\r') state = 1; break;
-            case 1: 
-                if (data[i] == '\n') state = 2; 
-                else state = 0;
-                break;
-            case 2: 
-                if (data[i] == '\r') state = 3; 
-                else state = 0;
-                break;
-            case 3: 
-                if (data[i] == '\n') return i + 1; // 返回结束位置
-                state = 0;
-                break;
+    const char* end = data + len;
+    const char* ptr = data;
+
+    // 快速扫描首个\r\n位置
+    while ((ptr = static_cast<const char*>(memchr(ptr, '\r', end - ptr)))) {
+        // 检查连续\r\n\r\n模式
+        if (ptr + 3 < end && 
+            ptr[1] == '\n' && 
+            ptr[2] == '\r' && 
+            ptr[3] == '\n') {
+            return ptr - data + 4;  // 返回结束位置
         }
+        ptr++;  // 继续搜索下一个\r
     }
     return 0;
 }
-// #endif
-
-// static int check_if_http_end(const char* data, int len) {
-//     if (len < 2) {
-//         return 0; // 长度不足时直接返回
-//     }
-
-//     int index = 0;
-//     while (index < len - 1) { // 确保剩余长度至少2字节
-//         // 优先检查标准结束符 \r\n\r\n (4字节)
-//         if (index + 3 < len && 
-//             data[index] == '\r' && 
-//             data[index+1] == '\n' && 
-//             data[index+2] == '\r' && 
-//             data[index+3] == '\n') {
-//             return index + 4; // 返回结束位置后4字节
-//         }
-
-//         // 检查非标准结束符 \n\n (2字节)
-//         if (data[index] == '\n' && data[index+1] == '\n') {
-//             return index + 2; // 返回结束位置后2字节
-//         }
-
-//         index++;
-//     }
-//     return 0; // 未找到结束符
-// }
 
 // websocket的解析逻辑，只有毁掉函数和返回值是自定义的，其余都是ai提供的解析代码，目前(2025/07/01)验证结果是正常的
 // return  -1 缓存失败，要关闭连接并删除源数据data 0 缓存数据，本次不处理  1 消息处理完成，需要清理缓存
@@ -369,8 +404,8 @@ int Websocket::ReadData(void* data, int len)
                     return -1;
                 }
             }
-            HttpRequest req;
-            std::string request((char*)input, in_len);
+            ValidationResult req;
+            std::string_view request((char*)input, in_len);
             std::string response;
             if (_HandleHandshake(request, req, response) < 0) {
                 OnSend(response, FD_WRITE);

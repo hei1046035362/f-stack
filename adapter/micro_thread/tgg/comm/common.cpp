@@ -176,89 +176,111 @@ int wait_all_child_exit()
 }
 
 
-// URL解码函数（参考网页[9][10]）
-std::string url_decode(const std::string &src) {
-    std::string decoded;
-    for (size_t i = 0; i < src.size(); ++i) {
-        if (src[i] == '%' && i + 2 < src.size()) {
-            int hex_val;
-            std::istringstream hex_stream(src.substr(i+1, 2));
-            if (hex_stream >> std::hex >> hex_val) {
-                decoded += static_cast<char>(hex_val);
-                i += 2;
-            }
-        } else if (src[i] == '+') {
-            decoded += ' ';
+// 1. URL解码优化：预分配内存+避免子串复制
+inline void url_decode_inplace(std::string& src) {
+    size_t src_idx = 0, dst_idx = 0;
+    for (; src_idx < src.size(); ++src_idx) {
+        if (src[src_idx] == '%' && src_idx + 2 < src.size()) {
+            char c1 = std::tolower(src[src_idx + 1]);
+            char c2 = std::tolower(src[src_idx + 2]);
+            uint8_t val = (c1 >= 'a' ? c1 - 'a' + 10 : c1 - '0') * 16 +
+                          (c2 >= 'a' ? c2 - 'a' + 10 : c2 - '0');
+            src[dst_idx++] = static_cast<char>(val);
+            src_idx += 2;
+        } else if (src[src_idx] == '+') {
+            src[dst_idx++] = ' ';
         } else {
-            decoded += src[i];
+            if (dst_idx != src_idx) src[dst_idx] = src[src_idx];
+            dst_idx++;
         }
     }
-    return decoded;
+    src.resize(dst_idx);
 }
 
-// 解析HTTP请求（参考网页[7][11]的握手处理）
-void parse_http_request(const std::string &raw_request, HttpRequest& req, bool parse_cookies)
-{
-    std::istringstream stream(raw_request);
-    std::string line;
+// 2. 高效解析HTTP请求
+void parse_http_request(const char* data, size_t len, HttpRequest& req, bool parse_cookies) {
+    const char* end = data + len;
+    const char* ptr = data;
 
-    // 解析请求行
-    if (std::getline(stream, line)) {
-        std::istringstream line_stream(line);
-        line_stream >> req.method >> req.uri >> req.protocol;
-        req.protocol = req.protocol.substr(5); // 去除"HTTP/"
+    // 解析请求行（避免字符串流）
+    while (ptr < end && *ptr != ' ') req.method += *ptr++;
+    while (ptr < end && *ptr == ' ') ptr++; // 跳过空格
+    while (ptr < end && *ptr != ' ') req.uri += *ptr++;
+    while (ptr < end && *ptr == ' ') ptr++;
+    while (ptr < end && *ptr != '\r') req.protocol += *ptr++;
+    if (!req.protocol.empty() && req.protocol.size() > 5) {
+        req.protocol.erase(0, 5); // 原地移除"HTTP/"
     }
 
-    // 解析请求头
-    while (std::getline(stream, line) && line != "\r") {
-        size_t colon_pos = line.find(':');
-        if (colon_pos != std::string::npos) {
-            std::string key = line.substr(0, colon_pos);
-            std::transform(key.begin(), key.end(), key.begin(), ::tolower);
-            std::string value = line.substr(colon_pos + 2); // 跳过": "
-            value.erase(std::remove(value.begin(), value.end(), '\r'), value.end());
-            req.headers[key] = value;
+    // 解析头部（零拷贝+预分配）
+    ptr += 2; // 跳过"\r\n"
+    req.headers.reserve(20); // 预分配典型头部数量
+    while (ptr < end - 2) {
+        const char* colon = std::find(ptr, end, ':');
+        if (colon == end) break;
+
+        std::string key(ptr, colon);
+        std::transform(key.begin(), key.end(), key.begin(), 
+                       [](char c) { return std::tolower(c); });
+
+        const char* val_start = colon + 1;
+        while (val_start < end && (*val_start == ' ' || *val_start == '\t')) val_start++;
+        const char* val_end = std::find(val_start, end, '\r');
+        std::string value(val_start, val_end);
+        if(key == "host") {
+            req.host = value;
+        }
+        else if(key == "content-type") {
+            req.content_type = value;
+        }
+        req.headers.emplace_back(key, value);
+        ptr = val_end + 2; // 跳过"\r\n"
+        if (ptr < end && *ptr == '\r') break; // 空行检测
+    }
+
+    // 3. 查询参数解析（批量解码+避免流）
+    size_t query_start = 0;
+    while (query_start < req.uri.size() && req.uri[query_start] != '?') query_start++;
+    if (query_start++ < req.uri.size()) {
+        const char* query_str = req.uri.data() + query_start;
+        size_t query_len = req.uri.size() - query_start;
+        std::string query_buf(query_str, query_len);
+        url_decode_inplace(query_buf); // 批量解码整段查询字符串
+
+        const char* qptr = query_buf.data();
+        const char* qend = qptr + query_buf.size();
+        while (qptr < qend) {
+            const char* amp = std::find(qptr, qend, '&');
+            const char* eq = std::find(qptr, amp, '=');
+            std::string key(qptr, eq);
+            std::string val(eq + 1, amp);
+            req.query.emplace_back(std::move(key), std::move(val));
+            qptr = amp + (amp != qend);
         }
     }
 
-    // 解析QUERY_STRING（参考网页[9]的URL参数处理）
-    size_t query_start = req.uri.find('?');
-    if (query_start != std::string::npos) {
-        std::string query_str = req.uri.substr(query_start + 1);
-        std::istringstream query_stream(query_str);
-        std::string pair;
-        while (std::getline(query_stream, pair, '&')) {
-            size_t eq_pos = pair.find('=');
-            std::string key = (eq_pos != std::string::npos) ? 
-                url_decode(pair.substr(0, eq_pos)) : url_decode(pair);
-            std::string value = (eq_pos != std::string::npos) ? 
-                url_decode(pair.substr(eq_pos + 1)) : "";
-            req.query[key] = value;
-        }
-    }
+    // 4. Cookie解析（按需触发）
+    if (parse_cookies) {
+        for (const auto& [k, v] : req.headers) {
+            if (k == "cookie") {
+                std::string cookie_buf = v;
+                url_decode_inplace(cookie_buf); // 批量解码
 
-    // 新增：解析 Cookies（需在请求头解析完成后添加）
-    if (req.headers.find("cookie") != req.headers.end()) {
-        std::string cookieStr = req.headers["cookie"];
-        std::istringstream cookieStream(cookieStr);
-        std::string cookiePair;
-
-        while (std::getline(cookieStream, cookiePair, ';')) {
-            // 去除首尾空格（网页4提到的清理逻辑）
-            cookiePair.erase(cookiePair.begin(), 
-                std::find_if(cookiePair.begin(), cookiePair.end(), 
-                    [](int ch) { return !std::isspace(ch); }));
-            cookiePair.erase(std::find_if(cookiePair.rbegin(), cookiePair.rend(),
-                [](int ch) { return !std::isspace(ch); }).base(), cookiePair.end());
-
-            // 分割键值对（类似查询参数处理）
-            size_t eqPos = cookiePair.find('=');
-            if (eqPos != std::string::npos) {
-                std::string key = url_decode(cookiePair.substr(0, eqPos));
-                std::string value = url_decode(
-                    cookiePair.substr(eqPos + 1)
-                );
-                req.cookies[key] = value;  // 需在 HttpRequest 结构体中定义 cookies 成员
+                const char* cptr = cookie_buf.data();
+                const char* cend = cptr + cookie_buf.size();
+                while (cptr < cend) {
+                    while (cptr < cend && std::isspace(*cptr)) cptr++;
+                    const char* semi = std::find(cptr, cend, ';');
+                    const char* eq = std::find(cptr, semi, '=');
+                    if (eq != semi) {
+                        req.cookies.emplace_back(
+                            std::string(cptr, eq),
+                            std::string(eq + 1, semi)
+                        );
+                    }
+                    cptr = semi + (semi != cend);
+                }
+                break;
             }
         }
     }
