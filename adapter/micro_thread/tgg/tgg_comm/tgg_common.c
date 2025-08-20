@@ -1174,6 +1174,7 @@ pid_t start_gwrcv_sendary(int lcore_id)
     args[1] = proc_id;
     args[2] = NULL; // 必须以 NULL 结尾
     pid_t pid = custom_fork("gwrcv", lcore_id, args);
+    free(proc_id);
     free(args);
     return pid;
 }
@@ -1198,12 +1199,33 @@ pid_t start_register(int lcore_id)
     return pid;
 }
 
+static int get_mask_value(uint32_t mask, int index) {
+    int count = 0;  // 记录当前找到的第几个1
+
+    // 遍历掩码的每一位（0-31位）
+    for (int pos = 0; pos < 32; pos++) {
+        uint32_t bit_mask = 1U << pos;  // 生成当前位的掩码
+        if (mask & bit_mask) {          // 检查当前位是否为1
+            if (count == index) {
+                return bit_mask;  // 找到目标位置，返回该位的掩码值
+            }
+            count++;  // 已找到的1的数量增加
+        }
+    }
+    return -1;  // 序号超出范围
+}
+
 pid_t start_gwbwprc(int prc_id)
 {
-    char **args = (char**)malloc((2) * sizeof(char*));
+	int lcore_mask = get_mask_value(TggConfigure::getInstance()->get_bcore_mask(), prc_id);
+    char* proc_mask = (char*)malloc(24);
+    sprintf(proc_mask, "-c%x", lcore_mask);
+    char **args = (char**)malloc((3) * sizeof(char*));
     args[0] = const_cast<char*>("gwbwprc");
-    args[1] = NULL; // 必须以 NULL 结尾
+    args[1] = proc_mask;
+    args[2] = NULL; // 必须以 NULL 结尾
     pid_t pid = custom_fork("gwbwprc", prc_id, args);
+    free(proc_mask);
     free(args);
     return pid;
 }
