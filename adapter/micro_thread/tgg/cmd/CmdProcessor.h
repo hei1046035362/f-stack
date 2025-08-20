@@ -250,6 +250,14 @@ public:
     int ExecCmd() { return 0; }
 };
 
+class CmdReloadIpFilter : public CmdBaseProcessor {
+public:
+
+	CmdReloadIpFilter(int prc_id, int fd, void* data, const rapidjson::Document& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
+	~CmdReloadIpFilter() {}
+    int ExecCmd();
+};
+
 
 
 int exec_cmd_processor(int prc_id, int fd, void* data);

@@ -77,11 +77,13 @@ const char* s_trans_ring_name = "tgg_trans_ring";
 const char* s_bwfdx_ring_name = "tgg_bwfdx_ring";
 const char* write_ring_name_prev = "tgg_write_ring";
 const char* bwrcv_ring_name_prev = "tgg_bwrcv_ring";
+const char* s_master_ring_name = "tgg_master_ring";
 // 队列长度
 static uint32_t s_bwfdx_ring_size = 1024;  // bwfdx添加删除队列(gwbwprc->gwcliprc)，这个数据本身就不大，且处理很快
 static uint32_t s_trans_ring_size = 1024*32;  // 缓冲队列的长度，得是2的幂
 static uint32_t s_write_ring_size = 1024*64;  // 下行写队列长度，得是2的幂
 static uint32_t s_bwrcv_ring_size = 1024*128;  // bwprc可能处理不过来，需要长一点，得是2的幂
+static uint32_t s_master_ring_size = 64;  // secondary 发送给master执行的命令并不频繁，目前只有一个ip过滤列表的reload命令
 
 // 当前实际使用的队列
 struct rte_ring* g_ring_writes[MAX_LCORE_COUNT] = {NULL};// 客户端下行
@@ -89,6 +91,7 @@ struct rte_ring* g_ring_trans = NULL;// 上行透传
 struct rte_ring* g_ring_bwfdx = NULL;// bwprc 接收到新的/删除旧的 fd时 要通知透传线程
 struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT] = {NULL};// BW下行
 
+struct rte_ring* g_ring_master = NULL;// bwprc接收重新加载ip过滤列表的命令 要通知master去执行
 
 
 /// 三个内存池
@@ -468,6 +471,7 @@ void tgg_master_init()
 	// cli上行透传
 	g_ring_trans = make_ring(s_trans_ring_name, s_trans_ring_size);
 	g_ring_bwfdx = make_ring(s_bwfdx_ring_name, s_bwfdx_ring_size);
+	g_ring_master = make_ring(s_master_ring_name, s_master_ring_size);
 
 	g_mempool_trans = make_mempool(s_pool_trans_name, s_trans_mempool_size, s_mempool_trans_cache);
 	g_gid_hash = init_hash(s_gid_hash_name, g_fd_limit, TGG_GID_LEN);
@@ -570,6 +574,9 @@ void tgg_master_uninit()
 	rte_ring_free(g_ring_bwfdx);
 	g_ring_bwfdx = NULL;
 
+	rte_ring_free(g_ring_master);
+	g_ring_master = NULL;
+
 	rte_hash_free(g_uid_hash);
 	g_uid_hash = NULL;
 	rte_hash_free(g_gid_hash);
@@ -653,6 +660,7 @@ void tgg_secondary_init()
 	g_lock_zone = find_memzone(s_lock_zone_name);
 	g_ring_trans = find_ring(s_trans_ring_name);
 	g_ring_bwfdx = find_ring(s_bwfdx_ring_name);
+	g_ring_master = find_ring(s_master_ring_name);
 	g_mempool_trans = find_mempool(s_pool_trans_name);
 	g_mempool_trans_data = find_mempool(s_pool_trans_data_name);
 	g_mempool_write_data = find_mempool(s_pool_write_data_name);

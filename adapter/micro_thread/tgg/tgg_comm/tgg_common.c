@@ -33,6 +33,8 @@ extern struct rte_ring* g_ring_trans;
 extern struct rte_ring* g_ring_bwfdx;
 extern struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT];
 
+extern struct rte_ring* g_ring_master;
+
 extern struct rte_mempool* g_mempool_trans;
 extern struct rte_mempool* g_mempool_write[MAX_LCORE_COUNT];
 extern struct rte_mempool* g_mempool_bwrcv[MAX_LCORE_COUNT];
@@ -842,6 +844,20 @@ int tgg_dequeue_bwfdx(tgg_bwfdx_data** data)
 	}
 	return rte_ring_dequeue(g_ring_bwfdx, (void**)data);
 }
+
+int tgg_enqueue_master(tgg_send_master_data* data)
+{
+	return rte_ring_enqueue(g_ring_master, data);
+}
+
+int tgg_dequeue_master(tgg_send_master_data** data)
+{
+	if (rte_ring_empty(g_ring_master)) {
+		return -ENOENT;
+	}
+	return rte_ring_dequeue(g_ring_master, (void**)data);
+}
+
 
 void clean_trans_data(tgg_trans_data* bdata)
 {
