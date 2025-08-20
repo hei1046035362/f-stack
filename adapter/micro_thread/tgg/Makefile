@@ -10,6 +10,9 @@ endif
 PKGCONF ?= pkg-config
 INSTALL_PATH = /usr/local/tgg_gateway
 TGG_CONF = $(INSTALL_PATH)/conf/tgg_conf.ini
+IP_W_FILTER_CONF = $(INSTALL_PATH)/conf/ip_filter/whitelist.txt
+IP_B_FILTER_CONF = $(INSTALL_PATH)/conf/ip_filter/blacklist.txt
+IP_E_FILTER_CONF = $(INSTALL_PATH)/conf/ip_filter/excludelist.txt
 DEBUG= -g
 BINARY = gwrcv gwcliprc gwbwprc gwredis gwregister
 FF_LIBS+= $(shell $(PKGCONF) --static --libs libdpdk)
@@ -74,7 +77,7 @@ clean:
 MASTER_OBJ = dpdk_init.o master.o tgg_comm/tgg_common.o tgg_comm/tgg_bwcomm.o tgg_comm/tgg_bw_cache.o comm/log.o\
 			comm/Websocket.o comm/Encrypt.o tgg_comm/WsConsumer.o tgg_comm/tgg_transport.o\
 			tgg_comm/tgg_lock.o comm/RWIni.o tgg_comm/tgg_conf.o comm/common.o tgg_comm/tgg_data_opt.o \
-			tgg_comm/tgg_master_timers.o
+			tgg_comm/tgg_master_timers.o tgg_comm/tgg_ip_filter.o
 
 
 CLIPRC_OBJ = cliprc.o dpdk_init.o tgg_comm/tgg_bw_cache.o comm/log.o\
@@ -135,3 +138,7 @@ install:
 	systemctl enable tgg_gateway
 	mkdir -p $(INSTALL_PATH)/conf
 	test -f '${TGG_CONF}' || cp -f ${FF_PATH}/adapter/micro_thread/tgg/config/tgg_conf.ini ${TGG_CONF}
+	mkdir -p $(INSTALL_PATH)/conf/ip_filter
+	test -f '${IP_W_FILTER_CONF}' || touch ${IP_W_FILTER_CONF}
+	test -f '${IP_B_FILTER_CONF}' || touch ${IP_B_FILTER_CONF}
+	test -f '${IP_E_FILTER_CONF}' || touch ${IP_E_FILTER_CONF}

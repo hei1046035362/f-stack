@@ -48,6 +48,7 @@ private:
 
     int auto_start;             // # 是否启用进程自动管理，1 是，0，否(意味着所有进程全部都需要手动启动)
 
+    std::string ip_filter_path;     // ip 黑、白名单文件路径
 
 public:
     int get_lcore_mask() { return lcore_mask;}
@@ -75,6 +76,7 @@ public:
     int get_gwrcv_fd_limit() { return gwrcv_fd_limit;}
     int get_gwbwprc_fd_limit() { return gwbwprc_fd_limit;}
     int get_auto_start() { return auto_start;}
+    const std::string& get_ip_filter_path() {return ip_filter_path;}
 };
 
 int tgg_init_config(int& argc, char* argv[]);

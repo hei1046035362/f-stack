@@ -126,7 +126,10 @@ enum GatewayProtocal {
     FLAG_BODY_IS_SCALAR = 0x01,
 
     // 通知gateway在send时不调用协议encode方法，在广播组播时提升性能
-    FLAG_NOT_CALL_ENCODE = 0x02
+    FLAG_NOT_CALL_ENCODE = 0x02,
+
+    // tgg_gateway自定义命令
+    CMD_RELOAD_IP_FILTER = 100
 
 };
 

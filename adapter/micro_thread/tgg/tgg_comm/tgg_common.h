@@ -135,8 +135,13 @@ int tgg_dequeue_trans(tgg_bw_data** data);
 int tgg_enqueue_bwfdx(tgg_bwfdx_data* data);
 int tgg_dequeue_bwfdx(tgg_bwfdx_data** data);
 
+// 下行发送队列
 int tgg_enqueue_write(int core_id, tgg_write_data* data);
 int tgg_dequeue_write(int core_id, tgg_write_data** data);
+
+int tgg_enqueue_master(tgg_send_master_data* data);
+int tgg_dequeue_master(tgg_send_master_data** data);
+
 
 tgg_bw_data* get_bwdata_from_transdata(int prc_id, tgg_trans_data* tdata);
 

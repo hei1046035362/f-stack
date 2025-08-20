@@ -19,6 +19,7 @@
 #include "tgg_comm/WsConsumer.h"
 #include "comm/Encrypt.hpp"
 #include "tgg_comm/tgg_master_timers.h"
+#include "tgg_comm/tgg_ip_filter.h"
 
 static const char* s_dump_file = "/var/corefiles/";//tgg_gw_master_core
 
@@ -39,6 +40,12 @@ using namespace NS_MICRO_THREAD;
 int sig_pipe[2];// 信号处理放入主函数异步处理，信号函数中很多系统函数不能调用，会崩溃死锁
 static int64_t s_left_fd = 0;// 剩余客户端连接数
 int* g_pid_check_times;
+
+typedef struct st_conn_info {
+    int cli_fd;
+    unsigned int ip;
+    unsigned short port;
+} conn_info;
 
 void signal_handler(int signum)
 {
@@ -86,28 +93,6 @@ void tgg_sig_init()
         exit(-1);
     }
 }
-
-static int get_remote_info(int sockfd, uint32_t& ip, ushort& port, char* ip_str)
-{
-     // 获取IP地址信息
-     struct sockaddr_in local_addr;
-     socklen_t addrlen = sizeof(local_addr);
-     if (ff_getpeername(sockfd, (struct linux_sockaddr *)&local_addr, &addrlen) < 0) {
-         LOG_ERROR("getsockname");
-         close(sockfd);
-         return -1;
-     }
-     // char ip_str[INET_ADDRSTRLEN];
-     inet_ntop(AF_INET, &(local_addr.sin_addr), ip_str, INET_ADDRSTRLEN);
-     // printf("ip str:%s\n", ip_str);
-     struct in_addr ip_addr;
-     inet_pton(AF_INET, ip_str, &ip_addr);
-     ip = ip_addr.s_addr;
-     port = local_addr.sin_port;
-     LOG_INFO("IP address in decimal: %u\n", ip);
-     return 0;
-}
-
 
 static int set_fd_nonblock(int fd)
 {
@@ -157,30 +142,38 @@ static void tgg_recv(void *arg)
 {
     s_left_fd++;
     int ret, consume_ret = 0;
-    int cli_fd = *((int *)arg);
-    delete (int *)arg;
-    uint32_t ip;
-    ushort port;
+    conn_info* cli_info = (conn_info *)arg;
     char ip_str[INET_ADDRSTRLEN] = {0};
-    if (get_remote_info(cli_fd, ip, port, ip_str) < 0) {
-        LOG_ERROR("get client remote info failed.");
-        close(cli_fd);
+    unsigned short port = cli_info->port;
+    const char* result = inet_ntop(AF_INET, &(cli_info->ip), ip_str,  sizeof(ip_str));
+    if(!result) {
+        LOG_ERROR("get connection ip string failed, fd:%d, ip:%d, port:%u", cli_info->cli_fd, cli_info->ip, cli_info->port);
+        close(cli_info->cli_fd);
+        delete(cli_info);
+        cli_info = NULL;
         return;
     }
-    if(tgg_init_cli(g_core_id, cli_fd, ip_str, ip, port) < 0) {
-        LOG_ERROR("init client info failed.");
-        close(cli_fd);
-        tgg_close_cli(g_core_id, cli_fd);
-        return;
+    int idx = -1;
+    bool exclude = is_ip_exclude(cli_info->ip);// exclude的连接只recv，不进入业务逻辑
+    if(!exclude) {
+        if(tgg_init_cli(g_core_id, cli_info->cli_fd, ip_str, cli_info->ip, cli_info->port) < 0) {
+            LOG_ERROR("init client info failed.");
+            close(cli_info->cli_fd);
+            tgg_close_cli(g_core_id, cli_info->cli_fd);
+            delete(cli_info);
+            return;
+        }
+        idx = tgg_get_cli_idx(g_core_id, cli_info->cli_fd);
     }
-    int idx = tgg_get_cli_idx(g_core_id, cli_fd);
-    // 通知后台有新的连接
-    if (consume_rdata(cli_fd, "", 0, idx, FD_NEW) < 0) {
-        LOG_ERROR("send new connection[%d] to cliprc failed, core id:%d idx:%d.", cli_fd, g_core_id, idx);
-        close(cli_fd);
-        tgg_close_cli(g_core_id, cli_fd);
-        return;
-    }
+    int cli_fd = cli_info->cli_fd;
+    delete cli_info;
+    // 通知后台有新的连接, 暂时不需要了，我们只在ws握手成功后发送给bw
+    // if (consume_rdata(cli_fd, "", 0, idx, FD_NEW) < 0) {
+    //     LOG_ERROR("send new connection[%d] to cliprc failed, core id:%d idx:%d.", cli_fd, g_core_id, idx);
+    //     close(cli_fd);
+    //     tgg_close_cli(g_core_id, cli_fd);
+    //     return;
+    // }
     char buf[1024] = {0};
     while (g_run_status) {
         // 1、接收数据  mt_recv在没有数据包的情况下会阻塞，让出cpu给其他的action执行
@@ -204,6 +197,9 @@ static void tgg_recv(void *arg)
             // 对端主动关闭了
             LOG_INFO("recv close from client, idx:%d.", idx);
             break;
+        }
+        if (exclude) {
+            continue;
         }
         if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
             // 调试打印
@@ -234,6 +230,13 @@ static void tgg_recv(void *arg)
             break;
         }
     }
+    if(exclude) {
+        close(cli_fd);
+        s_left_fd--;
+        LOG_DEBUG("excluded client coreid[%d] fd[%d] ip:%s port:%u closed, left_fd:%lld.",
+         g_core_id, cli_fd, ip_str, port, s_left_fd);
+        return;
+    }
     if(ret <= 0) {// 连接已断开，通知写协程，不必再执行发送
         tgg_set_cli_status(g_core_id, cli_fd, FD_STATUS_DISCONNECTED);
     }
@@ -256,7 +259,8 @@ static void tgg_recv(void *arg)
     if(s_left_fd <= 0) {
         g_max_concurency = 0;
     }
-    LOG_WARNING("client coreid[%d] fd[%d] idx[%d] closed, left_fd:%ld.", g_core_id, cli_fd, idx, s_left_fd);
+    LOG_WARNING("client coreid[%d] fd[%d] idx:%d ip:%s port:%u closed, left_fd:%lld.",
+         g_core_id, cli_fd, idx, ip_str, port, s_left_fd);
 }
 
 static void tgg_do_send(tgg_write_data* wdata)
@@ -377,7 +381,7 @@ static int tgg_gw_master()
     }
     LOG_INFO("start service for port:%d.", TggConfigure::getInstance()->get_gateway_port());
     int clt_fd = 0;
-    int *p;
+    conn_info *p;
     while (g_run_status) {
         struct sockaddr_in client_addr;
         int addr_len = sizeof(client_addr);
@@ -405,8 +409,12 @@ static int tgg_gw_master()
             LOG_ERROR("set clt_fd nonblock failed [%s]", strerror(errno));
             break;
         }
+        LOG_INFO("new connection, ip:%d", client_addr.sin_addr.s_addr);
+        p = new conn_info{.cli_fd = clt_fd,
+                          .ip = client_addr.sin_addr.s_addr,
+                          .port = client_addr.sin_port,
+                            };
         // 启动一个接收线程
-        p = new int(clt_fd);
         mt_start_thread((void *)tgg_recv, (void *)p);
     }
     close(fd);
@@ -447,6 +455,9 @@ int main(int argc, char *argv[])
     if (!mt_init_frame(argc, argv)) {
         LOG_ERROR("mt frame init failed.");
         return -1;
+    }
+    if (!init_ip_filter(rte_eal_process_type() == RTE_PROC_PRIMARY, TggConfigure::getInstance()->get_ip_filter_path().c_str())) {
+        LOG_WARNING("init ip filter failed.");        
     }
     g_core_id = mt_get_proc_id();//rte_lcore_to_cpu_id(rte_lcore_id());
     if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
@@ -503,6 +514,7 @@ int main(int argc, char *argv[])
             delete[] g_pid_check_times;
         }
         tgg_master_uninit();
+        cleanup_ip_filter();
     } else {
         LOG_INFO("-------secondary core[%d] exit-------", g_core_id);
     }
