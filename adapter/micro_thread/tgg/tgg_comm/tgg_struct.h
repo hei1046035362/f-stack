@@ -204,12 +204,21 @@ enum BWFDX_CMD {
     BWFDX_CMD_DELETE,
     BWFDX_CMD_UPDATEALL
 };
-// 出入队列的数据结构
+// gwbwprc发送给gwcli命令的数据结构
 typedef struct st_bwfdx_data {
     int bwfdx;
     int cmd;
 } tgg_bwfdx_data;
 
+
+enum MASTER_EXC_CMD {
+    CMD_IP_FILTER_RELOAD = 0,
+};
+
+// sendary发送给master的数据结构,暂时只用到了一个ip过滤从文件中reload的功能
+typedef struct st_send_master_data {
+    int cmd;
+} tgg_send_master_data;
 
 /// 统计入队列数据结构                   ------ 未实际使用
 typedef struct st_en_queue_stats {

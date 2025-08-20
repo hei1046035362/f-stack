@@ -264,12 +264,6 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
         return -1;
     }
 
-    std::string secret_key;        // 网关和bw消息加密的秘钥
-    std::string log_path;        // 日志路径
-    std::string gateway_log_level;         // gwrcv和cliprc的日志级别
-    std::string register_log_level;        // register日志级别
-    std::string bwserver_log_level;        // bwrcv服务日志级别
-
     // 网关和bw消息加密的秘钥
     this->secret_key = pTgg_Ini.getValue("bwserver", "secret_key");
 
@@ -325,6 +319,11 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
         this->auto_start = 1;
     }
 
+    this->ip_filter_path = pTgg_Ini.getValue("gateway", "ip_filter_path");
+    if(validate_path(this->ip_filter_path.c_str()) <= 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] parse config ip_filter_path:[%s] failed.", __FILE__, __LINE__, this->ip_filter_path.c_str());
+        return -1;
+    }
     return 0;
 }
 

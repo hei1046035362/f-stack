@@ -1088,6 +1088,22 @@ int CmdBatchGetClientIdByUid::ExecCmd()
     return 0;
 }
 
+int CmdReloadIpFilter::ExecCmd()
+{
+    tgg_send_master_data* data = (tgg_send_master_data*)dpdk_rte_malloc(sizeof(tgg_send_master_data));
+    if(!data) {
+        LOG_ERROR("Enqueue master cmd failed, malloc data error.");
+        return -1;
+    }
+    data->cmd = CMD_IP_FILTER_RELOAD;
+    if(tgg_enqueue_master(data) < 0) {
+        LOG_ERROR("Enqueue master cmd failed.");
+        return -1;
+    }
+    LOG_INFO("Enqueue reload ip filter master cmd success.");
+    return 0;
+}
+
 static int json_parse_body(unsigned char flag, rapidjson::Document& jdata)
 {
     int cmd = 0;
@@ -1322,6 +1338,9 @@ int exec_cmd_processor(int prc_id, int fd, void* data)
         // 批量获取群组ID内客户端个数
         case CMD_BATCH_GET_CLIENT_COUNT_BY_GROUP:
             pro = new CmdBatchGetClientCountByGroup(prc_id, fd, data, jdata);// 暂时不需要
+            break;
+        case CMD_RELOAD_IP_FILTER:
+            pro = new CmdReloadIpFilter(prc_id, fd, data, jdata);
             break;
         default :
             LOG_ERROR("Gateway inner pack err, Unknown cmd=%d.", cmd);

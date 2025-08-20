@@ -6,6 +6,8 @@
 #include "comm/common.hpp"
 #include "tgg_comm/tgg_conf.h"
 #include "tgg_bw_cache.h"
+#include "tgg_ip_filter.h"
+#include "tgg_common.h"
 #include <poll.h>
 
 extern int g_core_id;
@@ -183,11 +185,31 @@ static void concurrency_stat(struct rte_timer* tm, void* arg)
     s_last_fd_count = cur_count;
 }
 
+static void deal_master_cmd_dequeue(struct rte_timer* tm, void* arg)
+{
+    if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
+        tgg_send_master_data* cmd = NULL;
+        if(tgg_dequeue_master(&cmd) >= 0) {
+            switch(cmd->cmd) {
+                case CMD_IP_FILTER_RELOAD:
+                    reload_ip_filter(TggConfigure::getInstance()->get_ip_filter_path().c_str());
+                    break;
+                default:
+                    LOG_WARNING("unknown cmd:%d", cmd->cmd);
+                    break;
+            }
+            dpdk_rte_free(cmd);
+        }
+    } else {
+        sync_ip_filter();
+    }
+}
 // 定时任务
 struct rte_timer timer_task_sigchild;// 处理子进程信号
 struct rte_timer timer_task_monitor;// 监控管理子进程
 struct rte_timer timer_task_update_heartbeat;// secondary更新心跳
 struct rte_timer timer_task_concurrency;// 计算最高并发
+struct rte_timer timer_task_master_cmd;// 计算最高并发
 
 void init_timer()
 {
@@ -211,11 +233,14 @@ void init_timer()
                     rte_lcore_id(), update_gwrcv_secondary_heart_beat, NULL);
         }
     }
-
+    rte_timer_init(&timer_task_master_cmd);// 统计并发 周期1s
+    rte_timer_reset(&timer_task_master_cmd, hz, PERIODICAL, 
+            rte_lcore_id(), deal_master_cmd_dequeue, NULL);
 }
 
 void stop_timer()
 {
+    rte_timer_stop_sync(&timer_task_master_cmd);
     rte_timer_stop_sync(&timer_task_concurrency);
     if(TggConfigure::getInstance()->get_auto_start()) {
         if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
