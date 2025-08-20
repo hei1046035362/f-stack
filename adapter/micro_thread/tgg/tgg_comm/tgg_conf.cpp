@@ -15,7 +15,8 @@ TggConfigure* TggConfigure::instance = new TggConfigure;
 // 输入参数解析
 const char* tgg_short_options = "c:dt:p:g:";
 struct option tgg_long_options[] = {
-    { "conf", 1, NULL, 'c'},
+    { NULL, 1, NULL, 'c'},
+    { "conf", 1, NULL, 'f'},
     { "daemon", 0, NULL, 'd'},
     { "proc-type", 1, NULL, 't'},
     { "proc-id", 1, NULL, 'p'},
@@ -210,14 +211,19 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
         return -1;
     }
     this->bcore_mask = bcore_mask;
-
+    int maxallow_bwsvr_cnt = count_ones(bcore_mask);
     // bw服务进程个数
     int nbwsvr_count = get_int_value(&pTgg_Ini, "bwserver", "process_count");
     if(nbwsvr_count <= 0)  return -1;
     this->bwsvr_count = nbwsvr_count;
     if(this->bwsvr_count > 100 || this->bwsvr_count < 1) {
         // this->bwsvr_count = 3;// 默认个数
-        RTE_LOG(ERR, USER1, "[%s][%d] invalid bw process_count:[%d].", __FILE__, __LINE__, this->bwsvr_count <= 0);
+        RTE_LOG(ERR, USER1, "[%s][%d] invalid bw process_count:[%d].", __FILE__, __LINE__, this->bwsvr_count);
+        return -1;
+    }
+    if (maxallow_bwsvr_cnt < nbwsvr_count)
+    {
+        RTE_LOG(ERR, USER1, "[%s][%d] bw process_count:[%d] beyond core_mask count[%d] allowed.", __FILE__, __LINE__, this->bwsvr_count, maxallow_bwsvr_cnt);
         return -1;
     }
 
@@ -377,7 +383,7 @@ int tgg_init_config(int& argc, char* argv[])
     optind = 1;
     while((c = getopt_long(argc, argv, tgg_short_options, tgg_long_options, &index)) != -1) {
         switch (c) {
-            case 'c':
+            case 'f':
                 fstack_filename = strdup(optarg);
                 break;
             case 'd':

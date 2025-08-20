@@ -561,7 +561,7 @@ void *accept_routine( void * )
             co_poll( co_get_epoll_ct(),&pf,1,1000 );
             continue;
         }
-        LOG_INFO("accept new connection fd[%d].", fd);
+        LOG_INFO("accept new connection prc[%d] fd[%d].", g_prc_id, fd);
         if( g_read_stack.empty())
         {
             task_t * task = (task_t*)calloc( 1,sizeof(task_t) );
