@@ -11,6 +11,13 @@
 #define MAX_LCORE_COUNT 32
 #endif
 
+const char* s_log_path = "/var/log/tgg_gateway/";
+const char* s_health_check_path = "/usr/local/tgg_gateway/health_check/";
+const char* s_ip_filter_path = "/usr/local/tgg_gateway/conf/ip_filter/";
+const char* s_fstack_filename = "/usr/local/tgg_gateway/conf/config.ini";
+const char* s_tgg_filename = "/usr/local/tgg_gateway/conf/tgg_conf.ini";
+
+
 TggConfigure* TggConfigure::instance = new TggConfigure;
 // 输入参数解析
 const char* tgg_short_options = "c:dt:p:g:";
@@ -48,13 +55,13 @@ static int get_int_value(IniFileHandler *pFstack_Ini, const char* section,
         try {
             data = std::stoi(value);
         } catch (...) {
-            RTE_LOG(ERR, USER1, "[%s][%d] parse config section[%s] key[%s] value[%s] failed.",
+            RTE_LOG(ERR, USER1, "[%s][%d] parse config section[%s] key[%s] value[%s] failed.\n",
              __FILE__, __LINE__, section, key, value.c_str());
             return -1;
         }
         return data;
     }
-    RTE_LOG(ERR, USER1, "[%s][%d] parse config section[%s] key[%s] failed:[%s], value is empty.",
+    RTE_LOG(ERR, USER1, "[%s][%d] parse config section[%s] key[%s] failed:[%s], value is empty.\n",
          __FILE__, __LINE__, section, key, value.c_str());
     return -1;
 }
@@ -83,10 +90,10 @@ static int parse_lcore_mask(const std::string& lcore_mask) {
             value = std::stoi(lcore_mask, nullptr, 10);
         }
     } catch (const std::invalid_argument& e) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Invalid argument: %s.", __FILE__, __LINE__, e.what());
+        RTE_LOG(ERR, USER1, "[%s][%d] Invalid argument: %s.\n", __FILE__, __LINE__, e.what());
         throw;
     } catch (const std::out_of_range& e) {
-        RTE_LOG(ERR, USER1, "[%s][%d] Out of range: %s.", __FILE__, __LINE__, e.what());
+        RTE_LOG(ERR, USER1, "[%s][%d] Out of range: %s.\n", __FILE__, __LINE__, e.what());
         throw;
     }
 
@@ -96,7 +103,7 @@ static int parse_lcore_mask(const std::string& lcore_mask) {
 int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
 {
     if(access(fstack_conf, F_OK) || access(tgg_conf, F_OK)) {
-        RTE_LOG(ERR, USER1, "[%s][%d] fstack config[%s] or tgg config file[%s] not exist.",
+        RTE_LOG(ERR, USER1, "[%s][%d] fstack config[%s] or tgg config file[%s] not exist.\n",
          __FILE__, __LINE__, fstack_conf, tgg_conf);
         return -1;
     }
@@ -107,7 +114,7 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     std::string core_mask = pFstack_Ini.getValue("dpdk", "lcore_mask");
     int lcore_mask = parse_lcore_mask(core_mask);
     if(lcore_mask <= 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] read config lcore mask failed:[%d].",
+        RTE_LOG(ERR, USER1, "[%s][%d] read config lcore mask failed:[%d].\n",
          __FILE__, __LINE__, lcore_mask);
         return -1;
     }
@@ -127,7 +134,7 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     // 网关ip
     this->addr = pTgg_Ini.getValue("gateway", "ip");
     if(!is_ipv4(this->addr)) {
-        RTE_LOG(ERR, USER1, "[%s][%d] parse config gateway ip:[%s] failed.", __FILE__, __LINE__, this->addr.c_str());
+        RTE_LOG(ERR, USER1, "[%s][%d] parse config gateway ip:[%s] failed.\n", __FILE__, __LINE__, this->addr.c_str());
         return -1;
     }
     // 网关端口
@@ -135,7 +142,7 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     if(ret <= 0) return -1;
     this->port = ret;
     if(this->port > 65535) {
-        RTE_LOG(ERR, USER1, "[%s][%d] invalid gateway port:[%d].", __FILE__, __LINE__, this->port);
+        RTE_LOG(ERR, USER1, "[%s][%d] invalid gateway port:[%d].\n", __FILE__, __LINE__, this->port);
         return -1;
     }
 
@@ -143,13 +150,13 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     core_mask = pTgg_Ini.getValue("gateway", "ccore_mask");
     int ccore_mask = parse_lcore_mask(core_mask);
     if(ccore_mask <= 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] read config lcore mask failed:[%d].",
+        RTE_LOG(ERR, USER1, "[%s][%d] read config lcore mask failed:[%d].\n",
          __FILE__, __LINE__, ccore_mask);
         return -1;
     }
     // 收包进程绑定的core不能与cli处理线程绑定的core重叠
     if(this->lcore_mask & ccore_mask) {
-        RTE_LOG(ERR, USER1, "[%s][%d] lcore mask[%x] can't duplicate with ccore mask:[%x].",
+        RTE_LOG(ERR, USER1, "[%s][%d] lcore mask[%x] can't duplicate with ccore mask:[%x].\n",
          __FILE__, __LINE__, this->lcore_mask, ccore_mask);
         return -1;
     }
@@ -174,7 +181,7 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     if(this->gwwrite_co_count <= 0) return -1;
 
     if(this->gwwrite_co_count > 100000 || this->gwwrite_co_count < 1) {
-        RTE_LOG(ERR, USER1, "[%s][%d] invalid gwwrite co_count:[%d].", __FILE__, __LINE__, this->gwwrite_co_count);
+        RTE_LOG(ERR, USER1, "[%s][%d] invalid gwwrite co_count:[%d].\n", __FILE__, __LINE__, this->gwwrite_co_count);
         return -1;
     } else {
         this->gwwrite_co_count = 500;// 默认个数
@@ -185,14 +192,14 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     split_string(redis_ips, ',', this->redis_addrs);
     for (auto addr : this->redis_addrs) {
         if(!is_ipport_format(addr)) {
-            RTE_LOG(ERR, USER1, "[%s][%d] parse config redis ipport:[%s] failed.", __FILE__, __LINE__, addr.c_str());
+            RTE_LOG(ERR, USER1, "[%s][%d] parse config redis ipport:[%s] failed.\n", __FILE__, __LINE__, addr.c_str());
             return -1;
         }
     }
     // redis password
     this->redis_pwd = pTgg_Ini.getValue("redis", "password");
     if(this->redis_pwd.empty() || this->redis_pwd.length() > 128) {
-        RTE_LOG(ERR, USER1, "[%s][%d] parse config redis password:[%s] failed.", __FILE__, __LINE__, this->redis_pwd.c_str());
+        RTE_LOG(ERR, USER1, "[%s][%d] parse config redis password:[%s] failed.\n", __FILE__, __LINE__, this->redis_pwd.c_str());
         return -1;
     }
 
@@ -200,13 +207,13 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     core_mask = pTgg_Ini.getValue("bwserver", "bcore_mask");
     int bcore_mask = parse_lcore_mask(core_mask);
     if(bcore_mask <= 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] read config lcore mask failed:[%d].",
+        RTE_LOG(ERR, USER1, "[%s][%d] read config lcore mask failed:[%d].\n",
          __FILE__, __LINE__, bcore_mask);
         return -1;
     }
     // 收包进程绑定的core不能与cli处理线程绑定的core重叠
     if(this->lcore_mask & bcore_mask || this->ccore_mask & bcore_mask) {
-        RTE_LOG(ERR, USER1, "[%s][%d] bcore mask[%x] can't duplicate with lcore mask:[%x] or ccore mask:[%x].",
+        RTE_LOG(ERR, USER1, "[%s][%d] bcore mask[%x] can't duplicate with lcore mask:[%x] or ccore mask:[%x].\n",
          __FILE__, __LINE__, bcore_mask, this->lcore_mask, this->ccore_mask);
         return -1;
     }
@@ -218,12 +225,12 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     this->bwsvr_count = nbwsvr_count;
     if(this->bwsvr_count > 100 || this->bwsvr_count < 1) {
         // this->bwsvr_count = 3;// 默认个数
-        RTE_LOG(ERR, USER1, "[%s][%d] invalid bw process_count:[%d].", __FILE__, __LINE__, this->bwsvr_count);
+        RTE_LOG(ERR, USER1, "[%s][%d] invalid bw process_count:[%d].\n", __FILE__, __LINE__, this->bwsvr_count);
         return -1;
     }
     if (maxallow_bwsvr_cnt < nbwsvr_count)
     {
-        RTE_LOG(ERR, USER1, "[%s][%d] bw process_count:[%d] beyond core_mask count[%d] allowed.", __FILE__, __LINE__, this->bwsvr_count, maxallow_bwsvr_cnt);
+        RTE_LOG(ERR, USER1, "[%s][%d] bw process_count:[%d] beyond core_mask count[%d] allowed.\n", __FILE__, __LINE__, this->bwsvr_count, maxallow_bwsvr_cnt);
         return -1;
     }
 
@@ -232,7 +239,7 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     if(this->co_count <= 0) return -1;
 
     if(this->co_count > 100 || this->co_count < 1) {
-        RTE_LOG(ERR, USER1, "[%s][%d] invalid bw co_count:[%d].", __FILE__, __LINE__, this->co_count);
+        RTE_LOG(ERR, USER1, "[%s][%d] invalid bw co_count:[%d].\n", __FILE__, __LINE__, this->co_count);
         return -1;
     } else {
         this->co_count = 50;// 默认个数
@@ -240,7 +247,7 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     // 网关对内ip
     this->bw_addr = pTgg_Ini.getValue("bwserver", "ip");
     if(!is_ipv4(this->bw_addr)) {
-        RTE_LOG(ERR, USER1, "[%s][%d] parse config bwserver ip:[%s] failed.", __FILE__, __LINE__, this->bw_addr.c_str());
+        RTE_LOG(ERR, USER1, "[%s][%d] parse config bwserver ip:[%s] failed.\n", __FILE__, __LINE__, this->bw_addr.c_str());
         return -1;
     }
     // 网关对内端口
@@ -248,7 +255,7 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     if (ret <= 0) return -1;
     this->bw_port = (unsigned short)ret;
     if(this->bw_port > 65535) {
-        RTE_LOG(ERR, USER1, "[%s][%d] invalid bwserver port:[%d].", __FILE__, __LINE__, ret);
+        RTE_LOG(ERR, USER1, "[%s][%d] invalid bwserver port:[%d].\n", __FILE__, __LINE__, ret);
         return -1;
     }
     // 监控进程假死的间隔  单位(min)
@@ -258,7 +265,7 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     // 网关对内ip
     this->register_addr = pTgg_Ini.getValue("register", "ip");
     if(!is_ipv4(this->register_addr)) {
-        RTE_LOG(ERR, USER1, "[%s][%d] parse config register ip:[%s] failed.", __FILE__, __LINE__, this->register_addr.c_str());
+        RTE_LOG(ERR, USER1, "[%s][%d] parse config register ip:[%s] failed.\n", __FILE__, __LINE__, this->register_addr.c_str());
         return -1;
     }
     // 网关对内端口
@@ -266,7 +273,7 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     if (ret <= 0) return -1;
     this->register_port = (unsigned short)ret;
     if(this->register_port > 65535) {
-        RTE_LOG(ERR, USER1, "[%s][%d] invalid register port:[%d].", __FILE__, __LINE__, ret);
+        RTE_LOG(ERR, USER1, "[%s][%d] invalid register port:[%d].\n", __FILE__, __LINE__, ret);
         return -1;
     }
 
@@ -275,8 +282,18 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
 
     // 日志路径
     this->log_path = pTgg_Ini.getValue("gateway", "log_path");
+    if(this->log_path.empty()) {
+        RTE_LOG(INFO, USER1, "[%s][%d] read log_path failed, use default path:%s.\n", 
+            __FILE__, __LINE__, s_log_path);
+        this->log_path = s_log_path;
+        if(!ensure_path_exists(this->log_path, false)) {
+            RTE_LOG(ERR, USER1, "[%s][%d] create default log_path failed.\n", 
+                __FILE__, __LINE__);
+            return -1;
+        }
+    }
     if(validate_path(this->log_path.c_str()) <= 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] parse config log_path:[%s] failed.", __FILE__, __LINE__, this->log_path.c_str());
+        RTE_LOG(ERR, USER1, "[%s][%d] parse config log_path:[%s] failed.\n", __FILE__, __LINE__, this->log_path.c_str());
         return -1;
     }
     // 日志级别的校验在日志初始化的时候校验，这里就不校验了
@@ -290,13 +307,13 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     // gwrcv_fdlimit  
     int gwrcv_fdlimit = get_int_value(&pTgg_Ini, "gateway", "fd_limit");
     if(gwrcv_fdlimit <= 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] read config gateway fd_limit failed:[%d].",
+        RTE_LOG(ERR, USER1, "[%s][%d] read config gateway fd_limit failed:[%d].\n",
          __FILE__, __LINE__, gwrcv_fdlimit);
         return -1;
     }
     // 小于1或者大于100W就取默认值20W
     if(gwrcv_fdlimit < 1 || gwrcv_fdlimit > 1000000) {
-        RTE_LOG(INFO, USER1, "[%s][%d] gateway fd_limit[%d] is not in valid area, use default 200000.",
+        RTE_LOG(INFO, USER1, "[%s][%d] gateway fd_limit[%d] is not in valid area, use default 200000.\n",
          __FILE__, __LINE__, gwrcv_fdlimit);
         gwrcv_fdlimit = 200000;
     }
@@ -305,13 +322,13 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     // gwbwprc_fdlimit  
     int gwbwprc_fdlimit = get_int_value(&pTgg_Ini, "bwserver", "fd_limit");
     if(gwbwprc_fdlimit <= 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] read config bwserver fd_limit failed:[%d].",
+        RTE_LOG(ERR, USER1, "[%s][%d] read config bwserver fd_limit failed:[%d].\n",
          __FILE__, __LINE__, gwbwprc_fdlimit);
         return -1;
     }
     // 小于100或者大于10W就取默认值5K
     if(gwbwprc_fdlimit < 100 || gwbwprc_fdlimit > 100000) {
-        RTE_LOG(INFO, USER1, "[%s][%d] bwserver fd_limit[%d] is not in valid area, use default 5000.", 
+        RTE_LOG(INFO, USER1, "[%s][%d] bwserver fd_limit[%d] is not in valid area, use default 5000.\n", 
             __FILE__, __LINE__, gwbwprc_fdlimit);
         gwbwprc_fdlimit = 5000;
     }
@@ -326,8 +343,34 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     }
 
     this->ip_filter_path = pTgg_Ini.getValue("gateway", "ip_filter_path");
+    if(this->ip_filter_path.empty()) {
+        RTE_LOG(INFO, USER1, "[%s][%d] read ip_filter_path failed, use default path:%s.\n", 
+            __FILE__, __LINE__, s_ip_filter_path);
+        this->ip_filter_path = s_ip_filter_path;
+        if(!ensure_path_exists(this->ip_filter_path, false)) {
+            RTE_LOG(ERR, USER1, "[%s][%d] create default ip_filter_path failed.\n", 
+                __FILE__, __LINE__);
+            return -1;
+        }
+    }
     if(validate_path(this->ip_filter_path.c_str()) <= 0) {
-        RTE_LOG(ERR, USER1, "[%s][%d] parse config ip_filter_path:[%s] failed.", __FILE__, __LINE__, this->ip_filter_path.c_str());
+        RTE_LOG(ERR, USER1, "[%s][%d] parse config ip_filter_path:[%s] failed.\n", __FILE__, __LINE__, this->ip_filter_path.c_str());
+        return -1;
+    }
+
+    this->health_check_path = pTgg_Ini.getValue("gateway", "health_check_path");
+    if(this->health_check_path.empty()) {
+        RTE_LOG(INFO, USER1, "[%s][%d] read health_check_path failed, use default path:%s.\n", 
+            __FILE__, __LINE__, s_health_check_path);
+        this->health_check_path = s_health_check_path;
+        if(!ensure_path_exists(this->health_check_path, false)) {
+            RTE_LOG(ERR, USER1, "[%s][%d] create default health_check_path failed.\n", 
+                __FILE__, __LINE__);
+            return -1;
+        }
+    }
+    if(validate_path(this->health_check_path.c_str()) <= 0) {
+        RTE_LOG(ERR, USER1, "[%s][%d] parse config health_check_path:[%s] failed.\n", __FILE__, __LINE__, this->health_check_path.c_str());
         return -1;
     }
     return 0;
@@ -378,8 +421,8 @@ int tgg_init_config(int& argc, char* argv[])
     int index_argv_g = -1;
     int index_argv_d = -1;
     bool has_value_g = false;
-    std::string fstack_filename = "/usr/local/tgg_gateway/conf/config.ini";
-    std::string tgg_filename = "/usr/local/tgg_gateway/conf/tgg_conf.ini";
+    std::string fstack_filename = s_fstack_filename;
+    std::string tgg_filename = s_tgg_filename;
     optind = 1;
     while((c = getopt_long(argc, argv, tgg_short_options, tgg_long_options, &index)) != -1) {
         switch (c) {

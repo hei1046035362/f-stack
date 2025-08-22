@@ -40,4 +40,6 @@ struct HttpRequest {
 };
 void parse_http_request(const char* data, size_t len, HttpRequest& req, bool parse_cookies = true);
 
+bool ensure_path_exists(const std::string& path, bool writelog = true);
+
 #endif // __COMMON_HPP__

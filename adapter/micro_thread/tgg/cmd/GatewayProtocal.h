@@ -101,6 +101,9 @@ enum GatewayProtocal {
     // 批量获取群组ID内客户端个数
     CMD_BATCH_GET_CLIENT_COUNT_BY_GROUP = 28,
 
+    // tgg_gateway自定义命令
+    CMD_TGG_GATEWAY = 100,
+
     // worker连接gateway事件 
     // 00000045ca00000000000000000000000000000000010000000000007b227365637265745f6b6579223a22222c22776f726b65725f6b6579223a22727573745f73646b227d
     CMD_WORKER_CONNECT = 200,
@@ -128,8 +131,61 @@ enum GatewayProtocal {
     // 通知gateway在send时不调用协议encode方法，在广播组播时提升性能
     FLAG_NOT_CALL_ENCODE = 0x02,
 
-    // tgg_gateway自定义命令
-    CMD_RELOAD_IP_FILTER = 100
+};
+
+enum TggGatewayCmd {
+    // ********会影响数据流的操作*********
+    // reload ip黑名单白名单等
+    CMD_RELOAD_IP_FILTER = 100,
+    // 通知gwcliprc主动更新bwworker(影响负载均衡)，防止bwprc有接入新的bwworker没有及时通知gwcliprc或通知失败的情况。
+    CMD_UPDATE_REAL_WORKERS = 101,
+
+    // ********不影响数据流的操作*********
+    // 当前网关gid总数和所有的gid打印到文件
+    CMD_PRINT_ALL_GIDS = 110,
+    // 只打印当前网关gid总数到文件
+    CMD_PRINT_GID_COUNT = 111,
+    // 打印gid对应的cid到文件
+    CMD_PRINT_GID_CIDS = 112,
+
+    // 当前网关uid总数和所有的uid打印到文件
+    CMD_PRINT_ALL_UIDS = 120,
+    // 只打印当前网关gid总数到文件
+    CMD_PRINT_UID_COUNT = 121,
+    // 打印uid对应的cid到文件
+    CMD_PRINT_UID_CIDS = 122,
+
+    // 当前网关cid总数和所有的cid打印到文件
+    CMD_PRINT_ALL_CIDS = 130,
+    CMD_PRINT_CID_COUNT = 131,
+
+    // 当前网关使用的idx打印到文件
+    CMD_PRINT_ALL_IDXS = 140,
+    CMD_PRINT_IDX_COUNT = 141,
+
+    // 登陆类型的为 CMD_WORKER_CONNECT bw
+    CMD_PRINT_ALL_WORKERKEYS = 150,
+    CMD_PRINT_WORKERKEY_COUNT = 151,
+
+    // 统计worker数量
+    CMD_PRINT_ALL_WORKERS = 152,
+    CMD_PRINT_WORKER_COUNT = 153,
+    CMD_PRINT_REAL_ALL_WORKERS = 154,
+    CMD_PRINT_REAL_WORKER_COUNT = 155,
+
+    // 登陆类型的为 CMD_GATEWAY_CLIENT_CONNECT bw
+    CMD_PRINT_ALL_GATEWAYS = 160,
+    CMD_PRINT_GATEWAY_COUNT = 161,
+
+    // *******针对hash表的检查*******
+    //   试运行阶段，我们不知道是否会存在有的连接在结束后，hash表中是否有清除干净，为方便外部检查，这里提供一些可选的检查操作
+    //    注： 这里的操作都比较重，尽量在并发小的时候操作，都是针对全局hash表进行遍历，然后逐个检查
+    // 检查gid hash中的连接是否有效
+    CMD_CHECK_GIDCID_AVALIABLE = 200,
+    // 检查uid hash中的连接是否有效
+    CMD_CHECK_UIDCID_AVALIABLE = 201,
+    // 检查cid hash中的连接是否有效
+    CMD_CHECK_CID_AVALIABLE = 202,
 
 };
 

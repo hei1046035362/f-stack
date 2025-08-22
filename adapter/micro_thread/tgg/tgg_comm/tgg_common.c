@@ -423,12 +423,15 @@ void tgg_new_bw_session(int prc_id, int fd, int cmd,
 		tgg_add_bwwkkey(workerkey.c_str());
 		tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(sizeof(tgg_bwfdx_data));
 		if(!bwfdxdata) {
-			LOG_ERROR("Enqueue bwfdxdata failed.");
+			LOG_ERROR("malloc bwfdxdata failed.");
 			return;
 		}
 		bwfdxdata->bwfdx = generate_bwfdx(prc_id, fd);
 		bwfdxdata->cmd = BWFDX_CMD_ADD;
-		tgg_enqueue_bwfdx(bwfdxdata);
+		if(tgg_enqueue_bwfdx(bwfdxdata)) {
+			LOG_ERROR("Enqueue bwfdxdata failed.");
+			dpdk_rte_free(bwfdxdata);
+		}
 	}
 }
 
@@ -441,7 +444,7 @@ void tgg_close_bw_session(int prc_id, int fd)
 		// 通知透传线程不要再使用这个fd了
 		tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(sizeof(tgg_bwfdx_data));
 		if(!bwfdxdata) {
-			LOG_ERROR("Enqueue bwfdxdata failed, cannot malloc data.");
+			LOG_ERROR("malloc bwfdxdata failed, cannot malloc data.");
 			return;
 		}
 		bwfdxdata->bwfdx = generate_bwfdx(prc_id, fd);

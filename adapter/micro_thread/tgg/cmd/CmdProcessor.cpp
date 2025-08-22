@@ -9,8 +9,6 @@
 
 #include <set>
 #include <list>
-#include "tgg_comm/WsConsumer.h"
-#include <rte_log.h>
 #include "tgg_comm/tgg_bwcomm.h"
 #include "GatewayProtocal.h"
 #include "CmdProcessor.h"
@@ -21,6 +19,7 @@
 #include "comm/log.hpp"
 #include "tgg_comm/tgg_transport.h"
 #include "tgg_comm/tgg_conf.h"
+#include "TggCmdProcessor.h"
 
 static int s_compress_flag = 0;
 static int s_is_open_binary = 0;
@@ -38,7 +37,7 @@ static std::string rapidjson_to_string(const rapidjson::Value& val, bool bForLog
     return buffer.GetString();
 }
 
-static void get_body_string(const rapidjson::Value& jdata, std::string& body)
+void get_body_string(const rapidjson::Value& jdata, std::string& body)
 {
     if(jdata["body"].IsString()) {
         body = jdata["body"].GetString();
@@ -1088,22 +1087,6 @@ int CmdBatchGetClientIdByUid::ExecCmd()
     return 0;
 }
 
-int CmdReloadIpFilter::ExecCmd()
-{
-    tgg_send_master_data* data = (tgg_send_master_data*)dpdk_rte_malloc(sizeof(tgg_send_master_data));
-    if(!data) {
-        LOG_ERROR("Enqueue master cmd failed, malloc data error.");
-        return -1;
-    }
-    data->cmd = CMD_IP_FILTER_RELOAD;
-    if(tgg_enqueue_master(data) < 0) {
-        LOG_ERROR("Enqueue master cmd failed.");
-        return -1;
-    }
-    LOG_INFO("Enqueue reload ip filter master cmd success.");
-    return 0;
-}
-
 static int json_parse_body(unsigned char flag, rapidjson::Document& jdata)
 {
     int cmd = 0;
@@ -1123,7 +1106,7 @@ static int json_parse_body(unsigned char flag, rapidjson::Document& jdata)
     }
 
     // 2. 检查body格式
-    if(body_len > 2 && body[1] != 0x3a && body[0] != 0x7b) {
+    if(body_len > 2 && body[1] != 0x3a && body[0] != 0x7b) {// 直接发送的数据，不需要解析
         std::string print_data;
         if(body[0] == 0xff && body[1] == 0xfe) {
             message_unpack(body, print_data);
@@ -1135,7 +1118,7 @@ static int json_parse_body(unsigned char flag, rapidjson::Document& jdata)
     }
 
     // 3. JSON解析逻辑
-    try {
+    try {// body是json时，解析body
         if(!flag) {
             // 假设Php_UnSerialize返回rapidjson::Document
             obj.CopyFrom(Php_UnSerialize(body), allocator);
@@ -1167,7 +1150,7 @@ static int json_parse_body(unsigned char flag, rapidjson::Document& jdata)
     }
 
     // 6. 处理cmd逻辑
-    if (cmd) {
+    if (cmd) {// body里面的cmd
         const char* data_str = obj["data"].GetString();
         if (s_is_open_binary) {
             result = data_str;
@@ -1238,8 +1221,9 @@ int exec_cmd_processor(int prc_id, int fd, void* data)
         return -1;
     }
 
-    // TODO 这里的逻辑还不确定到底是什么意思，上行数据，待调试
-    json_parse_body(bwdata->flag, jdata);
+    if(cmd != CMD_TGG_GATEWAY) {// 网关自定义命令有自己的解析逻辑，不要影响正常业务
+        json_parse_body(bwdata->flag, jdata);
+    }
 
     switch(cmd) {
         case CMD_WORKER_CONNECT:
@@ -1339,8 +1323,8 @@ int exec_cmd_processor(int prc_id, int fd, void* data)
         case CMD_BATCH_GET_CLIENT_COUNT_BY_GROUP:
             pro = new CmdBatchGetClientCountByGroup(prc_id, fd, data, jdata);// 暂时不需要
             break;
-        case CMD_RELOAD_IP_FILTER:
-            pro = new CmdReloadIpFilter(prc_id, fd, data, jdata);
+        case CMD_TGG_GATEWAY:
+            pro = new CmdTggGateway(prc_id, fd, data, jdata);
             break;
         default :
             LOG_ERROR("Gateway inner pack err, Unknown cmd=%d.", cmd);
