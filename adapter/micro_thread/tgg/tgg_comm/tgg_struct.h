@@ -202,7 +202,9 @@ typedef struct st_read_data tgg_bw_data;
 enum BWFDX_CMD {
     BWFDX_CMD_ADD = 0,
     BWFDX_CMD_DELETE,
-    BWFDX_CMD_UPDATEALL
+    BWFDX_CMD_UPDATEALL,
+    BWFDX_CMD_PRINTWORKERS,
+    BWFDX_CMD_PRINTWORKERCOUNT
 };
 // gwbwprc发送给gwcli命令的数据结构
 typedef struct st_bwfdx_data {

@@ -751,6 +751,12 @@ void tgg_cliprc_uninit()
 // bw 消息处理进程处理dpdk操作相关数据结构初始化
 void tgg_bwprc_init(int bwcount)
 {
+	int lcore_count = count_ones(TggConfigure::getInstance()->get_lcore_mask());
+	for (int i = 0; i < lcore_count; i++) {// 健康检查时需要idx hash做查询cid是否有效用
+		char idx_hash_name[128] = {0};
+		sprintf(idx_hash_name, "%s_%d", s_idx_hash_name, i);
+		g_idx_hash[i] = get_hash_byname(idx_hash_name);
+	}
 	tgg_secondary_init();
 	g_bwprc_zone = find_memzone(bwprc_zone_name);
 }

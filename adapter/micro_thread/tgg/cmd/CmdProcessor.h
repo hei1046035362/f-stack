@@ -7,6 +7,8 @@
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 
+void get_body_string(const rapidjson::Value& jdata, std::string& body);
+
 #include <list>
 class CmdBaseProcessor {
 public:
@@ -249,16 +251,6 @@ public:
 	~CmdBatchGetClientCountByGroup() {}
     int ExecCmd() { return 0; }
 };
-
-class CmdReloadIpFilter : public CmdBaseProcessor {
-public:
-
-	CmdReloadIpFilter(int prc_id, int fd, void* data, const rapidjson::Document& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
-	~CmdReloadIpFilter() {}
-    int ExecCmd();
-};
-
-
 
 int exec_cmd_processor(int prc_id, int fd, void* data);
 
