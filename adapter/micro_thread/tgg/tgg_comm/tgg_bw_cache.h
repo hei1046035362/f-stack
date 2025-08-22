@@ -37,6 +37,7 @@ int tgg_del_fd4gid(const char* gid, int64_t fdidcid);
 int tgg_get_fdsbygid(const char* gid, std::list<int64_t>& lst_fd);
 // 获取所有在线的分组
 int tgg_get_allonlinegids(std::list<std::string>& lst_gid);
+int tgg_get_gid_count();
 void tgg_clean_gid();
 
 /// 增删查  uid  hash<uid, list<fdid> >
@@ -46,6 +47,8 @@ int tgg_del_fd4uid(const char* uid, int64_t fdidcid);
 void tgg_clean_uid();
 // 返回格式  list<string(fdid:uid)>
 int tgg_get_fdsbyuid(const char* uid, std::list<int64_t>& lst_fd);
+int tgg_get_allonlineuids(std::list<std::string>& lst_uid);
+int tgg_get_uid_count();
 
 /// 增删查  cid hash<cid, fdid>
 int tgg_add_cid(int64_t cid, int64_t fdidcid);
@@ -54,6 +57,7 @@ void tgg_clean_cid();
 int64_t tgg_get_fdbycid(int64_t cid);
 int tgg_get_allonlinecids(std::list<int64_t>& lst_cids);
 int tgg_get_allfds(std::list<int64_t>& lst_fds);
+int tgg_get_cid_count();
 // void tgg_clean_allcids_bypid(int prc_id);
 
 /// 增删查  cid->gid映射 hash<cid, list<gid> >
@@ -75,6 +79,7 @@ void tgg_iterprint_gidsbyuid(const char* uid = NULL);
 int tgg_add_idx(int coreid, int64_t idx);
 int tgg_del_idx(int coreid, int64_t idx);
 int tgg_check_idx_exist(int coreid, int64_t idx);
+int tgg_get_allidxs(int coreid, std::list<int64_t>& lst_idxs);
 int tgg_count_idx(int coreid);
 void tgg_iter_del_idx(int coreid);
 
@@ -93,5 +98,7 @@ int tgg_get_load_balance(std::vector<int64_t>& vec_bwfdx, int64_t ipport);
 int tgg_check_bwwkkey_exist(const char* bwwkkey);
 int tgg_del_bwwkkey(const char* bwwkkey);
 int tgg_add_bwwkkey(const char* bwwkkey);
+int tgg_get_allbwwkkeys(std::list<std::string>& lst_wkkeys);
+int tgg_get_bwwoker_count();
 
 #endif  // __TGG_BW_CACHE_H__

@@ -308,3 +308,101 @@ int message_unpack(const std::string& packedData, std::string& result)
     return 0;
 }
 
+#include <fstream>
+#include <list>
+#include <sstream>
+#include <stdexcept>
+#include <type_traits>
+
+template <typename T>
+int write_list_to_file_inline(const std::string& filename, 
+                     const std::string& header,
+                     const std::list<T>& dataList,
+                     size_t buffer_kb) 
+{
+    // 1. 创建输出流并设置缓冲区
+    std::ofstream out_file;
+    std::string buffer;
+    buffer.reserve(buffer_kb * 1024);  // 预分配缓冲区
+    if(!header.empty()) {
+        buffer.append(header);
+        buffer.append("\n");
+    }
+    try {
+        // 2. 打开文件（异常安全）
+        out_file.open(filename);
+        if (!out_file.is_open()) {
+            LOG_ERROR("Failed to open file: %s", filename.c_str());
+            return -1;
+        }
+
+        // 3. 遍历列表并构建缓冲区
+        for (const auto& item : dataList) {
+            std::ostringstream oss;
+            oss << item;
+            // 类型特化处理（避免额外开销）
+            // if constexpr (std::is_integral_v<T>) {
+            //     oss << item;  // 直接写入整型
+            // } else {
+            //     oss << item;  // 依赖类型重载的<<操作符
+            // }
+            
+            // 添加换行符
+            oss << '\n';
+            
+            // 检查缓冲区容量
+            if (buffer.size() + oss.str().size() > buffer.capacity()) {
+                out_file << buffer;  // 批量写入
+                buffer.clear();
+            }
+            buffer += oss.str();  // 添加到缓冲区
+        }
+
+        // 4. 写入剩余数据
+        if (!buffer.empty()) {
+            out_file << buffer;
+        }
+    } catch (...) {
+        if (out_file.is_open()) out_file.close();  // 异常时关闭文件
+        LOG_ERROR("writeListToFile [%s] failed, catched an exception.", filename.c_str());
+        return -1;
+    }
+    // 5. RAII自动关闭文件
+    return 0;
+}
+
+template <typename T>
+int write_list_to_file(const std::string& filename, 
+                     const std::string& header,
+                     const std::list<T>& dataList,
+                     size_t buffer_kb)
+{
+    return write_list_to_file_inline(filename, header, dataList, buffer_kb);
+}
+
+template <>
+int write_list_to_file<int>(const std::string& filename, 
+                     const std::string& header,
+                     const std::list<int>& dataList,
+                     size_t buffer_kb)
+{
+    return write_list_to_file_inline(filename, header, dataList, buffer_kb);
+}
+
+template <>
+int write_list_to_file<int64_t>(const std::string& filename, 
+                     const std::string& header,
+                     const std::list<int64_t>& dataList,
+                     size_t buffer_kb)
+{
+    return write_list_to_file_inline(filename, header, dataList, buffer_kb);
+}
+
+template<>
+int write_list_to_file<std::string>(const std::string& filename, 
+                     const std::string& header,
+                     const std::list<std::string>& dataList,
+                     size_t buffer_kb)
+{
+    return write_list_to_file_inline(filename, header, dataList, buffer_kb);
+}

@@ -1,6 +1,7 @@
 #ifndef __TGG_BWCOMM_H__
 #define __TGG_BWCOMM_H__
 #include <vector>
+#include <list>
 #include <string>
 #include "tgg_comm/tgg_struct.h"
 
@@ -14,5 +15,29 @@ int message_pack(uint16_t command, uint32_t seq, uint8_t protocol,
             uint8_t compressFormat, const std::string& body, std::string& result);
 
 int message_unpack(const std::string& packedData, std::string& result);
+
+template <typename T>
+int write_list_to_file(const std::string& filename, 
+                     const std::string& header,
+                     const std::list<T>& dataList,
+                     size_t buffer_kb = 8);
+
+template <>
+int write_list_to_file<int>(const std::string& filename, 
+                     const std::string& header,
+                     const std::list<int>& dataList,
+                     size_t buffer_kb);
+
+template <>
+int write_list_to_file<int64_t>(const std::string& filename, 
+                     const std::string& header,
+                     const std::list<int64_t>& dataList,
+                     size_t buffer_kb);
+
+template <>
+int write_list_to_file<std::string>(const std::string& filename, 
+                     const std::string& header,
+                     const std::list<std::string>& dataList,
+                     size_t buffer_kb);
 
 #endif  // __TGG_BWCOMM_H__

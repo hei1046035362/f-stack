@@ -49,6 +49,7 @@ private:
     int auto_start;             // # 是否启用进程自动管理，1 是，0，否(意味着所有进程全部都需要手动启动)
 
     std::string ip_filter_path;     // ip 黑、白名单文件路径
+    std::string health_check_path;    // gid,uid,cid等hash表打印/检查结果输出路径
 
 public:
     int get_lcore_mask() { return lcore_mask;}
@@ -70,6 +71,7 @@ public:
     unsigned short get_register_port() {return register_port;}
     const std::string& get_secret_key() {return secret_key;}
     const std::string& get_log_path() {return log_path;}
+    const std::string& get_health_check_path() {return health_check_path;}
     const std::string& get_gateway_log_level() {return gateway_log_level;}
     const std::string& get_register_log_level() {return register_log_level;}
     const std::string& get_bwserver_log_level() {return bwserver_log_level;}
