@@ -100,7 +100,7 @@ static bool ip_to_uint64(const std::string& ip_str, uint64_t& ip) {
     struct in_addr addr;
     if (inet_pton(AF_INET, ip_str.c_str(), &addr) == 1) {
         ip = addr.s_addr; // 这里没有调ntohl，因为客户端accept时ip(sockaddr_in.sin_addr)本身也是网络字节序，如果需要改为主机字节序，这里要注意适配
-        LOG_DEBUG("trans ip:%s to int:%d htonl:%ld", ip_str.c_str(), addr.s_addr, ip);
+        // LOG_DEBUG("trans ip:%s to int:%d htonl:%ld", ip_str.c_str(), addr.s_addr, ntohl(ip));
         return true;
     }
     return false;

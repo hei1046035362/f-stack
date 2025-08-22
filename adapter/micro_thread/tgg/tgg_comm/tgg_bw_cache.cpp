@@ -535,6 +535,11 @@ int tgg_get_allonlinegids(std::list<std::string>& lst_gid)
     return tgg_hash_get_allkeys(g_gid_hash, lst_gid);
 }
 
+int tgg_get_gid_count()
+{
+    return rte_hash_count(g_gid_hash);
+}
+
 /// 增删查  uid 用户id 
 int tgg_add_uid(const char* uid, int64_t fdidcid)
 {
@@ -607,6 +612,17 @@ int tgg_get_fdsbyuid(const char* uid, std::list<int64_t>& lst_fd)
     }
     return 0;
 }
+
+int tgg_get_allonlineuids(std::list<std::string>& lst_uid)
+{
+    return tgg_hash_get_allkeys(g_uid_hash, lst_uid);
+}
+
+int tgg_get_uid_count()
+{
+    return rte_hash_count(g_uid_hash);
+}
+
 
 /// 增删查  cid
 int tgg_add_cid(int64_t cid, int64_t fdidcid)
@@ -688,7 +704,7 @@ int tgg_get_allfds(std::list<int64_t>& lst_fds)
     uint32_t next = 0;
     int ret = 0;
     while (1) {
-        WriteLock lock(get_cidfd_lock());
+        // WriteLock lock(get_cidfd_lock());
         ret = rte_hash_iterate(g_cid_hash, (const void**)&key, (void**)&value, &next);
         if (-ENOENT == ret) {
             LOG_DEBUG("iter to the end.");
@@ -704,7 +720,10 @@ int tgg_get_allfds(std::list<int64_t>& lst_fds)
     }
     return 0;
 }
-
+int tgg_get_cid_count()
+{
+    return rte_hash_count(g_cid_hash);
+}
 
 int tgg_add_cidgid(int64_t cid, const char* gid)
 {
@@ -874,9 +893,15 @@ int tgg_del_idx(int coreid, int64_t idx)
     }
     return 0;
 }
+
 int tgg_check_idx_exist(int coreid, int64_t idx)
 {
     return rte_hash_lookup_with_hash(g_idx_hash[coreid], &idx, rte_hash_crc(&idx, sizeof(int64_t), 0));
+}
+
+int tgg_get_allidxs(int coreid, std::list<int64_t>& lst_idxs)
+{
+    return tgg_hash_get_all_intkeys(g_idx_hash[coreid], lst_idxs);
 }
 
 int tgg_count_idx(int coreid)
@@ -1034,4 +1059,14 @@ int tgg_check_bwwkkey_exist(const char* bwwkkey)
 {
     APROPRIAT_HASH_KEY(bwwkkey, TGG_BWWKKEY_LEN);
     return rte_hash_lookup_with_hash(g_bwwkkey_hash, _key, rte_hash_crc(_key, TGG_BWWKKEY_LEN, 0));
+}
+
+int tgg_get_allbwwkkeys(std::list<std::string>& lst_wkkeys)
+{
+    return tgg_hash_get_allkeys(g_bwwkkey_hash, lst_wkkeys);
+}
+
+int tgg_get_bwwoker_count()
+{
+    return rte_hash_count(g_bwwkkey_hash);
 }

@@ -8,6 +8,8 @@
 #include <string.h>
 #include "log.hpp"
 #include <array>
+#include <sys/stat.h>
+#include <unistd.h>
 
 std::string tgg_trim(const std::string& str) {
     auto start = str.begin();
@@ -284,4 +286,22 @@ void parse_http_request(const char* data, size_t len, HttpRequest& req, bool par
             }
         }
     }
+}
+
+
+bool ensure_path_exists(const std::string& path, bool writelog)
+{
+    struct stat info;
+    if (stat(path.c_str(), &info) != 0) {      // 路径不存在
+        if (mkdir(path.c_str(), 0755) == 0) {  // 创建单级目录
+            if (writelog) LOG_INFO("create path:%s", path.c_str());
+            return true;
+        }
+        if (writelog) LOG_ERROR("create path:%s failed", path.c_str());
+        return false;
+    } else if (S_ISDIR(info.st_mode)) {        // 已存在且是目录
+        return true;
+    }
+    if (writelog) LOG_ERROR("path:%s is not a directory", path.c_str());
+    return false;
 }
