@@ -914,7 +914,7 @@ void clean_fdidlist(tgg_fd_id_list* fdiddata)
 }
 
 
-tgg_write_data* format_send_data(int core_id, const std::string& sdata, std::map<int, int>& mapfdidx, int fdopt)
+tgg_write_data* format_send_data(int core_id, const std::shared_ptr<const std::string>& sdata, std::vector<int64_t>& vecfdidx, int fdopt)
 {
 	tgg_write_data* wdata = NULL;
 	int ret = high_freq_malloc(g_mempool_write[core_id], (void**)&wdata, sizeof(tgg_write_data));
@@ -926,16 +926,15 @@ tgg_write_data* format_send_data(int core_id, const std::string& sdata, std::map
 	tgg_fd_id_list* tail = NULL;
 	tgg_fd_id_list* pcur = NULL;
 	tgg_fd_id_list* head = NULL;
-	std::map<int, int>::iterator it = mapfdidx.begin();
-	while (it != mapfdidx.end()) {
+	for (auto fdidx : vecfdidx) {
 		ret = high_freq_malloc(g_mempool_clifdlist_data, (void**)&pcur, sizeof(tgg_fd_id_list));
 		if (ret < 0) {
             // TODO 如果只有一个失败了，其他的是不是可以继续发送，而不是全部都不发了
 			LOG_ERROR("get mem from clifdlist pool failed,code:%d.", ret);
 			goto add_data_failed;
 		}
-		pcur->fdid = it->first;
-		pcur->idx = it->second;
+		pcur->fdid = GET_FD_FDCID_MASK(fdidx);
+		pcur->idx = GET_IDX_FDCID_MASK(fdidx);
 		if (!tail) {
 			tail = pcur;
 			head = tail;
@@ -944,25 +943,24 @@ tgg_write_data* format_send_data(int core_id, const std::string& sdata, std::map
 			tail->next = pcur;
 			tail = tail->next;
 		}
-		it++;
 	}
 	if (head) {
 		wdata->lst_fd = head;
 	} else {
 		goto add_data_failed;
 	}
-	if (sdata.size() > 0) {
-		ret = high_freq_malloc(g_mempool_write_data, &wdata->data, sdata.size());
+	if (sdata->size() > 0) {
+		ret = high_freq_malloc(g_mempool_write_data, &wdata->data, sdata->size());
 		// wdata->data = dpdk_rte_malloc(sdata.length());
 		if (ret < 0) {
 			LOG_ERROR("malloc mem from write data pool failed, ret:%d.", ret);
 			goto add_data_failed;
 		}
-		memcpy((char*)(wdata->data), sdata.c_str(), sdata.size());
+		memcpy((char*)(wdata->data), sdata->data(), sdata->size());
 	} else {
 		wdata->data = NULL;
 	}
-	wdata->data_len = sdata.size();
+	wdata->data_len = sdata->size();
 	wdata->fd_opt = fdopt;
 	return wdata;
 
@@ -974,14 +972,14 @@ add_data_failed:
 	return NULL;
 }
 
-int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, int>& mapfdidx, int fdopt)
+int enqueue_data_batch_fd(int core_id, const std::shared_ptr<const std::string>& data, std::vector<int64_t> vecfdidx, int fdopt)
 {
-	if(mapfdidx.size() <= 0) {
+	if(vecfdidx.size() <= 0) {
 		// fd列表为空
-		LOG_ERROR("mapfdidx is empty.");
+		LOG_ERROR("vecfdidx is empty.");
 		return 0;
 	}
-	tgg_write_data* wdata = format_send_data(core_id, data, mapfdidx, fdopt);
+	tgg_write_data* wdata = format_send_data(core_id, data, vecfdidx, fdopt);
 	if (!wdata) {
 		LOG_ERROR("Format send data failed.");
 		return -1;
@@ -1006,11 +1004,12 @@ int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, in
 
 }
 
-int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx, int fdopt)
+int enqueue_data_single_fd(int core_id, const std::shared_ptr<const std::string>& data, int fd, int idx, int fdopt)
 {
-	std::map<int, int> mapfdidx;
-	mapfdidx[fd] = idx;
-	return enqueue_data_batch_fd(core_id, data, mapfdidx, fdopt);
+	std::vector<int64_t> vecfdidx;
+	int64_t fdidcid = ((int64_t)fd << 40) | (idx << 8);// 这里后续流程不需要core_id和prc_id，因此我们只赋值了fd和idx
+	vecfdidx.push_back(fdidcid);
+	return enqueue_data_batch_fd(core_id, data, vecfdidx, fdopt);
 }
 
 
