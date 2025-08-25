@@ -2,7 +2,8 @@
 #define _TGG_COMMON_H_
 
 #include <string>
-#include <map>
+#include <vector>
+#include <memory>
 #include "tgg_struct.h"
 
 #define BW_PRC_HEART_BEAT_CHECK 5000  // bwprc进程心跳检测间隔5s
@@ -192,8 +193,8 @@ void clean_fdidlist(tgg_fd_id_list* fdiddata);
 
 
 // 发送给客户端
-tgg_write_data* format_send_data(int core_id, const std::string& sdata, std::map<int, int>& mapfdidx, int fdopt);
-int enqueue_data_batch_fd(int core_id, const std::string& data, std::map<int, int>& mapfdidx, int fdopt);
-int enqueue_data_single_fd(int core_id, const std::string& data, int fd, int idx, int fdopt);
+tgg_write_data* format_send_data(int core_id, const std::shared_ptr<const std::string>& sdata, std::vector<int64_t>& vecfdidx, int fdopt);
+int enqueue_data_batch_fd(int core_id, const std::shared_ptr<const std::string>& data, std::vector<int64_t> vecfdidx, int fdopt);
+int enqueue_data_single_fd(int core_id, const std::shared_ptr<const std::string>& data, int fd, int idx, int fdopt);
 
 #endif  // _TGG_COMMON_H_
