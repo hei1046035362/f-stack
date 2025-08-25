@@ -7,24 +7,32 @@
 #include "tgg_bwcomm.h"
 #include "tgg_comm/tgg_common.h"
 #include "comm/Websocket.hpp"
+#include "tgg_conf.h"
 
 void Send2Fd(int core_id, int fd, int idx, const std::string& data, int fd_opt, int encode)
 {
-    std::string packData;
-    std::string sendData;
-    if(fd_opt & FD_CLOSE) {
-        sendData = Websocket::EncodeCloseFrame(data);
-    } else {
-        // 打包封装
-        if (encode && message_pack(2, 1, 0, 1, data, packData) < 0)
-        {
-            LOG_ERROR("message_pack data[%s] failed.", data.c_str());
-            return;
+    // 共享数据指针（避免重复打包）
+    auto shared_data = std::make_shared<const std::string>([&]{
+        std::string packData;
+        std::string sendData;
+        if(fd_opt & FD_CLOSE) {
+            sendData = Websocket::EncodeCloseFrame(data);
+        } else {
+            // 打包封装
+            if (encode && message_pack(2, 1, 0, 1, data, packData) < 0)
+            {
+                LOG_ERROR("message_pack data[%s] failed.", data.c_str());
+                return sendData;
+            }
+            sendData = Websocket::EncodeWebsocketMessage(BINARY_FRAME, encode ? packData : data);
         }
-        sendData = Websocket::EncodeWebsocketMessage(BINARY_FRAME, encode ? packData : data);
-    }
-    LOG_DEBUG("send data coreid:%d fd:%d idx:%d, data:%s.", core_id, fd, idx, bin2hex(sendData).c_str());
-    if (enqueue_data_single_fd(core_id, sendData, fd, idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
+        return sendData;
+    }());
+    
+    if (shared_data->empty()) return;
+
+    LOG_DEBUG("send data coreid:%d fd:%d idx:%d, data:%s.", core_id, fd, idx, bin2hex(*shared_data).c_str());
+    if (enqueue_data_single_fd(core_id, shared_data, fd, idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
         LOG_ERROR("Enqueue data Failed: coreid:%d fd:%d idx:%d,opt:%d", core_id, fd, idx, fd_opt);
     }
 
@@ -43,7 +51,7 @@ void Send2Client(int cid, const std::string& data, int fd_opt, int encode)
     Send2Fd(core_id, fd, idx, data, fd_opt, encode);
 }
 
-void BatchSend2ClientBycids(std::list<int> cids, const std::string& data, int fd_opt, int encode)
+void BatchSend2ClientBycids(std::list<int>& cids, const std::string& data, int fd_opt, int encode)
 {
     std::list<int64_t> lstFds;
     std::list<int>::iterator itCid = cids.begin();
@@ -59,48 +67,67 @@ void BatchSend2ClientBycids(std::list<int> cids, const std::string& data, int fd
     BatchSend2ClientByfds(lstFds, data, fd_opt, encode);
 }
 
-void BatchSend2ClientByfds(std::list<int64_t> fds, const std::string& data, int fd_opt, int encode)
+void BatchSend2ClientByfds(const std::list<int64_t>& fds, 
+                           const std::string& data, 
+                           int fd_opt, 
+                           int encode) 
 {
-    if(fds.size() <= 0) {
-        LOG_ERROR("fd list can't be empty.");
+    // ==================== 1. 输入校验与预检查 ====================
+    if (fds.empty()) {
+        LOG_ERROR("fd list empty");
         return;
     }
-    // 不同的core_id，分到不同的组，发送的时候需要根据core_id发送到不同的队列
-    std::map<int, std::list<int64_t> > mapEachcorefds;// map<coreid, fdidcid>
-    std::list<int64_t>::iterator itFd = fds.begin();
-    while(itFd != fds.end()) {
-        mapEachcorefds[GET_COREID_FDCID_MASK(*itFd)].push_back(*itFd);
-        itFd++;
+    
+    // ==================== 2. 核心分组优化 ====================
+    const int coreid_count = count_ones(TggConfigure::getInstance()->get_lcore_mask());
+    if (coreid_count <= 0) {
+        LOG_ERROR("invalid core count");
+        return;
     }
-    for (auto coreidFds : mapEachcorefds) {
-        std::map<int, int> mapFdidx;// map<fd, idx>
-        std::list<int64_t>::iterator itFd = coreidFds.second.begin();
-        while(itFd != coreidFds.second.end()) {
-            int idx = GET_IDX_FDCID_MASK(*itFd);// tgg_get_cli_idx(coreidFds.first, *itFd);
-            int fd = GET_FD_FDCID_MASK(*itFd);
-            mapFdidx[fd] = idx;
-            itFd++;
+
+    // 预分配核心分组容器（避免动态扩容）
+    static thread_local std::vector<std::vector<int64_t>> core_groups;
+    core_groups.resize(coreid_count);
+    for (auto& group : core_groups) {
+        group.clear();
+    }
+
+    // 单次遍历完成分组（O(n) 复杂度）
+    for (int64_t fd_cid : fds) { 
+        const int core_id = GET_COREID_FDCID_MASK(fd_cid);
+        if (core_id >= 0 && core_id < coreid_count) {
+            core_groups[core_id].push_back(fd_cid);
         }
-        if(mapFdidx.size() <= 0) {
-            LOG_ERROR("no live fd found for.");
-            return;
-        }
+    }
+
+    // ==================== 3. 数据打包优化 ====================
+    // 共享数据指针（避免重复打包）
+    auto shared_data = std::make_shared<const std::string>([&]{
         std::string packData;
         std::string sendData;
-        // 打包封装到
-        if (encode && message_pack(2, 1, 0, 1, data, packData) < 0)
-        {
-            LOG_ERROR("message_pack data[%s] failed.", data.c_str());
-            return;
-        }
         if(fd_opt & FD_CLOSE) {
-            sendData = Websocket::EncodeCloseFrame(encode ? packData : data);
+            sendData = Websocket::EncodeCloseFrame(data);
         } else {
+            // 打包封装
+            if (encode && message_pack(2, 1, 0, 1, data, packData) < 0)
+            {
+                LOG_ERROR("message_pack data[%s] failed.", data.c_str());
+                return sendData;
+            }
             sendData = Websocket::EncodeWebsocketMessage(BINARY_FRAME, encode ? packData : data);
         }
-        LOG_DEBUG("send to batch client,coreid:%d data:%s.", coreidFds.first, bin2hex(sendData).c_str());
-        if (enqueue_data_batch_fd(coreidFds.first, sendData, mapFdidx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
-            LOG_ERROR("Batch Enqueue data Failed.");
+        return sendData;
+    }());
+    
+    if (shared_data->empty()) return;
+
+    // ==================== 4. 异步任务投递 ====================
+    for (int core_id = 0; core_id < coreid_count; ++core_id) {
+        if (core_groups[core_id].empty()) continue;
+                
+        // 投递到对应核心的任务队列
+        if (enqueue_data_batch_fd(core_id, shared_data, std::move(core_groups[core_id]), fd_opt) < 0) {// 函数内部会循环尝试发送10次
+            LOG_ERROR("Enqueue failed for core: %d", core_id);
         }
     }
 }
