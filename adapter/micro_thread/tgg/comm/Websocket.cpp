@@ -171,7 +171,7 @@ int Websocket::_HandleHandshake(std::string_view request, ValidationResult& req,
 }
 
 // 编码关闭帧
-std::string Websocket::EncodeCloseFrame(const std::string& reason)
+std::string Websocket::EncodeCloseFrame(std::string_view reason)
 {
     std::vector<uint8_t> frame;
     uint16_t status_code = 1000;
@@ -183,7 +183,7 @@ std::string Websocket::EncodeCloseFrame(const std::string& reason)
     payload.push_back(status_code & 0xFF);
     
     // 截断原因短语至123字节
-    std::string trimmed_reason = reason.substr(0, 123);
+    std::string_view trimmed_reason = reason.substr(0, 123);
     payload.insert(payload.end(), trimmed_reason.begin(), trimmed_reason.end());
     // 3. 构建帧头
     frame.push_back(0b10000000 | CLOSE_OPCODE); // FIN=1 + Opcode=8
@@ -195,7 +195,7 @@ std::string Websocket::EncodeCloseFrame(const std::string& reason)
     return std::string(frame.begin(), frame.end());
 }
 
-std::string Websocket::EncodeWebsocketMessage(int opcode, const std::string& message)
+std::string Websocket::EncodeWebsocketMessage(int opcode, std::string_view message)
 {
     std::vector<uint8_t> frame;
     frame.push_back(0b10000000|opcode); // FIN + opcode (text frame)
@@ -472,7 +472,7 @@ void Websocket::SendONnoAuth(const std::string& data, int fd_opt)
     if(fd_opt & FD_CLOSE) {
         result = EncodeCloseFrame("");
     } else {
-        result = EncodeWebsocketMessage(BINARY_FRAME, data);
+        result = EncodeWebsocketMessage(BINARY_FRAME, data.data());
     }
     OnSend(result, fd_opt);
 }
