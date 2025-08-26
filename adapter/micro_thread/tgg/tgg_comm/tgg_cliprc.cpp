@@ -85,22 +85,14 @@ void update_gwcliprc_heart_beat() {
 void print_current_workers(std::vector<int64_t>& vec_bwfdx)
 {
     LOG_INFO("ExecCmd PrintALLRealWorkers...");
-    std::list<std::int64_t> lst_workers;
-    auto it = vec_bwfdx.begin();
-    while(it != vec_bwfdx.end())
-    {
-        lst_workers.push_back(*it);
-        it++;
-    }
-
     std::string print_path;
     print_path.reserve(256);
     print_path.append(TggConfigure::getInstance()->get_health_check_path());
     print_path.append("/");
     print_path.append("_print_real_all_workers");
 
-    std::string header = "count: " + std::to_string(lst_workers.size());
-    if (write_list_to_file(print_path, header, lst_workers) < 0) {
+    std::string header = "count: " + std::to_string(vec_bwfdx.size());
+    if (write_list_to_file(print_path, header, vec_bwfdx) < 0) {
         return;
     }
 
@@ -111,7 +103,7 @@ void print_current_workers(std::vector<int64_t>& vec_bwfdx)
 void print_current_worker_count(std::vector<int64_t>& vec_bwfdx)
 {
     LOG_INFO("ExecCmd PrintRealWorkerCount...");
-    std::list<std::string> lst_workers;
+    std::vector<std::string> lst_workers;
 
     std::string print_path;
     print_path.reserve(256);

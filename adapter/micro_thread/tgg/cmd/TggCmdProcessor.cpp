@@ -51,7 +51,7 @@ int CmdTggGateway::UpdateRealWorkers()
 int CmdTggGateway::PrintAllGids()
 {
     LOG_INFO("ExecCmd PrintAllGids...");
-    std::list<std::string> lst_gid;
+    std::vector<std::string> lst_gid;
     if (tgg_get_allonlinegids(lst_gid) < 0) {
         return -1;
     }
@@ -69,7 +69,7 @@ int CmdTggGateway::PrintAllGids()
 int CmdTggGateway::PrintGidCount()
 {
     LOG_INFO("ExecCmd PrintGidCount...");
-    std::list<std::string> lst_gid;
+    std::vector<std::string> lst_gid;
     int count = tgg_get_gid_count();
     if (count < 0) {
         return -1;
@@ -93,10 +93,13 @@ int CmdTggGateway::PrintGidCids(rapidjson::Document& body)
         LOG_ERROR("body_data[%s] not an GID", body_data.c_str());
         return -1;
     }
-    std::list<int64_t> lst_fd;
-    std::list<int> lstCids;
+    std::vector<int64_t> lst_fd;
+    std::vector<int> lstCids;
     if (tgg_get_fdsbygid(body_data.c_str(), lst_fd) < 0) {
         return -1;
+    }
+    if (lst_fd.size() > 0) {
+        lstCids.reserve(lst_fd.size());
     }
     for (int64_t fdidcid : lst_fd) {
         if (fdidcid < 0) {
@@ -129,7 +132,7 @@ int CmdTggGateway::PrintGidCids(rapidjson::Document& body)
 int CmdTggGateway::PrintAllUids()
 {
     LOG_INFO("ExecCmd PrintAllUids...");
-    std::list<std::string> lst_uid;
+    std::vector<std::string> lst_uid;
     if (tgg_get_allonlinegids(lst_uid) < 0) {
         return -1;
     }
@@ -147,7 +150,7 @@ int CmdTggGateway::PrintAllUids()
 int CmdTggGateway::PrintUidCount()
 {
     LOG_INFO("ExecCmd PrintUidCount...");
-    std::list<std::string> lst_uid;
+    std::vector<std::string> lst_uid;
     int count = tgg_get_uid_count();
     if (count < 0) {
         return -1;
@@ -171,10 +174,13 @@ int CmdTggGateway::PrintUidCids(rapidjson::Document& body)
         LOG_ERROR("body_data[%s] not an UID", body_data.c_str());
         return -1;
     }
-    std::list<int64_t> lst_fd;
-    std::list<int> lstCids;
+    std::vector<int64_t> lst_fd;
+    std::vector<int> lstCids;
     if (tgg_get_fdsbyuid(body_data.c_str(), lst_fd) < 0) {
         return -1;
+    }
+    if (lst_fd.size() > 0) {
+        lstCids.reserve(lst_fd.size());
     }
     for (int64_t fdidcid : lst_fd) {
         if (fdidcid < 0) {
@@ -208,7 +214,7 @@ int CmdTggGateway::PrintUidCids(rapidjson::Document& body)
 int CmdTggGateway::PrintAllCids()
 {
     LOG_INFO("ExecCmd PrintAllCids...");
-    std::list<int64_t> lst_cid;
+    std::vector<int64_t> lst_cid;
     if (tgg_get_allonlinecids(lst_cid) < 0) {
         return -1;
     }
@@ -226,7 +232,7 @@ int CmdTggGateway::PrintAllCids()
 int CmdTggGateway::PrintCidCount()
 {
     LOG_INFO("ExecCmd PrintCidCount...");
-    std::list<std::int64_t> lst_cid;
+    std::vector<std::int64_t> lst_cid;
     int count = tgg_get_uid_count();
     if (count < 0) {
         return -1;
@@ -252,7 +258,7 @@ int CmdTggGateway::PrintAllIdxs()
         std::string filename = _print_path + std::to_string(i);
         filename += "_";
         filename += std::to_string(g_prc_id);
-        std::list<int64_t> lst_idx;
+        std::vector<int64_t> lst_idx;
         tgg_get_allidxs(i, lst_idx);
         std::string header = "count: " + std::to_string(lst_idx.size());
         if (write_list_to_file(_print_path, header, lst_idx) < 0) {
@@ -267,7 +273,7 @@ int CmdTggGateway::PrintAllIdxs()
 int CmdTggGateway::PrintIdxCount()
 {
     LOG_INFO("ExecCmd PrintIdxCount...");
-    std::list<int64_t> lst_idx;
+    std::vector<int64_t> lst_idx;
     int gwrcv_cnt = count_ones(TggConfigure::getInstance()->get_lcore_mask());
     std::string header;
     for (int i = 0; i < gwrcv_cnt; ++i)
@@ -292,7 +298,7 @@ int CmdTggGateway::PrintIdxCount()
 int CmdTggGateway::PrintAllWorkerKeys()
 {
     LOG_INFO("ExecCmd PrintAllWorkerKeys...");
-    std::list<std::string> lst_wkkeys;
+    std::vector<std::string> lst_wkkeys;
     if (tgg_get_allbwwkkeys(lst_wkkeys) < 0) {
         return -1;
     }
@@ -310,7 +316,7 @@ int CmdTggGateway::PrintAllWorkerKeys()
 int CmdTggGateway::PrintWorkerKeyCount()
 {
     LOG_INFO("ExecCmd PrintWorkerKeyCount...");
-    std::list<std::string> lst_wkkeys;
+    std::vector<std::string> lst_wkkeys;
     int count = tgg_get_bwwoker_count();
     if (count < 0) {
         return -1;
@@ -329,18 +335,19 @@ int CmdTggGateway::PrintWorkerKeyCount()
 int CmdTggGateway::PrintAllWorkers()
 {
     LOG_INFO("ExecCmd PrintAllWorkers...");
-    std::list<int64_t> lst_wokers;
+    // std::vector<int64_t> lst_wokers;
     std::vector<int64_t> vec_wokers;
+    vec_wokers.reserve(5000);
     tgg_getall_bwfdx(vec_wokers);
-    auto it = vec_wokers.begin();
-    while(it != vec_wokers.end()) {
-        lst_wokers.push_back(*it);
-        it++;
-    }
+    // auto it = vec_wokers.begin();
+    // while(it != vec_wokers.end()) {
+    //     lst_wokers.push_back(*it);
+    //     it++;
+    // }
     _print_path.append("_print_all_workers_");
     _print_path.append(std::to_string(g_prc_id));
-    std::string header = "count: " + std::to_string(lst_wokers.size());
-    if (write_list_to_file(_print_path, header, lst_wokers) < 0) {
+    std::string header = "count: " + std::to_string(vec_wokers.size());
+    if (write_list_to_file(_print_path, header, vec_wokers) < 0) {
         return -1;
     }
 
@@ -351,7 +358,7 @@ int CmdTggGateway::PrintAllWorkers()
 int CmdTggGateway::PrintWorkerCount()
 {
     LOG_INFO("ExecCmd PrintWorkerCount...");
-    std::list<int64_t> lst_wokers;
+    std::vector<int64_t> lst_wokers;
     int count = tgg_get_bwfdx_count();
     if (count < 0) {
         return -1;
@@ -406,14 +413,16 @@ int CmdTggGateway::PrintRealWorkerCount()
 int CmdTggGateway::CheckGidcidAvaliable()
 {
     LOG_INFO("ExecCmd CheckGidcidAvaliable...");
-    std::list<std::string> lst_gid;
-    std::list<std::string> lst_result;
+    std::vector<std::string> lst_gid;
+    std::vector<std::string> lst_result;
     // 获取所有在线的分组
     if (tgg_get_allonlinegids(lst_gid) < 0)
         return -1;
+    if(lst_gid.size() > 0)
+        lst_result.reserve(lst_gid.size());
     auto it = lst_gid.begin();
     while (it != lst_gid.end()) {
-        std::list<int64_t> lst_fd;
+        std::vector<int64_t> lst_fd;
         if (tgg_get_fdsbygid((*it).c_str(), lst_fd) < 0)
             continue;
         auto it_fdidcid = lst_fd.begin();
@@ -461,14 +470,16 @@ int CmdTggGateway::CheckGidcidAvaliable()
 int CmdTggGateway::CheckUidcidAvaliable()
 {
     LOG_INFO("ExecCmd CheckUidcidAvaliable...");
-    std::list<std::string> lst_uid;
-    std::list<std::string> lst_result;
+    std::vector<std::string> lst_uid;
+    std::vector<std::string> lst_result;
     // 获取所有在线的分组
     if (tgg_get_allonlineuids(lst_uid) < 0)
         return -1;
+    if(lst_uid.size() > 0)
+        lst_result.reserve(lst_uid.size());
     auto it = lst_uid.begin();
     while (it != lst_uid.end()) {
-        std::list<int64_t> lst_fd;
+        std::vector<int64_t> lst_fd;
         if (tgg_get_fdsbygid((*it).c_str(), lst_fd) < 0)
             continue;
         auto it_fdidcid = lst_fd.begin();
@@ -516,10 +527,12 @@ int CmdTggGateway::CheckUidcidAvaliable()
 int CmdTggGateway::CheckCidAvaliable()
 {
     LOG_INFO("ExecCmd CheckCidAvaliable...");
-    std::list<std::string> lst_result;
-    std::list<int64_t> lst_fd;
+    std::vector<std::string> lst_result;
+    std::vector<int64_t> lst_fd;
     if (tgg_get_allfds(lst_fd) < 0)
         return -1;
+    if(lst_fd.size() > 0)
+        lst_result.reserve(lst_fd.size());
     auto it_fdidcid = lst_fd.begin();
     while(it_fdidcid != lst_fd.end()) {
         std::string str_result;
@@ -565,10 +578,9 @@ int CmdTggGateway::ExecCmd()
     _print_path.append(TggConfigure::getInstance()->get_health_check_path());
     _print_path.append("/");
     ensure_path_exists(_print_path);
-    std::string body;
-    get_body_string(jdata, body);
+    std::string_view body = get_body_string(jdata);
     rapidjson::Document body_info;
-    body_info.Parse(body.c_str());
+    body_info.Parse(body.data());
     if (body_info.HasParseError()) {
         LOG_ERROR("CmdTggGateway: JSON parse error");
         return -1;
@@ -577,7 +589,6 @@ int CmdTggGateway::ExecCmd()
         LOG_ERROR("CmdTggGateway: no cmd key found in body.");
         return -1;
     }
-    printf("body:%s\n", body.c_str());
     int cmd = body_info["cmd"].GetInt();
     switch (cmd) {
         case CMD_RELOAD_IP_FILTER:

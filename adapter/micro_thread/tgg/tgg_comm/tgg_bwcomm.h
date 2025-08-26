@@ -12,32 +12,32 @@ tgg_bw_info* lookup_bwinfo(int fd);
 tgg_bw_info* get_valid_bwinfo_by_fd(int fd);
 
 int message_pack(uint16_t command, uint32_t seq, uint8_t protocol,
-            uint8_t compressFormat, const std::string& body, std::string& result);
+            uint8_t compressFormat, std::string_view body, std::string& result);
 
 int message_unpack(const std::string& packedData, std::string& result);
 
 template <typename T>
 int write_list_to_file(const std::string& filename, 
                      const std::string& header,
-                     const std::list<T>& dataList,
+                     const std::vector<T>& dataList,
                      size_t buffer_kb = 8);
 
 template <>
 int write_list_to_file<int>(const std::string& filename, 
                      const std::string& header,
-                     const std::list<int>& dataList,
+                     const std::vector<int>& dataList,
                      size_t buffer_kb);
 
 template <>
 int write_list_to_file<int64_t>(const std::string& filename, 
                      const std::string& header,
-                     const std::list<int64_t>& dataList,
+                     const std::vector<int64_t>& dataList,
                      size_t buffer_kb);
 
 template <>
 int write_list_to_file<std::string>(const std::string& filename, 
                      const std::string& header,
-                     const std::list<std::string>& dataList,
+                     const std::vector<std::string>& dataList,
                      size_t buffer_kb);
 
 #endif  // __TGG_BWCOMM_H__
