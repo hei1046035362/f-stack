@@ -8,6 +8,7 @@
 #include <algorithm>
 
 #include <set>
+#include <unordered_set>
 #include <list>
 #include "tgg_comm/tgg_bwcomm.h"
 #include "GatewayProtocal.h"
@@ -216,7 +217,8 @@ int CmdSendToGroup::ExecCmd()
     }
 
     // 构建排除cid集合
-    std::set<int> setExeptCid;
+    std::unordered_set<int> setExeptCid;
+    setExeptCid.reserve(256);
     if (ext_data.HasMember("exclude") && ext_data["exclude"].IsObject()) {
         const rapidjson::Value& excludeObj = ext_data["exclude"];
         for (rapidjson::Value::ConstMemberIterator itr = excludeObj.MemberBegin(); 
@@ -233,33 +235,36 @@ int CmdSendToGroup::ExecCmd()
         }
     }
 
-    // 收集待发送的fd列表
-    std::vector<int64_t> lstAllFds;
-    lstAllFds.reserve(5000);
     if (ext_data.HasMember("group") && ext_data["group"].IsArray()) {
         const rapidjson::Value& groupArray = ext_data["group"];
+        // 收集待发送的fd列表
+        // std::vector<int64_t> lstAllFds;
+        // lstAllFds.reserve(5000);
+        size_t total_fd_count = 0;
         for (rapidjson::SizeType i = 0; i < groupArray.Size(); i++) {
             const char* gid = groupArray[i].GetString();
             std::vector<int64_t> lstFds;
-            if (tgg_get_fdsbygid(gid, lstFds) < 0) {
-                LOG_DEBUG("gid[%s] not exist.", gid);
-                continue;
+            if (tgg_get_fdsbygid(gid, lstFds) >= 0) {
+                total_fd_count += lstFds.size();
             }
-
-            for (int64_t fdidcid : lstFds) {
-                if (fdidcid < 0) {
-                    LOG_WARNING("Invalid fdidcid[%lld] for gid[%s].", fdidcid, gid);
-                    continue;
+        }
+        std::vector<int64_t> lstAllFds;
+        lstAllFds.reserve(total_fd_count);
+        thread_local std::vector<int> cid_cache;
+        for (rapidjson::SizeType i = 0; i < groupArray.Size(); i++) {
+            std::vector<int64_t> lstFds;
+            const char* gid = groupArray[i].GetString();
+            if (tgg_get_fdsbygid(gid, lstFds) >= 0) {
+                // 批量提取 CID
+                cid_cache.resize(lstFds.size());
+                for (size_t j = 0; j < lstFds.size(); j++) {
+                    cid_cache[j] = GET_CID_FDCID_MASK(lstFds[j]);
                 }
-
-                int cid = GET_CID_FDCID_MASK(fdidcid);
-                if (cid <= 0) {
-                    LOG_WARNING("cid for fdidcid[%lld] gid[%s] not exist.", fdidcid, gid);
-                    continue;
-                }
-
-                if (setExeptCid.find(cid) == setExeptCid.end()) {
-                    lstAllFds.push_back(fdidcid);
+                // 批量过滤
+                for (size_t j = 0; j < lstFds.size(); j++) {
+                    if (setExeptCid.find(cid_cache[j]) == setExeptCid.end()) {
+                        lstAllFds.push_back(lstFds[j]);
+                    }
                 }
             }
         }
