@@ -208,12 +208,13 @@ static int tgg_hash_del_fdlst4key(const rte_hash* hash, rte_rcu_qsbr *rcu, const
     return found ? 0 : -1; // 返回是否找到并删除
 }
 
-static int tgg_hash_get_allkeys(const rte_hash* hash, std::list<std::string>& lst_items)
+static int tgg_hash_get_allkeys(const rte_hash* hash, std::vector<std::string>& lst_items)
 {
     char* key = NULL;
     int* value = NULL;
     uint32_t next = 0;
     int ret = 0;
+    lst_items.reserve(5000);
     while (1) {
         ret = rte_hash_iterate(hash, (const void**)&key, (void**)&value, &next);
         if (-ENOENT == ret) {
@@ -433,8 +434,13 @@ static int tgg_hash_del_idlst4intkey(const rte_hash* hash, rte_rcu_qsbr *rcu, in
 }
 
 
-static int tgg_hash_get_all_intkeys(const rte_hash* hash, std::list<int64_t>& lst_items)
+static int tgg_hash_get_all_intkeys(const rte_hash* hash, std::vector<int64_t>& lst_items)
 {
+    int count = rte_hash_count(hash);
+    if(count <= 0) {
+        return 0;
+    }
+    lst_items.reserve(count);
     int64_t* key = NULL;
     int* value = NULL;
     uint32_t next = 0;
@@ -466,8 +472,9 @@ int tgg_add_gid(const char* gid, int64_t fdidcid)
     return tgg_hash_add_keywithfdlst(g_gid_hash, _key, TGG_GID_LEN, fdidcid);
 }
 
-int tgg_get_fdsbygid(const char* gid, std::list<int64_t>& lst_fd)
+int tgg_get_fdsbygid(const char* gid, std::vector<int64_t>& lst_fd)
 {
+    lst_fd.reserve(5000);
     APROPRIAT_HASH_KEY(gid, TGG_GID_LEN);
     tgg_gid_data* value = (tgg_gid_data*)tgg_hash_get_value(g_gid_hash, _key, TGG_GID_LEN);
     if(!value) {
@@ -530,7 +537,7 @@ int tgg_del_fd4gid(const char* gid, int64_t fdidcid)
     return tgg_hash_del_fdlst4key(g_gid_hash, g_gid_rcu, _key, TGG_GID_LEN, fdidcid);
 }
 
-int tgg_get_allonlinegids(std::list<std::string>& lst_gid)
+int tgg_get_allonlinegids(std::vector<std::string>& lst_gid)
 {
     return tgg_hash_get_allkeys(g_gid_hash, lst_gid);
 }
@@ -595,7 +602,7 @@ int tgg_del_fd4uid(const char* uid, int64_t fdidcid)
     return tgg_hash_del_fdlst4key(g_uid_hash, g_uid_rcu, _key, TGG_UID_LEN, fdidcid);
 }
 
-int tgg_get_fdsbyuid(const char* uid, std::list<int64_t>& lst_fd)
+int tgg_get_fdsbyuid(const char* uid, std::vector<int64_t>& lst_fd)
 {
     APROPRIAT_HASH_KEY(uid, TGG_UID_LEN);
     // ReadLock lock(get_uidfd_lock());
@@ -604,6 +611,7 @@ int tgg_get_fdsbyuid(const char* uid, std::list<int64_t>& lst_fd)
         LOG_DEBUG("get fdidcid by uid[%s] failed.", uid);
         return -1;
     }
+    lst_fd.reserve(100);
     ReadLock lock(&value->lock);
     tgg_fd_list* current = value->list;
     while (current) {
@@ -613,7 +621,7 @@ int tgg_get_fdsbyuid(const char* uid, std::list<int64_t>& lst_fd)
     return 0;
 }
 
-int tgg_get_allonlineuids(std::list<std::string>& lst_uid)
+int tgg_get_allonlineuids(std::vector<std::string>& lst_uid)
 {
     return tgg_hash_get_allkeys(g_uid_hash, lst_uid);
 }
@@ -654,11 +662,13 @@ int tgg_del_cid(int64_t cid)
 void tgg_clean_cid()
 {
     LOG_DEBUG("clean cids.");
-    if(rte_hash_count(g_cid_hash) <= 0) {
+    int count = rte_hash_count(g_cid_hash);
+    if(count <= 0) {
         LOG_DEBUG("cid hash is empty.");
         return;
     }
-    std::list<int> keys_to_delete; // 预存待删键
+    std::vector<int> keys_to_delete; // 预存待删键
+    keys_to_delete.reserve(count);
 
     // 阶段1：遍历并标记待删键
     uint32_t iter = 0;
@@ -692,17 +702,22 @@ int64_t tgg_get_fdbycid(int64_t cid)
     return *value;
 }
 
-int tgg_get_allonlinecids(std::list<int64_t>& lst_cids)
+int tgg_get_allonlinecids(std::vector<int64_t>& lst_cids)
 {
     return tgg_hash_get_all_intkeys(g_cid_hash, lst_cids);
 }
 
-int tgg_get_allfds(std::list<int64_t>& lst_fds)
+int tgg_get_allfds(std::vector<int64_t>& lst_fds)
 {
     int64_t* key = NULL;
     int64_t* value = NULL;
     uint32_t next = 0;
     int ret = 0;
+    int count = rte_hash_count(g_cid_hash);
+    if(count <= 0) {
+        return 0;
+    }
+    lst_fds.reserve(count);
     while (1) {
         // WriteLock lock(get_cidfd_lock());
         ret = rte_hash_iterate(g_cid_hash, (const void**)&key, (void**)&value, &next);
@@ -733,7 +748,7 @@ int tgg_add_cidgid(int64_t cid, const char* gid)
 
 }
 
-int tgg_get_gidsbycid(int64_t cid, std::list<std::string>& lst_gid)
+int tgg_get_gidsbycid(int64_t cid, std::vector<std::string>& lst_gid)
 {
     // APROPRIAT_HASH_KEY(uid, TGG_UID_LEN);
     // ReadLock lock(get_cidgid_lock());
@@ -742,6 +757,7 @@ int tgg_get_gidsbycid(int64_t cid, std::list<std::string>& lst_gid)
         LOG_INFO("cid [%d] not exist in gid hash.", cid);
         return -1;
     }
+    lst_gid.reserve(5000);
     ReadLock lock(&(value->lock));
     tgg_list_id *current = value->list;
     while (current) {
@@ -765,12 +781,13 @@ int tgg_del_cid_cidgid(int64_t cid)
 void tgg_clean_cidgid()
 {
     LOG_DEBUG("clean cids in cidgid.");
-    if(rte_hash_count(g_cidgid_hash) <= 0) {
+    int count = rte_hash_count(g_cidgid_hash);
+    if(count <= 0) {
         LOG_DEBUG("cidgid hash is empty.");
         return;
     }
-    std::list<int> keys_to_delete; // 预存待删键
-
+    std::vector<int> keys_to_delete; // 预存待删键
+    keys_to_delete.reserve(count);
     // 阶段1：遍历并标记待删键
     uint32_t iter = 0;
     int *key, *value;
@@ -805,12 +822,12 @@ int tgg_del_gid_cidgid(int64_t cid, const char* gid)
 
 int tgg_get_gidsbyuid(const char* uid, std::set<std::string>& set_gid)
 {
-    std::list<int64_t> lstFds;
+    std::vector<int64_t> lstFds;
     tgg_get_fdsbyuid(uid, lstFds);// 通过uid找到cid列表
-    std::list<int64_t>::iterator it = lstFds.begin();
+    std::vector<int64_t>::iterator it = lstFds.begin();
     while(it != lstFds.end()) {
         int cid = GET_CID_FDCID_MASK(*it);
-        std::list<std::string> lstGids;
+        std::vector<std::string> lstGids;
         tgg_get_gidsbycid(cid, lstGids);// 通过cid找到gid列表
         set_gid.insert(std::make_move_iterator(lstGids.begin()), 
              std::make_move_iterator(lstGids.end()));
@@ -821,10 +838,10 @@ int tgg_get_gidsbyuid(const char* uid, std::set<std::string>& set_gid)
 
 void tgg_del_gid_cidgid(const char* gid)
 {
-    std::list<int64_t> fdcids;
+    std::vector<int64_t> fdcids;
     tgg_get_fdsbygid(gid, fdcids);
     // 这里没有复用tgg_get_fdsbygid中的循环是为了减少加锁的时间
-    std::list<int64_t>::iterator it = fdcids.begin();
+    std::vector<int64_t>::iterator it = fdcids.begin();
     while (it != fdcids.end()) {
         int cid = GET_CID_FDCID_MASK(*it);
         if(cid <= 0) {
@@ -840,7 +857,8 @@ void tgg_del_gid_cidgid(const char* gid)
 
 void tgg_iterprint_gidsbyuid(const char* uid)
 {
-    std::list<std::string> lst_fd;
+    std::vector<std::string> lst_fd;
+    lst_fd.reserve(5000);
     char* key = NULL;
     tgg_gid_list* value = NULL;
     uint32_t next = 0;
@@ -899,7 +917,7 @@ int tgg_check_idx_exist(int coreid, int64_t idx)
     return rte_hash_lookup_with_hash(g_idx_hash[coreid], &idx, rte_hash_crc(&idx, sizeof(int64_t), 0));
 }
 
-int tgg_get_allidxs(int coreid, std::list<int64_t>& lst_idxs)
+int tgg_get_allidxs(int coreid, std::vector<int64_t>& lst_idxs)
 {
     return tgg_hash_get_all_intkeys(g_idx_hash[coreid], lst_idxs);
 }
@@ -911,7 +929,12 @@ int tgg_count_idx(int coreid)
 
 void tgg_iter_del_idx(int coreid)
 {
-    std::list<int64_t> keys_to_delete; // 预存待删键
+    int count = rte_hash_count(g_idx_hash[coreid]);
+    if(count <= 0) {
+        return ;
+    }
+    std::vector<int64_t> keys_to_delete; // 预存待删键
+    keys_to_delete.reserve(count);
 
     // 阶段1：遍历并标记待删键
     uint32_t iter = 0;
@@ -999,7 +1022,12 @@ int tgg_get_load_balance(std::vector<int64_t>& vec_bwfdx, int64_t ipport)
 
 void tgg_iter_del_bwfdx(int prc_id)
 {
-    std::list<int64_t> keys_to_delete; // 预存待删键
+    int count = rte_hash_count(g_bwfdx_hash);
+    if(count <= 0) {
+        return ;
+    }
+    std::vector<int64_t> keys_to_delete; // 预存待删键
+    keys_to_delete.reserve(count);
 
     // 阶段1：遍历并标记待删键
     uint32_t iter = 0;
@@ -1061,7 +1089,7 @@ int tgg_check_bwwkkey_exist(const char* bwwkkey)
     return rte_hash_lookup_with_hash(g_bwwkkey_hash, _key, rte_hash_crc(_key, TGG_BWWKKEY_LEN, 0));
 }
 
-int tgg_get_allbwwkkeys(std::list<std::string>& lst_wkkeys)
+int tgg_get_allbwwkkeys(std::vector<std::string>& lst_wkkeys)
 {
     return tgg_hash_get_allkeys(g_bwwkkey_hash, lst_wkkeys);
 }
