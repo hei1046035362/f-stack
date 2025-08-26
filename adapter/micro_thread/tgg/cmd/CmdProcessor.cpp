@@ -37,17 +37,19 @@ static std::string rapidjson_to_string(const rapidjson::Value& val, bool bForLog
     return buffer.GetString();
 }
 
-void get_body_string(const rapidjson::Value& jdata, std::string& body)
+std::string_view get_body_string(const rapidjson::Value& jdata)
 {
+    std::string_view body;
     if(jdata["body"].IsString()) {
-        body = jdata["body"].GetString();
+        body = std::string_view(jdata["body"].GetString());
     } else if (jdata["body"].IsUint64()) {
         const char* sbody = reinterpret_cast<char*>(jdata["body"].GetUint64());
         int body_len = jdata["body_len"].GetInt();
         if(body_len) {
-            body = std::string(sbody, body_len);
+            body = std::string_view(sbody, body_len);
         }
-    }  
+    }
+    return body;
 }
 
 void CmdBaseProcessor::Send2BW(const rapidjson::Value& data, bool serialize)
@@ -68,10 +70,9 @@ int CmdWorkerConnect::ExecCmd()
 {
     std::string bwSeckey = TggConfigure::getInstance()->get_secret_key();// tgg_get_bwfdx_seckey(this->prc_id, this->fd);
     try {
-        std::string body;
-        get_body_string(jdata, body);
+        std::string_view body = get_body_string(jdata);
         rapidjson::Document worker_info;
-        worker_info.Parse(body.c_str());
+        worker_info.Parse(body.data());
         if (worker_info.HasParseError()) {
             LOG_ERROR("WorkerConnect: JSON parse error");
             this->need_close = 1;
@@ -153,13 +154,12 @@ int CmdGatewayClientConnect::ExecCmd()
         }
         // printf("jdata:%s\n", jdata.dump(4).c_str());
         LOG_INFO("New GatewayClientConnect: ip:%s:%u", ip_str, ((tgg_bw_data*)data)->peer_port);
-        std::string body;
-        get_body_string(jdata, body);
-        LOG_INFO("GatewayClientConnect:JSON parse:%s", body.c_str());
+        std::string_view body = get_body_string(jdata);
+        LOG_INFO("GatewayClientConnect:JSON parse:%s", body.data());
         rapidjson::Document worker_info;
-        worker_info.Parse(body.c_str());
+        worker_info.Parse(body.data());
         if (worker_info.HasParseError()) {
-            LOG_ERROR("GatewayClientConnect:JSON parse error:%s", body.c_str());
+            LOG_ERROR("GatewayClientConnect:JSON parse error:%s", body.data());
             this->need_close = 1;
             // close(this->fd);
             return -1;
@@ -177,7 +177,7 @@ int CmdGatewayClientConnect::ExecCmd()
             // close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             return -1;
         }
-        LOG_DEBUG("GatewayClientConnect: cmd executed body:%s.", body.c_str());
+        LOG_DEBUG("GatewayClientConnect: cmd executed body:%s.", body.data());
     } catch (...) {
     // 捕获其他任何未预料到的异常
         LOG_ERROR("Exception catched.");
@@ -195,8 +195,7 @@ int CmdSendToOne::ExecCmd()
 {
     int cid = jdata["connection_id"].GetInt();
     int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
-    std::string body;
-    get_body_string(jdata, body);
+    std::string_view body = get_body_string(jdata);
   // TODO 目前只支持ws发送
     LOG_DEBUG("SendToOne: cmd executed cid[%d] data:%s.", cid, bin2hex(body).c_str());
     Send2Client(cid, body, FD_WRITE, !raw);
@@ -206,8 +205,7 @@ int CmdSendToOne::ExecCmd()
 int CmdSendToGroup::ExecCmd()
 {
     int raw = true; // 原始标志位 //jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
-    std::string body;
-    get_body_string(jdata, body);
+    std::string_view body = get_body_string(jdata);
 
     // 解析 ext_data
     rapidjson::Document ext_data;
@@ -236,12 +234,13 @@ int CmdSendToGroup::ExecCmd()
     }
 
     // 收集待发送的fd列表
-    std::list<int64_t> lstAllFds;
+    std::vector<int64_t> lstAllFds;
+    lstAllFds.reserve(5000);
     if (ext_data.HasMember("group") && ext_data["group"].IsArray()) {
         const rapidjson::Value& groupArray = ext_data["group"];
         for (rapidjson::SizeType i = 0; i < groupArray.Size(); i++) {
             const char* gid = groupArray[i].GetString();
-            std::list<int64_t> lstFds;
+            std::vector<int64_t> lstFds;
             if (tgg_get_fdsbygid(gid, lstFds) < 0) {
                 LOG_DEBUG("gid[%s] not exist.", gid);
                 continue;
@@ -312,10 +311,10 @@ int CmdDestroy::ExecCmd()
 int CmdSendToALL::ExecCmd()
 {
     int raw = true;
-    std::string body;
-    get_body_string(jdata, body);
+    std::string_view body = get_body_string(jdata);
 
-    std::list<int> lstCids;
+    std::vector<int> lstCids;
+    lstCids.reserve(1000);
     std::string ext_data = jdata["ext_data"].GetString();  // 直接获取字符串值
 
     if (!ext_data.empty()) {
@@ -345,7 +344,7 @@ int CmdSendToALL::ExecCmd()
     }
 
     // 所有在线的客户端fd
-    std::list<int64_t> lstFds;
+    std::vector<int64_t> lstFds;
     if (tgg_get_allfds(lstFds) < 0) {
         LOG_WARNING("SendToALL: get all online clients failed.");
         return -1;
@@ -359,12 +358,12 @@ int CmdSendToALL::ExecCmd()
     return 0;
 }
 
-void CmdSelect::FormatResult(const std::list<int64_t>& lst_fd, int mask, rapidjson::Document& result)
+void CmdSelect::FormatResult(const std::vector<int64_t>& lst_fd, int mask, rapidjson::Document& result)
 {
     // 获取分配器引用（关键优化点）
     rapidjson::Document::AllocatorType& allocator = result.GetAllocator();
     
-    std::list<int64_t>::const_iterator itFd = lst_fd.begin();
+    std::vector<int64_t>::const_iterator itFd = lst_fd.begin();
     while (itFd != lst_fd.end()) {
         if(*itFd < 0) {
             LOG_WARNING("invalid fd.");
@@ -494,7 +493,7 @@ int CmdSelect::ExecCmd()
                     // 处理 groups 和 uid 条件
                     if (value.IsArray()) {
                         for (rapidjson::SizeType i = 0; i < value.Size(); i++) {
-                            std::list<int64_t> lst_fd;
+                            std::vector<int64_t> lst_fd;
                             const char* item = value[i].GetString();
                             
                             if (key == "groups") {
@@ -512,7 +511,8 @@ int CmdSelect::ExecCmd()
                 } 
                 else {
                     // 处理 connection_id
-                    std::list<int64_t> lst_fds;
+                    std::vector<int64_t> lst_fds;
+                    lst_fds.reserve(5000);
                     if (value.IsArray()) {
                         for (rapidjson::SizeType i = 0; i < value.Size(); i++) {
                             int cid = value[i].GetInt();
@@ -528,7 +528,7 @@ int CmdSelect::ExecCmd()
         } 
         else {
             // 处理全局条件
-            std::list<int64_t> lst_fds;
+            std::vector<int64_t> lst_fds;
             if (!tgg_get_allfds(lst_fds)) {
                 if (!lst_fds.empty()) {
                     FormatResult(lst_fds, mask, result);
@@ -551,7 +551,7 @@ int CmdSelect::ExecCmd()
 
 int CmdGetGroupIdList::ExecCmd()
 {
-    std::list<std::string> lst_gid;
+    std::vector<std::string> lst_gid;
     if (tgg_get_allonlinegids(lst_gid) < 0) {
         LOG_WARNING("get all online gids failed.");
     }
@@ -637,7 +637,7 @@ int CmdGetAllClientSession::ExecCmd()
     result.SetObject();
     rapidjson::Document::AllocatorType& allocator = result.GetAllocator();
 
-    std::list<int64_t> lst_fds;
+    std::vector<int64_t> lst_fds;
     tgg_get_allfds(lst_fds);
     for (auto fdidcid : lst_fds) {
         std::string session = tgg_get_cli_reserved(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid));
@@ -811,15 +811,13 @@ int CmdUnBindUid::ExecCmd()
 int CmdSendToUid::ExecCmd()
 {
     bool raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
-    std::string body;
-    get_body_string(jdata, body);
-    std::list<int64_t> lst_fds;
+    std::string_view body = get_body_string(jdata);
 // 1. 获取ext_data字符串
-    std::string ext_data_str = jdata["ext_data"].GetString(); // 直接获取字符串[1,4](@ref)
+    std::string_view ext_data_str = jdata["ext_data"].GetString(); // 直接获取字符串[1,4](@ref)
 
     // 2. 解析JSON字符串为rapidjson文档
     rapidjson::Document juid;
-    juid.Parse(ext_data_str.c_str());
+    juid.Parse(ext_data_str.data());
     if (juid.HasParseError() || !juid.IsArray()) { // 检查解析结果[6,8](@ref)
         LOG_WARNING("SendToUid: invalid ext_data format");
         return -1;
@@ -827,6 +825,7 @@ int CmdSendToUid::ExecCmd()
 
     // 3. 提取UID数组
     std::vector<std::string> vec_uids;
+    vec_uids.reserve(juid.Size());
     for (rapidjson::SizeType i = 0; i < juid.Size(); i++) { // 遍历数组[6](@ref)
         if (juid[i].IsString()) {
             vec_uids.push_back(juid[i].GetString());
@@ -835,22 +834,26 @@ int CmdSendToUid::ExecCmd()
         }
     }
 
+    std::vector<int64_t> lst_fds;
+    lst_fds.reserve(vec_uids.size()*10);// 预留每个uid平均10个连接，避免多次扩容
     // 4. 收集所有UID对应的文件描述符
     for (auto& it : vec_uids) {
-        std::list<int64_t> lst_fd;
+        std::vector<int64_t> lst_fd;
         if (tgg_get_fdsbyuid(it.c_str(), lst_fd) < 0) {
             LOG_DEBUG("SendToUid: no fd found for uid[%s]", it.c_str());
             continue;
         }
-        lst_fds.splice(lst_fds.end(), lst_fd);
+        lst_fds.insert(lst_fds.end(), 
+                      std::make_move_iterator(lst_fd.begin()),
+                      std::make_move_iterator(lst_fd.end()));
     }
 
     // 5. 批量发送数据
     if (!lst_fds.empty()) {
-        BatchSend2ClientByfds(lst_fds, body, FD_WRITE, !raw);
+        BatchSend2ClientByfds(std::move(lst_fds), body, FD_WRITE, !raw);
         LOG_DEBUG("SendToUid: cmd exec success. Sent to %zu fds", lst_fds.size());
     } else {
-        LOG_DEBUG("SendToUid: no fd found for all uids[%s]", ext_data_str.c_str());
+        LOG_DEBUG("SendToUid: no fd found for all uids[%s]", ext_data_str.data());
     }
     return 0;
 }
@@ -956,9 +959,9 @@ int CmdGetClientSessionsByGroup::ExecCmd()
         Send2BW(result);
         return -1;
     }
-    std::list<int64_t> lst_sfd;
+    std::vector<int64_t> lst_sfd;
     if (!tgg_get_fdsbygid(group.c_str(), lst_sfd)) {
-        std::list<int64_t>::iterator itFd = lst_sfd.begin();
+        std::vector<int64_t>::iterator itFd = lst_sfd.begin();
         while (itFd != lst_sfd.end()) {
             int coreid = GET_COREID_FDCID_MASK(*itFd);
             int fd = GET_FD_FDCID_MASK(*itFd);
@@ -990,14 +993,14 @@ int CmdGetClientCountByGroup::ExecCmd()
     result.SetInt(0);
     std::string group = jdata["ext_data"].GetString();
     if(group.empty()) {
-        std::list<int64_t> lst_cid;
+        std::vector<int64_t> lst_cid;
         tgg_get_allonlinecids(lst_cid);
         result.SetInt(lst_cid.size());
         LOG_DEBUG("GetAllClientCount:%s.", rapidjson_to_string(result).c_str());
         Send2BW(result);
         return 0;
     }
-    std::list<int64_t> lst_sfd;
+    std::vector<int64_t> lst_sfd;
     int count = 0;// TODO  前期调试需要排查格式等问题，后期应该直接计算lst_sfd的长度即可
     if (!tgg_get_fdsbygid(group.c_str(), lst_sfd)) {
         count = lst_sfd.size();
@@ -1020,9 +1023,9 @@ int CmdGetClientIdByUid::ExecCmd()
         Send2BW(result);
         return -1;
     }
-    std::list<int64_t> lst_sfd;
+    std::vector<int64_t> lst_sfd;
     if (tgg_get_fdsbyuid(suid.c_str(), lst_sfd) == 0) {
-        std::list<int64_t>::iterator itFd = lst_sfd.begin();
+        std::vector<int64_t>::iterator itFd = lst_sfd.begin();
         while (itFd != lst_sfd.end()) {
             int cid = GET_CID_FDCID_MASK(*itFd);//tgg_get_cli_cid(*itFd & 0xff, *itFd >> 8);
             if(cid < 0) {
@@ -1064,7 +1067,7 @@ int CmdBatchGetClientIdByUid::ExecCmd()
         rapidjson::Value uid_obj(rapidjson::kObjectType);
         rapidjson::Value arr(rapidjson::kArrayType);
         
-        std::list<int64_t> lst_sfd;
+        std::vector<int64_t> lst_sfd;
         if (tgg_get_fdsbyuid(uid, lst_sfd) == 0) {
             for (auto fdid : lst_sfd) {
                 int cid = GET_CID_FDCID_MASK(fdid);

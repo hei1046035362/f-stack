@@ -16,7 +16,7 @@ void split_string(const std::string& str, char delimiter, std::vector<std::strin
 
 std::string hex2bin(const std::string& hex);
 
-std::string bin2hex(const std::string& input, bool bForLog = true, bool uppercase = false);
+std::string bin2hex(std::string_view input, bool bForLog = true, bool uppercase = false);
 
 // 函数：将无符号整数转换为十六进制字符串
 std::string uint32_to_hex(uint32_t ip);

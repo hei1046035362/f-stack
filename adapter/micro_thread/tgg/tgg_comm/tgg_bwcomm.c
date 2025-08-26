@@ -40,7 +40,7 @@ int get_connection_info(int fd, char* ip_str, unsigned int* ip, unsigned short* 
 }
 
 // 将输入字符串使用 DEFLATE 压缩
-int gzdeflate(const std::string& input, std::string& outBuffer) {
+int gzdeflate(std::string_view input, std::string& outBuffer) {
     if(!input.length()) {
         // 输入为空时，deflate会失败，但是php那边是可以压缩的，值为 \x03\x00
         outBuffer = "\x03\x00";
@@ -66,7 +66,7 @@ int gzdeflate(const std::string& input, std::string& outBuffer) {
     }
 
     deflateStream.avail_in = input.length();
-    deflateStream.next_in = (Bytef*)input.c_str();
+    deflateStream.next_in = (Bytef*)input.data();
     deflateStream.avail_out = outBufferSize;
     deflateStream.next_out = (Bytef*)outBuffer.c_str();
 
@@ -92,7 +92,7 @@ int gzdeflate(const std::string& input, std::string& outBuffer) {
     return 0;
 }
 
-int gzinflate(const std::string& input, std::string& outBuffer)
+int gzinflate(std::string_view input, std::string& outBuffer)
 {
     // 预计最大的解压后缓冲区大小，这里设置为输入字符串大小的10倍（可根据实际情况调整）
     uLongf outBufferSize = input.length() * 2;
@@ -114,7 +114,7 @@ int gzinflate(const std::string& input, std::string& outBuffer)
     }
 
     inflateStream.avail_in = input.length();
-    inflateStream.next_in = (Bytef*)input.c_str();
+    inflateStream.next_in = (Bytef*)input.data();
     inflateStream.avail_out = outBufferSize;
     inflateStream.next_out = (Bytef*)outBuffer.c_str();
 
@@ -139,7 +139,7 @@ int gzinflate(const std::string& input, std::string& outBuffer)
 }
 
 int message_pack(uint16_t command, uint32_t seq, uint8_t protocol,
-            uint8_t compressFormat, const std::string& body, std::string& result)
+            uint8_t compressFormat, std::string_view body, std::string& result)
 {    
     const uint16_t PACKAGE_SEPARATOR = 65534; // 假设的包分隔符
     std::vector<uint8_t> output;
@@ -309,7 +309,7 @@ int message_unpack(const std::string& packedData, std::string& result)
 }
 
 #include <fstream>
-#include <list>
+#include <vector>
 #include <sstream>
 #include <stdexcept>
 #include <type_traits>
@@ -317,7 +317,7 @@ int message_unpack(const std::string& packedData, std::string& result)
 template <typename T>
 int write_list_to_file_inline(const std::string& filename, 
                      const std::string& header,
-                     const std::list<T>& dataList,
+                     const std::vector<T>& dataList,
                      size_t buffer_kb) 
 {
     // 1. 创建输出流并设置缓冲区
@@ -374,7 +374,7 @@ int write_list_to_file_inline(const std::string& filename,
 template <typename T>
 int write_list_to_file(const std::string& filename, 
                      const std::string& header,
-                     const std::list<T>& dataList,
+                     const std::vector<T>& dataList,
                      size_t buffer_kb)
 {
     return write_list_to_file_inline(filename, header, dataList, buffer_kb);
@@ -383,7 +383,7 @@ int write_list_to_file(const std::string& filename,
 template <>
 int write_list_to_file<int>(const std::string& filename, 
                      const std::string& header,
-                     const std::list<int>& dataList,
+                     const std::vector<int>& dataList,
                      size_t buffer_kb)
 {
     return write_list_to_file_inline(filename, header, dataList, buffer_kb);
@@ -392,7 +392,7 @@ int write_list_to_file<int>(const std::string& filename,
 template <>
 int write_list_to_file<int64_t>(const std::string& filename, 
                      const std::string& header,
-                     const std::list<int64_t>& dataList,
+                     const std::vector<int64_t>& dataList,
                      size_t buffer_kb)
 {
     return write_list_to_file_inline(filename, header, dataList, buffer_kb);
@@ -401,7 +401,7 @@ int write_list_to_file<int64_t>(const std::string& filename,
 template<>
 int write_list_to_file<std::string>(const std::string& filename, 
                      const std::string& header,
-                     const std::list<std::string>& dataList,
+                     const std::vector<std::string>& dataList,
                      size_t buffer_kb)
 {
     return write_list_to_file_inline(filename, header, dataList, buffer_kb);

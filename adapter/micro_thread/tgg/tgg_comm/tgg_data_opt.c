@@ -1,7 +1,7 @@
 #include "tgg_common.h"
 #include <rte_log.h>
 #include "string.h"
-#include <list>
+#include <vector>
 #include "tgg_bw_cache.h"
 #include "comm/log.hpp"
 
@@ -10,7 +10,7 @@ int tgg_bind_session(const char* uid, int cid)
 {
     int64_t fdidcid = tgg_get_fdbycid(cid);
     if(fdidcid < 0) {
-        LOG_ERROR("get fd by cid[%d] failed.", cid);
+        LOG_DEBUG("get fd by cid[%d] failed, cid may not exist.", cid);
         return -1;
     }
 	int core_id = GET_COREID_FDCID_MASK(fdidcid);
@@ -77,9 +77,9 @@ int tgg_free_session(int core_id, int fd, int cid)
 	std::string uid = tgg_get_cli_uid(core_id, fd);
 	int64_t fdidcid = generate_fdidcid(core_id, fd, cid);
 	if(cid > 0) {
-		std::list<std::string> lstgid;
+		std::vector<std::string> lstgid;
 		if (!tgg_get_gidsbycid(cid, lstgid)) {
-			std::list<std::string>::iterator itgid = lstgid.begin();
+			std::vector<std::string>::iterator itgid = lstgid.begin();
 			while(itgid != lstgid.end()) {
 				// 清理hash<gid,list<fdx>>
 				tgg_del_fd4gid((*itgid).c_str(), fdidcid);

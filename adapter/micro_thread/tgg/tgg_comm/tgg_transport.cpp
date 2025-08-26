@@ -9,7 +9,7 @@
 #include "comm/Websocket.hpp"
 #include "tgg_conf.h"
 
-void Send2Fd(int core_id, int fd, int idx, const std::string& data, int fd_opt, int encode)
+void Send2Fd(int core_id, int fd, int idx, std::string_view data, int fd_opt, int encode)
 {
     // 共享数据指针（避免重复打包）
     auto shared_data = std::make_shared<const std::string>([&]{
@@ -21,7 +21,7 @@ void Send2Fd(int core_id, int fd, int idx, const std::string& data, int fd_opt, 
             // 打包封装
             if (encode && message_pack(2, 1, 0, 1, data, packData) < 0)
             {
-                LOG_ERROR("message_pack data[%s] failed.", data.c_str());
+                LOG_ERROR("message_pack data[%s] failed.", data.data());
                 return sendData;
             }
             sendData = Websocket::EncodeWebsocketMessage(BINARY_FRAME, encode ? packData : data);
@@ -31,14 +31,14 @@ void Send2Fd(int core_id, int fd, int idx, const std::string& data, int fd_opt, 
     
     if (shared_data->empty()) return;
 
-    LOG_DEBUG("send data coreid:%d fd:%d idx:%d, data:%s.", core_id, fd, idx, bin2hex(*shared_data).c_str());
+    LOG_DEBUG("send data coreid:%d fd:%d idx:%d, data:%s.", core_id, fd, idx, bin2hex(std::string_view(*shared_data)).c_str());
     if (enqueue_data_single_fd(core_id, shared_data, fd, idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
         LOG_ERROR("Enqueue data Failed: coreid:%d fd:%d idx:%d,opt:%d", core_id, fd, idx, fd_opt);
     }
 
 }
 
-void Send2Client(int cid, const std::string& data, int fd_opt, int encode)
+void Send2Client(int cid, std::string_view data, int fd_opt, int encode)
 {
     int64_t fdidcid = tgg_get_fdbycid(cid);
     if(fdidcid <= 0) {
@@ -51,10 +51,10 @@ void Send2Client(int cid, const std::string& data, int fd_opt, int encode)
     Send2Fd(core_id, fd, idx, data, fd_opt, encode);
 }
 
-void BatchSend2ClientBycids(std::list<int>& cids, const std::string& data, int fd_opt, int encode)
+void BatchSend2ClientBycids(std::vector<int>& cids, std::string_view data, int fd_opt, int encode)
 {
-    std::list<int64_t> lstFds;
-    std::list<int>::iterator itCid = cids.begin();
+    std::vector<int64_t> lstFds;
+    std::vector<int>::iterator itCid = cids.begin();
     while(itCid != cids.end()) {
         int fdidcid = tgg_get_fdbycid(*itCid);
         if(fdidcid <= 0) {
@@ -67,8 +67,8 @@ void BatchSend2ClientBycids(std::list<int>& cids, const std::string& data, int f
     BatchSend2ClientByfds(lstFds, data, fd_opt, encode);
 }
 
-void BatchSend2ClientByfds(const std::list<int64_t>& fds, 
-                           const std::string& data, 
+void BatchSend2ClientByfds(const std::vector<int64_t>& fds, 
+                           std::string_view data, 
                            int fd_opt, 
                            int encode) 
 {
@@ -111,10 +111,10 @@ void BatchSend2ClientByfds(const std::list<int64_t>& fds,
             // 打包封装
             if (encode && message_pack(2, 1, 0, 1, data, packData) < 0)
             {
-                LOG_ERROR("message_pack data[%s] failed.", data.c_str());
+                LOG_ERROR("message_pack data[%s] failed.", data.data());
                 return sendData;
             }
-            sendData = Websocket::EncodeWebsocketMessage(BINARY_FRAME, encode ? packData : data);
+            sendData = Websocket::EncodeWebsocketMessage(BINARY_FRAME, encode ? std::string_view(packData.data()) : data);
         }
         return sendData;
     }());

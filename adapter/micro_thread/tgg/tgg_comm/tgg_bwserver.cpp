@@ -451,7 +451,7 @@ void *read_routine( void *arg )
                 if(pack_len < sizeof(tgg_bw_protocal) || 
                    pack_len > MAX_PACKET_SIZE) {
                     LOG_ERROR("invalid packet len[%d], bw[ip:%s,port%d] is closing.", pack_len, ip_str, ntohs(port));
-                    LOG_ERROR("bin data:%s.", bin2hex(recv_buffer).c_str());
+                    LOG_ERROR("bin data:%s.", bin2hex(std::string_view(recv_buffer)).c_str());
                     tgg_close_bw_session(g_prc_id, fd);
                     close( fd );
                     LOG_ERROR("bw[ip:%s,port%d] closed.", ip_str, ntohs(port));

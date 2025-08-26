@@ -7,7 +7,7 @@
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 
-void get_body_string(const rapidjson::Value& jdata, std::string& body);
+std::string_view get_body_string(const rapidjson::Value& jdata);
 
 #include <list>
 class CmdBaseProcessor {
@@ -104,7 +104,7 @@ private:
 	// @param lst_fd    客户端连接链表
 	// @param mask      输出信息掩码，目前之后cid,uid,gid
 	// @param result    返回json对象
-	void FormatResult(const std::list<int64_t>& lst_fd, int mask, rapidjson::Document& result);
+	void FormatResult(const std::vector<int64_t>& lst_fd, int mask, rapidjson::Document& result);
 };
 
 class CmdGetGroupIdList : public CmdBaseProcessor {
