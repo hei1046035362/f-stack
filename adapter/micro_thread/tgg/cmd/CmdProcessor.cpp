@@ -217,8 +217,6 @@ int CmdSendToGroup::ExecCmd()
     }
 
     // 构建排除cid集合
-    std::unordered_set<int> setExeptCid;
-    setExeptCid.reserve(256);
     if (ext_data.HasMember("exclude") && ext_data["exclude"].IsObject()) {
         const rapidjson::Value& excludeObj = ext_data["exclude"];
         for (rapidjson::Value::ConstMemberIterator itr = excludeObj.MemberBegin(); 
@@ -228,7 +226,7 @@ int CmdSendToGroup::ExecCmd()
             // 提取值（需检查类型）
             if (itr->value.IsInt()) {
                 // int value = itr->value.GetInt();
-                setExeptCid.insert(itr->value.GetInt());
+                tgg_add_expt_cid(prc_id, itr->value.GetInt());
             } else {
                 LOG_ERROR("Invalid type of value for key:%s", itr->name.GetString());
             }
@@ -262,7 +260,7 @@ int CmdSendToGroup::ExecCmd()
                 }
                 // 批量过滤
                 for (size_t j = 0; j < lstFds.size(); j++) {
-                    if (setExeptCid.find(cid_cache[j]) == setExeptCid.end()) {
+                    if (tgg_check_expt_cid_exist(prc_id, cid_cache[j]) < 0) {
                         lstAllFds.push_back(lstFds[j]);
                     }
                 }
@@ -275,7 +273,9 @@ int CmdSendToGroup::ExecCmd()
             // 日志优化：直接记录gid数量而非完整JSON[1](@ref)
             LOG_DEBUG("SendToGroup: cmd executed for %d groups", groupArray.Size());
         }
+        tgg_reset_expt_cid(prc_id);
     } else {
+        tgg_reset_expt_cid(prc_id);
         LOG_WARNING("SendToGroup: cmd executed, no Group found.");
         return -1;
     }
@@ -517,7 +517,7 @@ int CmdSelect::ExecCmd()
                 else {
                     // 处理 connection_id
                     std::vector<int64_t> lst_fds;
-                    lst_fds.reserve(5000);
+                    lst_fds.reserve(RESERVED_SIZE_FOR_GID_CIDS);
                     if (value.IsArray()) {
                         for (rapidjson::SizeType i = 0; i < value.Size(); i++) {
                             int cid = value[i].GetInt();
