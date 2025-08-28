@@ -506,6 +506,7 @@ int main(int argc, char *argv[])
 
     // 停止定时器
     stop_timer();
+    print_mem_statistics();
     if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
         if(TggConfigure::getInstance()->get_auto_start()) {
             kill_all_child();
@@ -518,7 +519,6 @@ int main(int argc, char *argv[])
     } else {
         LOG_INFO("-------secondary core[%d] exit-------", g_core_id);
     }
-    print_mem_statistics();
     mt_uninit_frame();
     rte_eal_cleanup();
     LOG_WARNING("gwrcv left fd count:%ld", s_left_fd);

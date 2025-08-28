@@ -571,6 +571,24 @@ int CmdTggGateway::CheckCidAvaliable()
     return 0;
 }
 
+int CmdTggGateway::PrintMemStats()
+{
+    LOG_INFO("ExecCmd reload ip filter...");
+    tgg_send_master_data* data = (tgg_send_master_data*)dpdk_rte_malloc(sizeof(tgg_send_master_data));
+    if(!data) {
+        LOG_ERROR("Enqueue master cmd failed, malloc data error.");
+        return -1;
+    }
+    data->cmd = CMD_PRINT_DATA_STATS;
+    if(tgg_enqueue_master(data) < 0) {
+        LOG_ERROR("Enqueue master cmd failed.");
+        dpdk_rte_free(data);
+        return -1;
+    }
+    LOG_INFO("print mem stats success.");
+    return 0;
+}
+
 
 int CmdTggGateway::ExecCmd()
 {
@@ -580,9 +598,9 @@ int CmdTggGateway::ExecCmd()
     ensure_path_exists(_print_path);
     std::string_view body = get_body_string(jdata);
     rapidjson::Document body_info;
-    body_info.Parse(body.data());
+    body_info.Parse(body.data(), body.size());
     if (body_info.HasParseError()) {
-        LOG_ERROR("CmdTggGateway: JSON parse error");
+        LOG_ERROR("CmdTggGateway: JSON[%s] parse error, body size:%d", body.data(), body.size());
         return -1;
     }
     if (!body_info.HasMember("cmd")) {
@@ -652,6 +670,9 @@ int CmdTggGateway::ExecCmd()
             break;
         case CMD_CHECK_CID_AVALIABLE:
             return CheckCidAvaliable();
+            break;
+        case CMD_PRINT_MEM_STATS:
+            return PrintMemStats();
             break;
         default:
             LOG_WARNING("unknown cmd:%d", cmd);

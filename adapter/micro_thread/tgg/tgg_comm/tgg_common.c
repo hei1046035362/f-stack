@@ -1057,7 +1057,12 @@ void dpdk_rte_free(void* pdata)
 	// 		可以用链表管理起来，然后注册rte_service给master进程去管理，也可以放到定时任务管理
 }
 
+// 调试是否有内存泄漏，但是高频操作在正式环境不合适，map查询非常耗性能
+#ifdef DEBUG_MEMPOOL_STATS
 static std::map<uintptr_t, int> s_hi_freq_malloc;
+static std::map<uintptr_t, int> s_hi_freq_free;
+#endif
+
 int high_freq_malloc(struct rte_mempool* pool, void** data, int size)
 {
 	if(size <= 0) {
@@ -1068,31 +1073,37 @@ int high_freq_malloc(struct rte_mempool* pool, void** data, int size)
 	if(size > COMMON_PACKET_LEN) {
 		LOG_INFO("recieved an large packet, size:%d", size);
 		ret = rte_mempool_get(g_mempool_large_data, data);
+#ifdef DEBUG_MEMPOOL_STATS
 		if(!ret)
 			s_hi_freq_malloc[reinterpret_cast<uintptr_t>(g_mempool_large_data)]++;
+#endif
 	} else {
 		ret = rte_mempool_get(pool, data);
+#ifdef DEBUG_MEMPOOL_STATS
 		if(!ret)
 			s_hi_freq_malloc[reinterpret_cast<uintptr_t>(pool)]++;
+#endif
 	}
 	return ret;
 }
 
-static std::map<uintptr_t, int> s_hi_freq_free;
 void high_freq_free(struct rte_mempool* pool, void* data, int size)
 {
 	if(size <= 0) {
 		LOG_INFO("invalid size[%d] to free.", size);
 		return ;
 	}
-	// s_hi_freq_free[pool->name]++;
 	if(size > COMMON_PACKET_LEN) {
 		LOG_INFO("free an large packet, size:%d", size);
 		rte_mempool_put(g_mempool_large_data, data);
+#ifdef DEBUG_MEMPOOL_STATS
 		s_hi_freq_free[reinterpret_cast<uintptr_t>(g_mempool_large_data)]++;
+#endif
 	} else {
 		rte_mempool_put(pool, data);
+#ifdef DEBUG_MEMPOOL_STATS
 		s_hi_freq_free[reinterpret_cast<uintptr_t>(pool)]++;
+#endif
 	}
 }
 
@@ -1100,13 +1111,46 @@ void print_mem_statistics()
 {
 	LOG_WARNING("malloc times: %d", s_malloc_count);
 	LOG_WARNING("free times: %d", s_free_count);
+#ifdef DEBUG_MEMPOOL_STATS
 	for(auto iter : s_hi_freq_malloc) {
 		LOG_WARNING("pool[%s] hi_malloc times: %d", (reinterpret_cast<struct rte_mempool*>(iter.first))->name, iter.second);	
 	}
 	for(auto iter : s_hi_freq_free) {
 		LOG_WARNING("pool[%s] hi_free times: %d", (reinterpret_cast<struct rte_mempool*>(iter.first))->name, iter.second);	
 	}
+#endif
 	LOG_WARNING("ws buffer left count:%ld", s_buffer_count);
+    if(rte_eal_process_type() != RTE_PROC_PRIMARY) {
+    	return;
+    }
+
+	LOG_WARNING("****************rte_ring stats*****************");
+	for (int i = 0; i < MAX_LCORE_COUNT; ++i)
+	{
+		if(g_ring_writes[i])
+			LOG_WARNING("%s cur count:%ld", g_ring_writes[i]->name, rte_ring_count(g_ring_writes[i]));
+		if(g_ring_bwrcvs[i])
+			LOG_WARNING("%s cur count:%ld", g_ring_bwrcvs[i]->name, rte_ring_count(g_ring_bwrcvs[i]));
+	}
+	LOG_WARNING("%s cur count:%ld", g_ring_trans->name, rte_ring_count(g_ring_trans));
+	LOG_WARNING("%s cur count:%ld", g_ring_bwfdx->name, rte_ring_count(g_ring_bwfdx));
+	LOG_WARNING("%s cur count:%ld", g_ring_master->name, rte_ring_count(g_ring_master));
+
+	LOG_WARNING("****************rte_mempool stats*****************");
+	for (int i = 0; i < MAX_LCORE_COUNT; ++i)
+	{
+		if(g_mempool_write[i])
+			LOG_WARNING("%s available count:%ld used count:%u", g_mempool_write[i]->name, rte_mempool_avail_count(g_mempool_write[i]), rte_mempool_in_use_count(g_mempool_write[i]));
+		if(g_mempool_bwrcv[i])
+			LOG_WARNING("%s available count:%ld used count:%u", g_mempool_bwrcv[i]->name, rte_mempool_avail_count(g_mempool_bwrcv[i]), rte_mempool_in_use_count(g_mempool_bwrcv[i]));
+	}
+	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_trans->name, rte_mempool_avail_count(g_mempool_trans), rte_mempool_in_use_count(g_mempool_trans));
+	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_trans_data->name, rte_mempool_avail_count(g_mempool_trans_data), rte_mempool_in_use_count(g_mempool_trans_data));
+	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_write_data->name, rte_mempool_avail_count(g_mempool_write_data), rte_mempool_in_use_count(g_mempool_write_data));
+	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_bwrcv_data->name, rte_mempool_avail_count(g_mempool_bwrcv_data), rte_mempool_in_use_count(g_mempool_bwrcv_data));
+	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_large_data->name, rte_mempool_avail_count(g_mempool_large_data), rte_mempool_in_use_count(g_mempool_large_data));
+	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_clifdlist_data->name, rte_mempool_avail_count(g_mempool_clifdlist_data), rte_mempool_in_use_count(g_mempool_clifdlist_data));
+	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_ws_buffer->name, rte_mempool_avail_count(g_mempool_ws_buffer), rte_mempool_in_use_count(g_mempool_ws_buffer));
 }
 
 
