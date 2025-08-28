@@ -966,7 +966,7 @@ tgg_write_data* format_send_data(int core_id, const std::shared_ptr<const std::s
 
 add_data_failed:
 	LOG_ERROR("malloc mem failed.");
-	clean_fdidlist(wdata->lst_fd);
+	clean_fdidlist(head);
 	memset(wdata, 0, sizeof(tgg_write_data));
 	high_freq_free(g_mempool_write[core_id], wdata, sizeof(tgg_write_data));
 	return NULL;
@@ -1057,7 +1057,7 @@ void dpdk_rte_free(void* pdata)
 	// 		可以用链表管理起来，然后注册rte_service给master进程去管理，也可以放到定时任务管理
 }
 
-static std::map<std::string, int> s_hi_freq_malloc;
+static std::map<uintptr_t, int> s_hi_freq_malloc;
 int high_freq_malloc(struct rte_mempool* pool, void** data, int size)
 {
 	if(size <= 0) {
@@ -1069,16 +1069,16 @@ int high_freq_malloc(struct rte_mempool* pool, void** data, int size)
 		LOG_INFO("recieved an large packet, size:%d", size);
 		ret = rte_mempool_get(g_mempool_large_data, data);
 		if(!ret)
-			s_hi_freq_malloc[g_mempool_large_data->name]++;
+			s_hi_freq_malloc[reinterpret_cast<uintptr_t>(g_mempool_large_data)]++;
 	} else {
 		ret = rte_mempool_get(pool, data);
 		if(!ret)
-			s_hi_freq_malloc[pool->name]++;
+			s_hi_freq_malloc[reinterpret_cast<uintptr_t>(pool)]++;
 	}
 	return ret;
 }
 
-static std::map<std::string, int> s_hi_freq_free;
+static std::map<uintptr_t, int> s_hi_freq_free;
 void high_freq_free(struct rte_mempool* pool, void* data, int size)
 {
 	if(size <= 0) {
@@ -1089,10 +1089,10 @@ void high_freq_free(struct rte_mempool* pool, void* data, int size)
 	if(size > COMMON_PACKET_LEN) {
 		LOG_INFO("free an large packet, size:%d", size);
 		rte_mempool_put(g_mempool_large_data, data);
-		s_hi_freq_free[g_mempool_large_data->name]++;
+		s_hi_freq_free[reinterpret_cast<uintptr_t>(g_mempool_large_data)]++;
 	} else {
 		rte_mempool_put(pool, data);
-		s_hi_freq_free[pool->name]++;
+		s_hi_freq_free[reinterpret_cast<uintptr_t>(pool)]++;
 	}
 }
 
@@ -1101,10 +1101,10 @@ void print_mem_statistics()
 	LOG_WARNING("malloc times: %d", s_malloc_count);
 	LOG_WARNING("free times: %d", s_free_count);
 	for(auto iter : s_hi_freq_malloc) {
-		LOG_WARNING("pool[%s] hi_malloc times: %d", iter.first.c_str(), iter.second);	
+		LOG_WARNING("pool[%s] hi_malloc times: %d", (reinterpret_cast<struct rte_mempool*>(iter.first))->name, iter.second);	
 	}
 	for(auto iter : s_hi_freq_free) {
-		LOG_WARNING("pool[%s] hi_free times: %d", iter.first.c_str(), iter.second);	
+		LOG_WARNING("pool[%s] hi_free times: %d", (reinterpret_cast<struct rte_mempool*>(iter.first))->name, iter.second);	
 	}
 	LOG_WARNING("ws buffer left count:%ld", s_buffer_count);
 }
