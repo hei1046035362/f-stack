@@ -106,5 +106,6 @@ int tgg_add_expt_cid(int prc_id, int64_t cid);
 int tgg_check_expt_cid_exist(int prc_id, int64_t cid);
 void tgg_reset_expt_cid(int prc_id);
 
+void print_hash_statistics();
 
 #endif  // __TGG_BW_CACHE_H__

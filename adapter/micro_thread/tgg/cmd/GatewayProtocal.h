@@ -177,6 +177,8 @@ enum TggGatewayCmd {
     CMD_PRINT_ALL_GATEWAYS = 160,
     CMD_PRINT_GATEWAY_COUNT = 161,
 
+    CMD_PRINT_MEM_STATS = 170,
+
     // *******针对hash表的检查*******
     //   试运行阶段，我们不知道是否会存在有的连接在结束后，hash表中是否有清除干净，为方便外部检查，这里提供一些可选的检查操作
     //    注： 这里的操作都比较重，尽量在并发小的时候操作，都是针对全局hash表进行遍历，然后逐个检查

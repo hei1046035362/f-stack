@@ -215,6 +215,7 @@ typedef struct st_bwfdx_data {
 
 enum MASTER_EXC_CMD {
     CMD_IP_FILTER_RELOAD = 0,
+    CMD_PRINT_DATA_STATS,
 };
 
 // sendary发送给master的数据结构,暂时只用到了一个ip过滤从文件中reload的功能

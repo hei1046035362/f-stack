@@ -1120,3 +1120,24 @@ void tgg_reset_expt_cid(int prc_id)
     }
     rte_hash_reset(g_expt_cid_hash[prc_id]);
 }
+
+void print_hash_statistics()
+{
+    if(rte_eal_process_type() != RTE_PROC_PRIMARY) {
+        return;
+    }
+    LOG_WARNING("****************rte_hash stats*****************");
+    for (int i = 0; i < MAX_LCORE_COUNT; ++i)
+    {
+        if(g_idx_hash[i])
+            LOG_WARNING("%s cur count:%ld", g_idx_hash[i]->name, rte_hash_count(g_idx_hash[i]));
+        if(g_expt_cid_hash[i])
+            LOG_WARNING("%s cur count:%ld", g_expt_cid_hash[i]->name, rte_hash_count(g_expt_cid_hash[i]));
+    }
+    LOG_WARNING("%s cur count:%ld", g_gid_hash->name, rte_hash_count(g_gid_hash));
+    LOG_WARNING("%s cur count:%ld", g_uid_hash->name, rte_hash_count(g_uid_hash));
+    LOG_WARNING("%s cur count:%ld", g_cid_hash->name, rte_hash_count(g_cid_hash));
+    LOG_WARNING("%s cur count:%ld", g_cidgid_hash->name, rte_hash_count(g_cidgid_hash));
+    LOG_WARNING("%s cur count:%ld", g_bwfdx_hash->name, rte_hash_count(g_bwfdx_hash));
+    LOG_WARNING("%s cur count:%ld", g_bwwkkey_hash->name, rte_hash_count(g_bwwkkey_hash));
+}
