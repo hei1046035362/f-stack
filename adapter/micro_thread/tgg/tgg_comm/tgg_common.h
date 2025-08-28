@@ -11,6 +11,9 @@
 #define GW_MONITOR_HEART_BEAT_CHECK 5000  // gw进程心跳检测间隔5s
 #define GW_MONITOR_HEART_BEAT_UPDATE 1000 // gw进程心跳更新间隔1s
 
+#define RESERVED_SIZE_FOR_GID_CIDS 5000  // 获取每个gid有多少个uid/cid时预留的vector的大小，防止频繁动态扩容
+#define RESERVED_SIZE_FOR_UID_CIDS 100  // 获取每个uid有多少个cid时预留的vector的大小，防止频繁动态扩容
+
 void init_endians();
 
 bool big_endian();

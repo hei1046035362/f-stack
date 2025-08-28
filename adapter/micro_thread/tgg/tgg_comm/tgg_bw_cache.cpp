@@ -16,6 +16,7 @@ extern const struct rte_hash *g_cidgid_hash;
 extern const struct rte_hash *g_idx_hash[];
 extern const struct rte_hash *g_bwfdx_hash;
 extern const struct rte_hash *g_bwwkkey_hash;
+extern struct rte_hash *g_expt_cid_hash[];// sendgroup时，要排除的cid列表，标准库的set和unordered_set效率太低
 
 extern struct rte_rcu_qsbr *g_gid_rcu;
 extern struct rte_rcu_qsbr *g_uid_rcu;
@@ -214,7 +215,7 @@ static int tgg_hash_get_allkeys(const rte_hash* hash, std::vector<std::string>& 
     int* value = NULL;
     uint32_t next = 0;
     int ret = 0;
-    lst_items.reserve(5000);
+    lst_items.reserve(RESERVED_SIZE_FOR_GID_CIDS);
     while (1) {
         ret = rte_hash_iterate(hash, (const void**)&key, (void**)&value, &next);
         if (-ENOENT == ret) {
@@ -474,7 +475,7 @@ int tgg_add_gid(const char* gid, int64_t fdidcid)
 
 int tgg_get_fdsbygid(const char* gid, std::vector<int64_t>& lst_fd)
 {
-    lst_fd.reserve(5000);
+    lst_fd.reserve(RESERVED_SIZE_FOR_GID_CIDS);
     APROPRIAT_HASH_KEY(gid, TGG_GID_LEN);
     tgg_gid_data* value = (tgg_gid_data*)tgg_hash_get_value(g_gid_hash, _key, TGG_GID_LEN);
     if(!value) {
@@ -611,7 +612,7 @@ int tgg_get_fdsbyuid(const char* uid, std::vector<int64_t>& lst_fd)
         LOG_DEBUG("get fdidcid by uid[%s] failed.", uid);
         return -1;
     }
-    lst_fd.reserve(100);
+    lst_fd.reserve(RESERVED_SIZE_FOR_UID_CIDS);
     ReadLock lock(&value->lock);
     tgg_fd_list* current = value->list;
     while (current) {
@@ -757,7 +758,7 @@ int tgg_get_gidsbycid(int64_t cid, std::vector<std::string>& lst_gid)
         LOG_INFO("cid [%d] not exist in gid hash.", cid);
         return -1;
     }
-    lst_gid.reserve(5000);
+    lst_gid.reserve(RESERVED_SIZE_FOR_GID_CIDS);
     ReadLock lock(&(value->lock));
     tgg_list_id *current = value->list;
     while (current) {
@@ -858,7 +859,7 @@ void tgg_del_gid_cidgid(const char* gid)
 void tgg_iterprint_gidsbyuid(const char* uid)
 {
     std::vector<std::string> lst_fd;
-    lst_fd.reserve(5000);
+    lst_fd.reserve(RESERVED_SIZE_FOR_GID_CIDS);
     char* key = NULL;
     tgg_gid_list* value = NULL;
     uint32_t next = 0;
@@ -1097,4 +1098,19 @@ int tgg_get_allbwwkkeys(std::vector<std::string>& lst_wkkeys)
 int tgg_get_bwwoker_count()
 {
     return rte_hash_count(g_bwwkkey_hash);
+}
+
+int tgg_add_expt_cid(int prc_id, int64_t cid)
+{
+    return rte_hash_add_key_with_hash(g_expt_cid_hash[prc_id], &cid, rte_hash_crc(&cid, sizeof(int64_t), 0));
+}
+
+int tgg_check_expt_cid_exist(int prc_id, int64_t cid)
+{
+    return rte_hash_lookup_with_hash(g_expt_cid_hash[prc_id], &cid, rte_hash_crc(&cid, sizeof(int64_t), 0));
+}
+
+void tgg_reset_expt_cid(int prc_id)
+{
+    rte_hash_reset(g_expt_cid_hash[prc_id]);
 }

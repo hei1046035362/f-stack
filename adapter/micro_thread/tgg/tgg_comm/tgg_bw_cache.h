@@ -101,4 +101,10 @@ int tgg_add_bwwkkey(const char* bwwkkey);
 int tgg_get_allbwwkkeys(std::vector<std::string>& lst_wkkeys);
 int tgg_get_bwwoker_count();
 
+// 排除cid列表 sendgroup时，会有一个排除的cid列表，标准库的set和unordered_set效率太低
+int tgg_add_expt_cid(int prc_id, int64_t cid);
+int tgg_check_expt_cid_exist(int prc_id, int64_t cid);
+void tgg_reset_expt_cid(int prc_id);
+
+
 #endif  // __TGG_BW_CACHE_H__
