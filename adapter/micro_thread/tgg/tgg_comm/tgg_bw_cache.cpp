@@ -1107,10 +1107,16 @@ int tgg_add_expt_cid(int prc_id, int64_t cid)
 
 int tgg_check_expt_cid_exist(int prc_id, int64_t cid)
 {
+    if(rte_hash_count(g_expt_cid_hash[prc_id]) <= 0) {
+        return -1;
+    }
     return rte_hash_lookup_with_hash(g_expt_cid_hash[prc_id], &cid, rte_hash_crc(&cid, sizeof(int64_t), 0));
 }
 
 void tgg_reset_expt_cid(int prc_id)
 {
+    if(rte_hash_count(g_expt_cid_hash[prc_id]) <= 0) {
+        return;
+    }
     rte_hash_reset(g_expt_cid_hash[prc_id]);
 }
