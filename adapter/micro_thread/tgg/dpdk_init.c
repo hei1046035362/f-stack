@@ -407,6 +407,7 @@ void tgg_master_init()
 
 	s_trans_data_mempool_size = s_trans_ring_size;// 尽量设置成2^n  上行透传 数据 内存
 	s_write_data_mempool_size = s_write_ring_size * lcore_count;  // 只有一个内存池
+	s_clifdlist_mempool_size = 1024*1024*lcore_count; // 每个write_data对应的fd链表(一个data可能要发给多个fd) 使用的内存池大小
 	s_bwrcv_data_mempool_size = s_bwrcv_ring_size * TggConfigure::getInstance()->get_bwsvr_count();// 只有一个内存池
 
 	s_large_data_mempool_size = 1024*32*lcore_count;// 大块数据，本来就很少，大多是连接创建的时候会有，但是这个是上下行三个队列都会用到
