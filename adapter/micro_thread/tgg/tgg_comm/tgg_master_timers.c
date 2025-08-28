@@ -8,6 +8,7 @@
 #include "tgg_bw_cache.h"
 #include "tgg_ip_filter.h"
 #include "tgg_common.h"
+#include "tgg_bw_cache.h"
 #include <poll.h>
 
 extern int g_core_id;
@@ -194,6 +195,10 @@ static void deal_master_cmd_dequeue(struct rte_timer* tm, void* arg)
                 case CMD_IP_FILTER_RELOAD:
                     reload_ip_filter(TggConfigure::getInstance()->get_ip_filter_path().c_str());
                     break;
+                case CMD_PRINT_DATA_STATS:
+                    print_mem_statistics();
+                    print_hash_statistics();
+                    break;
                 default:
                     LOG_WARNING("unknown cmd:%d", cmd->cmd);
                     break;
@@ -201,6 +206,7 @@ static void deal_master_cmd_dequeue(struct rte_timer* tm, void* arg)
             dpdk_rte_free(cmd);
         }
     } else {
+        // primary执行完成后会设置标志，sync_ip_filter函数内部会根据标记判断是否执行同步
         sync_ip_filter();
     }
 }

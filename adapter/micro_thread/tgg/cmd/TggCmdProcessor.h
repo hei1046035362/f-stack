@@ -31,6 +31,7 @@ private:
     int CheckGidcidAvaliable();
     int CheckUidcidAvaliable();
     int CheckCidAvaliable();
+    int PrintMemStats();
 private:
     std::string _print_path;
 };
