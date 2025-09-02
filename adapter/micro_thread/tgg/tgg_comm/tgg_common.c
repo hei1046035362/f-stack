@@ -44,6 +44,7 @@ extern struct rte_mempool* g_mempool_bwrcv_data;
 extern struct rte_mempool* g_mempool_large_data;
 extern struct rte_mempool* g_mempool_clifdlist_data;
 extern struct rte_mempool* g_mempool_ws_buffer;
+extern struct rte_mempool* g_mempool_fd_snddata[MAX_LCORE_COUNT];
 
 tgg_stats g_tgg_stats = {0};
 static bool s_big_endian = false;
@@ -118,6 +119,8 @@ void tgg_close_cli(int core_id, int fd)
 	// memset(cli->reserved, 0, sizeof(cli->reserved));
 	cli->idx = TGG_FD_CLOSED;
 	cli->authorized = AUTH_TYPE_UNKNOWN;
+	cli->thread = NULL;
+	tgg_clean_cli_snd_data(core_id, fd);
 }
 
 int tgg_init_cli(int core_id, int fd, char* ip_str, uint32_t ip, ushort port)
@@ -141,6 +144,7 @@ int tgg_init_cli(int core_id, int fd, char* ip_str, uint32_t ip, ushort port)
 	memcpy(cli->ip_str, ip_str, INET_ADDRSTRLEN);
 	cli->ip = ip;
 	cli->port = port;
+	cli->send_datalist = NULL;
 	return 0;
 }
 
@@ -201,6 +205,76 @@ int tgg_get_cli_bwfdx(int core_id, int fd)
 {
 	// SpinLock lock(get_cli_lock());
 	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].bwfdx;	
+}
+
+tgg_send_data* tgg_get_cli_snd_data(int core_id, int fd)
+{
+	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist;
+}
+
+int tgg_add_cli_snd_data(int core_id, int fd, tgg_write_data* wdata)
+{
+	tgg_send_data* data = NULL;
+	if (high_freq_malloc(g_mempool_fd_snddata[core_id], (void**)(&data), sizeof(tgg_send_data)) < 0) {
+		return -1;
+	}
+	if(wdata->data) {
+		wdata->ref++;
+	}
+	data->data = wdata;
+	data->next = NULL;
+	tgg_send_data* snddata = ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist;
+	if(!snddata) {
+		((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist = data;
+		data->tail = data;
+		return 0;
+	}
+	snddata->tail->next = data;
+	snddata->tail = data;
+	return 0;
+}
+
+void tgg_clean_cli_snd_data(int core_id, int fd)
+{
+	tgg_send_data* snddata = ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist;
+	while(snddata) {
+		tgg_send_data* tmp = snddata;
+        ((tgg_write_data*)(tmp->data))->ref--;
+        if(((tgg_write_data*)(tmp->data))->ref <= 0) {
+            clean_write_data(core_id, (tgg_write_data*)(tmp->data));            
+        }
+		snddata = snddata->next;
+		high_freq_free(g_mempool_fd_snddata[core_id], tmp, sizeof(tgg_send_data));
+	}
+	((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist = NULL;
+}
+tgg_send_data* tgg_pop_cli_snd_data(int core_id, int fd)
+{
+	tgg_send_data* snddata = ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist;
+	if(snddata && snddata->next) {
+		((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist = snddata->next;
+		snddata->next->tail = snddata->tail;
+	} else {
+		((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist = NULL;
+	}
+	return snddata;
+}
+
+void tgg_set_cli_thread(int core_id, int fd, void* pthread)
+{
+	((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].thread = pthread;
+}
+void* tgg_get_cli_thread(int core_id, int fd)
+{
+	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].thread;
+}
+
+void tgg_free_cli_snd_data(int core_id, tgg_send_data* data)
+{
+	data->data = NULL;
+	data->next = NULL;
+	data->tail = NULL;
+	high_freq_free(g_mempool_fd_snddata[core_id], data, sizeof(tgg_send_data));
 }
 
 std::string tgg_get_cli_uid(int core_id, int fd)
@@ -896,41 +970,51 @@ void clean_write_data(int core_id, tgg_write_data* wdata)
     high_freq_free(g_mempool_write[core_id], wdata, sizeof(tgg_write_data));
 }
 
-void clean_fdidlist(tgg_fd_id_list* fdiddata)
+void clean_fdidnode(tgg_fd_id_list* fdiddata)
 {
     if (!fdiddata) {
         return;
     }
+    memset(fdiddata, 0, sizeof(tgg_fd_id_list));
+    high_freq_free(g_mempool_clifdlist_data, fdiddata, sizeof(tgg_fd_id_list));	
+}
+
+void clean_fdidlist(tgg_fd_id_list* fdiddata)
+{
     tgg_fd_id_list* iter = fdiddata;// 第一个节点不存数据，先删除数据节点
-    while(iter->next) {
-        tgg_fd_id_list* tmp = iter->next;
-        iter->next = iter->next->next;
+    while(iter) {
+        tgg_fd_id_list* tmp = iter;
+        iter = iter->next;
         memset(tmp, 0, sizeof(tgg_fd_id_list));
     	high_freq_free(g_mempool_clifdlist_data, tmp, sizeof(tgg_fd_id_list));
     }
-    // 删除第一个节点
-    memset(fdiddata, 0, sizeof(tgg_fd_id_list));
-    high_freq_free(g_mempool_clifdlist_data, fdiddata, sizeof(tgg_fd_id_list));
 }
 
 
 tgg_write_data* format_send_data(int core_id, const std::shared_ptr<const std::string>& sdata, std::vector<int64_t>& vecfdidx, int fdopt)
 {
+	int try_times = ENQUEUE_TRY_TIMES;
+    unsigned int attempt_size = vecfdidx.size();  // Change to *1 for less conservatism; revert if needed for concurrency buffer
+    while(rte_mempool_avail_count(g_mempool_clifdlist_data) < attempt_size && try_times-- > 0) {
+        usleep(10);
+    }
+    if(try_times <= 0) {
+        LOG_ERROR("no enough[%u] avail unit in mempool, tried times:%d.", attempt_size, ENQUEUE_TRY_TIMES - try_times);
+        return NULL;
+    }
 	tgg_write_data* wdata = NULL;
-	int ret = high_freq_malloc(g_mempool_write[core_id], (void**)&wdata, sizeof(tgg_write_data));
-    // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
-	if (ret < 0) {
-		LOG_ERROR("get mem from write pool failed,code:%d.", ret);
-		return NULL;
-	}
+	int ret = 0;
 	tgg_fd_id_list* tail = NULL;
 	tgg_fd_id_list* pcur = NULL;
 	tgg_fd_id_list* head = NULL;
 	for (auto fdidx : vecfdidx) {
-		ret = high_freq_malloc(g_mempool_clifdlist_data, (void**)&pcur, sizeof(tgg_fd_id_list));
+		// ret = high_freq_malloc(g_mempool_clifdlist_data, (void**)&pcur, sizeof(tgg_fd_id_list));
+		try_times = ENQUEUE_TRY_TIMES;
+		while ((ret = high_freq_malloc(g_mempool_clifdlist_data, (void**)&pcur, sizeof(tgg_fd_id_list))) < 0 && try_times-- > 0) {
+			usleep(10);
+		}
 		if (ret < 0) {
-            // TODO 如果只有一个失败了，其他的是不是可以继续发送，而不是全部都不发了
-			LOG_ERROR("get mem from clifdlist pool failed,code:%d.", ret);
+			LOG_ERROR("malloc fdiddata node failed, ret:%d.", ret);
 			goto add_data_failed;
 		}
 		pcur->fdid = GET_FD_FDCID_MASK(fdidx);
@@ -944,13 +1028,19 @@ tgg_write_data* format_send_data(int core_id, const std::shared_ptr<const std::s
 			tail = tail->next;
 		}
 	}
-	if (head) {
-		wdata->lst_fd = head;
-	} else {
-		goto add_data_failed;
-	}
+	try_times = ENQUEUE_TRY_TIMES;
+    while ((ret = high_freq_malloc(g_mempool_write[core_id], (void**)&wdata, sizeof(tgg_write_data))) < 0 && try_times-- > 0) {
+        usleep(10);
+    }
+    if (ret < 0) {
+        LOG_ERROR("get mem from write pool failed,code:%d.", ret);
+        goto add_data_failed;
+    }
 	if (sdata->size() > 0) {
-		ret = high_freq_malloc(g_mempool_write_data, &wdata->data, sdata->size());
+		try_times = ENQUEUE_TRY_TIMES;
+		while ((ret = high_freq_malloc(g_mempool_write_data, &wdata->data, sdata->size())) < 0 && try_times-- > 0) {
+			usleep(10);
+		}
 		// wdata->data = dpdk_rte_malloc(sdata.length());
 		if (ret < 0) {
 			LOG_ERROR("malloc mem from write data pool failed, ret:%d.", ret);
@@ -960,15 +1050,20 @@ tgg_write_data* format_send_data(int core_id, const std::shared_ptr<const std::s
 	} else {
 		wdata->data = NULL;
 	}
+	wdata->lst_fd = head;
 	wdata->data_len = sdata->size();
 	wdata->fd_opt = fdopt;
 	return wdata;
 
 add_data_failed:
-	LOG_ERROR("malloc mem failed.");
-	clean_fdidlist(head);
-	memset(wdata, 0, sizeof(tgg_write_data));
-	high_freq_free(g_mempool_write[core_id], wdata, sizeof(tgg_write_data));
+	LOG_ERROR("format write data failed.");
+	if(wdata) {
+        wdata->lst_fd = head;
+        clean_write_data(core_id, wdata);
+    } else {
+        clean_fdidlist(head);
+        head = NULL;
+    }
 	return NULL;
 }
 
@@ -984,20 +1079,14 @@ int enqueue_data_batch_fd(int core_id, const std::shared_ptr<const std::string>&
 		LOG_ERROR("Format send data failed.");
 		return -1;
 	}
-	int count = 10;
-	while (tgg_enqueue_write(core_id, wdata) < 0 && count-- > 0 ) {
+	int count = ENQUEUE_TRY_TIMES;
+	int ret = 0;
+	while ((ret = tgg_enqueue_write(core_id, wdata)) < 0 && count-- > 0 ) {
 		usleep(10);
 	}
-	static int loop_times_sndcli = 0;
-	// TODO 前期调试要看是否经常出现重试
-	if (count < 9) {
-		++loop_times_sndcli;
-		if(loop_times_sndcli % 100 == 0) {
-			LOG_ERROR("loop times:%d.", loop_times_sndcli);
-		}
-	}
-	if (count <= 0) {
-		LOG_ERROR("Enqueue write data failed.");
+	if (ret < 0) {
+		clean_write_data(core_id, wdata);
+		LOG_ERROR("Enqueue write data failed, ret:%d.", ret);
 		return -1;
 	}
 	return 0;
@@ -1107,6 +1196,7 @@ void high_freq_free(struct rte_mempool* pool, void* data, int size)
 	}
 }
 
+// #include <stdio.h>
 void print_mem_statistics()
 {
 	LOG_WARNING("malloc times: %d", s_malloc_count);
@@ -1143,6 +1233,8 @@ void print_mem_statistics()
 			LOG_WARNING("%s available count:%ld used count:%u", g_mempool_write[i]->name, rte_mempool_avail_count(g_mempool_write[i]), rte_mempool_in_use_count(g_mempool_write[i]));
 		if(g_mempool_bwrcv[i])
 			LOG_WARNING("%s available count:%ld used count:%u", g_mempool_bwrcv[i]->name, rte_mempool_avail_count(g_mempool_bwrcv[i]), rte_mempool_in_use_count(g_mempool_bwrcv[i]));
+		if(g_mempool_fd_snddata[i])
+			LOG_WARNING("%s available count:%ld used count:%u", g_mempool_fd_snddata[i]->name, rte_mempool_avail_count(g_mempool_fd_snddata[i]), rte_mempool_in_use_count(g_mempool_fd_snddata[i]));
 	}
 	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_trans->name, rte_mempool_avail_count(g_mempool_trans), rte_mempool_in_use_count(g_mempool_trans));
 	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_trans_data->name, rte_mempool_avail_count(g_mempool_trans_data), rte_mempool_in_use_count(g_mempool_trans_data));
@@ -1151,6 +1243,14 @@ void print_mem_statistics()
 	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_large_data->name, rte_mempool_avail_count(g_mempool_large_data), rte_mempool_in_use_count(g_mempool_large_data));
 	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_clifdlist_data->name, rte_mempool_avail_count(g_mempool_clifdlist_data), rte_mempool_in_use_count(g_mempool_clifdlist_data));
 	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_ws_buffer->name, rte_mempool_avail_count(g_mempool_ws_buffer), rte_mempool_in_use_count(g_mempool_ws_buffer));
+
+	// const char* dump_mem = "/var/log/tgg_gateway/mem_stat.log"
+	// FILE* file = open(dump_mem, "w+");
+	// if(!file) {
+	// 	LOG_WARNING("open dump_mem:%s failed.", dump_mem);
+	// 	return;
+	// }
+	// rte_mempool_dump(stdout, g_mempool_clifdlist_data);
 }
 
 
