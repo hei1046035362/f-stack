@@ -1371,15 +1371,20 @@ int MtFrame::recv(int fd, void *buf, int len, int flags, int timeout)
         epfd.SetOwnerThread(thread);
         if (!mtframe->KqueueSchedule(NULL, &epfd, timeout))
         {
-            MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
+            if(errno != ETIME) {
+                MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
+            }
             if (s_fd_stat[fd] == FF_FD_CLOSE) {
                 return -4;
             }
             now = mtframe->GetLastClock();
             if ((int)(now - start) > timeout)
             {
-                errno = ETIME;
+                // errno = ETIME;
                 return -1;
+            }
+            if (errno == ETIME) {
+                return -5;
             }
             return -2;
         }
@@ -1438,10 +1443,10 @@ ssize_t MtFrame::send(int fd, const void *buf, size_t nbyte, int flags, int time
             if (errno == EINTR) {
                 continue;
             }
-            if (errno == EAGAIN) {  // 资源暂时不可用
-                sleep(1); // 等待 1ms 重试
-                continue;
-            }
+            // if (errno == EAGAIN) {  // 资源暂时不可用
+            //     sleep(1); // 等待 1ms 重试
+            //     continue;
+            // }
             if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) {
                 MTLOG_ERROR("write failed, errno: %d", errno);
                 return -2;
@@ -1460,15 +1465,20 @@ ssize_t MtFrame::send(int fd, const void *buf, size_t nbyte, int flags, int time
         epfd.EnableOutput();
         epfd.SetOwnerThread(thread);
         if (!mtframe->KqueueSchedule(NULL, &epfd, timeout)) {
-            MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
+            if(errno != ETIME) {
+                MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
+            }
             if (s_fd_stat[fd] == FF_FD_CLOSE) {
                 return -4;
             }
             now = mtframe->GetLastClock();
             if ((int)(now - start) > timeout)
             {
-                errno = ETIME;
+                // errno = ETIME;
                 return -1;
+            }
+            if(errno == ETIME) {
+                return -5;
             }
             return -3;
         }
