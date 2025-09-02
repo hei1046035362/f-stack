@@ -25,7 +25,7 @@ static const char* s_dump_file = "/var/corefiles/";//tgg_gw_master_core
 
 // 1、心跳检测间隔，没收到数据就会结束fd，
 // 2、freebsd底层销毁并回收fd的时间是30s，这个时间最好是大于30
-static int s_fd_timeout = 60*1000;
+static unsigned long long s_fd_timeout = 60*1000;
 extern struct rte_mempool* g_mempool_write;
 extern struct rte_mempool* g_mempool_write_data;
 extern ushort g_gateway_port;
@@ -138,6 +138,49 @@ static void clean_client_data(int cli_fd, int idx)
     release_ws_buffer(g_core_id, cli_fd);
 }
 
+int do_real_send(int fd, int idx)
+{
+    tgg_send_data* data = NULL;
+    int ret = 0;
+    while((data = tgg_pop_cli_snd_data(g_core_id, fd)) != NULL) {
+        if(data && data->data) {
+            if(((tgg_write_data*)(data->data))->data) {
+                if(ret >= 0) {
+                    if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
+                        if(((tgg_write_data*)(data->data))->data_len > 4 && !strncmp((char*)(((tgg_write_data*)(data->data))->data), "HTTP", 4)) {// GET请求消息
+                            LOG_DEBUG("fd:%d idx:%d send to clien:%s.", fd, idx, (char*)(((tgg_write_data*)(data->data))->data));
+                        } else {// 其他消息
+                            LOG_DEBUG("fd:%d idx:%d send to clien:%s.", fd, idx, bin2hex(std::string_view((char*)(((tgg_write_data*)(data->data))->data), ((tgg_write_data*)(data->data))->data_len)).c_str());
+                        }
+                    }
+                    int try_count = 10;// 防止死循环，最多重试10次(10s)
+                    do {
+                        ret = mt_send(fd, ((tgg_write_data*)(data->data))->data, ((tgg_write_data*)(data->data))->data_len, 0, 1000);
+                    } while ((ret == -5 || ret == -1) && try_count-- > 0);// -5 表示微线程被主动唤醒，发送没有完成，我们要继续发送才行
+
+                    if (try_count <= 0 && ret < 0) {
+                        LOG_WARNING("fd:%d idx:%d send to client failed, try times:%d.", fd, idx, 10 - try_count);
+                    }
+
+                    if (ret == -4) {
+                        // 主动断开连接
+                        LOG_INFO("closing connection affected.");
+                    } else if (ret < 0) {
+                        LOG_ERROR("send data to client fd[%d] idx[%d] error, ret[%d]", fd, idx, ret);
+                    }
+                }
+
+                ((tgg_write_data*)(data->data))->ref--;
+            }
+            if(((tgg_write_data*)(data->data))->ref <= 0) {
+                clean_write_data(g_core_id, (tgg_write_data*)(data->data));
+            }
+            tgg_free_cli_snd_data(g_core_id, data);
+        }
+    }
+    return ret;
+}
+
 static void tgg_recv(void *arg)
 {
     s_left_fd++;
@@ -175,9 +218,27 @@ static void tgg_recv(void *arg)
     //     return;
     // }
     char buf[1024] = {0};
+    unsigned long long hold_time = 0, bf_snd;
     while (g_run_status) {
         // 1、接收数据  mt_recv在没有数据包的情况下会阻塞，让出cpu给其他的action执行
-        ret = mt_recv(cli_fd, (void *)buf, 1024, 0, s_fd_timeout);
+        ret = mt_recv(cli_fd, (void *)buf, 1024, 0, 10);
+        hold_time += 10;
+        if(ret == -5 || ret == -1) {// -5 表示微线程被主动唤醒
+            if(tgg_get_cli_snd_data(g_core_id, cli_fd)) {
+                bf_snd = mt_time_ms();
+                ret = do_real_send(cli_fd, idx);
+                tgg_clean_cli_snd_data(g_core_id, cli_fd);
+                hold_time += mt_time_ms() - bf_snd;
+                if(ret < 0) {
+                    LOG_ERROR("send data failed, ret:%d, idx:%d.", ret, idx);
+                    break;
+                }
+            }
+            if(hold_time < s_fd_timeout) {
+                continue;
+            }
+        }
+        hold_time = 0;
         if(ret == -1 && errno == ETIME) {
             LOG_ERROR("client heart beat timeout, idx:%d.", idx);
             break;
@@ -286,15 +347,26 @@ static void tgg_do_send(tgg_write_data* wdata)
 
             // 是否需要发送数据
             if (wdata->fd_opt & FD_WRITE && (!(tgg_get_cli_status(g_core_id, cli_fd) & FD_STATUS_DISCONNECTED))) {
-                int ret = mt_send(cli_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
-                if (ret == -4) {
-                    // 主动断开连接
-                    LOG_INFO("closing connection affected.");
-                } else if (ret < 0) {
-                    LOG_ERROR("send data to client fd[%d] idx[%d] error, ret[%d]", cli_fd, idx, ret);
-                } else {
-                    g_tgg_stats.en_read_stats.enqueue++;
+                int try_times = 1000;// 最多等待1s，否则就关闭连接
+                while (tgg_add_cli_snd_data(g_core_id, cli_fd, wdata) < 0 && try_times-- > 0)
+                {
+                    mt_sleep(1);
                 }
+                if(try_times < 0) {
+                    mt_close(cli_fd);
+                    // mt_thread_wakeup_wait(tgg_get_cli_thread(g_core_id, cli_fd));
+                // } else {
+                    LOG_ERROR("add cli[fd:%d, idx:%d] snd data failed, no more available unit in mempool", cli_fd, idx);
+                }
+                // int ret = mt_send(cli_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
+                // if (ret == -4) {
+                //     // 主动断开连接
+                //     LOG_INFO("closing connection affected.");
+                // } else if (ret < 0) {
+                //     LOG_ERROR("send data to client fd[%d] idx[%d] error, ret[%d]", cli_fd, idx, ret);
+                // } else {
+                //     g_tgg_stats.en_read_stats.enqueue++;
+                // }
             }
 
             if ( wdata->fd_opt & FD_CLOSE) {
@@ -314,16 +386,16 @@ static void tgg_do_send(tgg_write_data* wdata)
         }
 
 send_client_end:
+        // tgg_fd_id_list* tmp = fd_id_list;
         fd_id_list = fd_id_list->next;
+        // clean_fdidnode(tmp);
     }
+    clean_fdidlist(wdata->lst_fd);
+    wdata->lst_fd = NULL;// 清理完必须要置空，否则后续clean_write_data时，会重复释放
     // 所有fd都发送完了之后，需要清理并回收内存
-    clean_write_data(g_core_id, wdata);
-    // if(wdata->data) {
-    //  memset(wdata->data, 0, wdata->data_len);
-    //  high_freq_free(g_mempool_write_data, wdata->data, wdata->data_len);
-    // }
-    // memset(wdata, 0, sizeof(tgg_write_data));
-    // high_freq_free(g_mempool_write[g_core_id], wdata, sizeof(tgg_write_data));
+    if(wdata->ref <= 0) {
+        clean_write_data(g_core_id, wdata);
+    }
 }
 
 static void tgg_send(void *arg)
@@ -352,9 +424,9 @@ static void tgg_send(void *arg)
 static int tgg_gw_master()
 {
     // 启动发送线程
-    // for(int i = 0; i < TggConfigure::getInstance()->get_gwwrite_co_count(); ++i) {
+    for(int i = 0; i < TggConfigure::getInstance()->get_gwwrite_co_count(); ++i) {
         mt_start_thread((void *)tgg_send, NULL);
-    // }
+    }
 
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
@@ -415,7 +487,8 @@ static int tgg_gw_master()
                           .port = client_addr.sin_port,
                             };
         // 启动一个接收线程
-        mt_start_thread((void *)tgg_recv, (void *)p);
+        void* pthread = mt_start_thread((void *)tgg_recv, (void *)p);
+        tgg_set_cli_thread(g_core_id, clt_fd, pthread);
     }
     close(fd);
     return 0;

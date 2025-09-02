@@ -35,6 +35,13 @@ std::string tgg_get_cli_ip_str(int core_id, int fd);
 uint32_t tgg_get_cli_ip(int core_id, int fd);
 ushort tgg_get_cli_port(int core_id, int fd);
 int tgg_get_cli_bwfdx(int core_id, int fd);
+tgg_send_data* tgg_get_cli_snd_data(int core_id, int fd);
+int tgg_add_cli_snd_data(int core_id, int fd, tgg_write_data* wdata);
+void tgg_clean_cli_snd_data(int core_id, int fd);
+void tgg_set_cli_thread(int core_id, int fd, void* pthread);
+void* tgg_get_cli_thread(int core_id, int fd);
+tgg_send_data* tgg_pop_cli_snd_data(int core_id, int fd);
+void tgg_free_cli_snd_data(int core_id, tgg_send_data* wdata);
 // 不能返回引用，内部加锁的
 std::string tgg_get_cli_uid(int core_id, int fd);
 int tgg_get_cli_cid(int core_id, int fd);
@@ -193,6 +200,7 @@ void clean_trans_data(tgg_trans_data* bdata);
 void clean_bw_data(int prc_id, tgg_bw_data* bdata);
 void clean_write_data(int core_id, tgg_write_data* wdata);
 void clean_fdidlist(tgg_fd_id_list* fdiddata);
+void clean_fdidnode(tgg_fd_id_list* fdiddata);
 
 
 // 发送给客户端

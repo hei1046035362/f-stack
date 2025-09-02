@@ -108,6 +108,7 @@ const char* s_pool_bwrcv_data_name = "tgg_pl_bwdata";// 客户端上行透传 �
 const char* s_pool_large_data_name = "tgg_pl_large_data";// 客户端上行透传 和 bw上行共用
 const char* s_pool_ws_buffer_name = "tgg_pl_ws_buffer";// 缓存ws大包使用(处理分包粘包)
 const char* s_pool_clifdlist_data_name = "tgg_pl_fdlst_data";// 下行发送fd列表的队列
+const char* s_pool_fd_snddata_name = "tgg_pl_fd_data";// 下行发送fd列表的队列
 
 // 内存池大小 TODO 大小根据队列长度设置
 static uint32_t s_trans_mempool_size;// 尽量设置成2^n 单个队列预留 上行透传内存
@@ -123,15 +124,21 @@ static uint32_t s_large_data_mempool_size;// 尽量设置成2^n  上行发送 �
 
 static uint32_t s_ws_buffer_mempool_size;// 尽量设置成2^n  ws缓存 数据 内存
 
+static uint32_t s_fd_snddata_mempool_size;// 尽量设置成2^n  每个fd的待发送数据链表节点 内存
+
 // 每个内存池单个内存块儿的大小
 static uint32_t s_mempool_trans_cache = sizeof(tgg_trans_data);// 单个缓存的大小待定
 static uint32_t s_mempool_write_cache = sizeof(struct st_write_data);// 单个缓存的大小待定
 static uint32_t s_mempool_bwrcv_cache = sizeof(tgg_bw_data);// 单个缓存的大小待定
+
+static uint32_t s_mempool_fdsnd_cache = sizeof(struct st_send_data);// 单个缓存的大小待定
+
 // 内存池
 // 队列存储的数据结构
 struct rte_mempool* g_mempool_trans = NULL;
 struct rte_mempool* g_mempool_write[MAX_LCORE_COUNT] = {NULL};
 struct rte_mempool* g_mempool_bwrcv[MAX_LCORE_COUNT] = {NULL};
+struct rte_mempool* g_mempool_fd_snddata[MAX_LCORE_COUNT] = {NULL};
 
 // 分配队列中的数据结构的data字段
 struct rte_mempool* g_mempool_trans_data = NULL;
@@ -407,8 +414,10 @@ void tgg_master_init()
 
 	s_trans_data_mempool_size = s_trans_ring_size;// 尽量设置成2^n  上行透传 数据 内存
 	s_write_data_mempool_size = s_write_ring_size * lcore_count;  // 只有一个内存池
-	s_clifdlist_mempool_size = 1024*1024*lcore_count; // 每个write_data对应的fd链表(一个data可能要发给多个fd) 使用的内存池大小
+	s_clifdlist_mempool_size = 1024*1024*(1<<(lcore_count-1)); // 每个write_data对应的fd链表(一个data可能要发给多个fd) 使用的内存池大小
 	s_bwrcv_data_mempool_size = s_bwrcv_ring_size * TggConfigure::getInstance()->get_bwsvr_count();// 只有一个内存池
+
+	s_fd_snddata_mempool_size = 2*1024*1024;// 单个进程最多允许200w待发送数据
 
 	s_large_data_mempool_size = 1024*32*lcore_count;// 大块数据，本来就很少，大多是连接创建的时候会有，但是这个是上下行三个队列都会用到
 
@@ -453,6 +462,10 @@ void tgg_master_init()
 		char write_pool_name[RTE_MEMPOOL_NAMESIZE] = {0};
 		sprintf(write_pool_name, "%s_%d", s_pool_write_name, i);
 		g_mempool_write[i] = make_mempool(write_pool_name, s_write_mempool_size, s_mempool_write_cache);
+
+		char fd_snddata_pool_name[RTE_MEMPOOL_NAMESIZE] = {0};
+		sprintf(fd_snddata_pool_name, "%s_%d", s_pool_fd_snddata_name, i);
+		g_mempool_fd_snddata[i] = make_mempool(fd_snddata_pool_name, s_fd_snddata_mempool_size, s_mempool_fdsnd_cache);
 	}
 	for (uint32_t i = 0; i < TggConfigure::getInstance()->get_bwsvr_count() ; i++) {
 		// bwfd zone
@@ -546,6 +559,9 @@ void tgg_master_uninit()
 
 		rte_mempool_free(g_mempool_write[i]);
 		g_mempool_write[i] = NULL;
+
+		rte_mempool_free(g_mempool_fd_snddata[i]);
+		g_mempool_fd_snddata[i] = NULL;
 	}
 	for (uint32_t i = 0; i < TggConfigure::getInstance()->get_bwsvr_count(); i++) {
 		rte_memzone_free(g_bwfdx_zones[i]);
@@ -646,6 +662,9 @@ void init_multi_for_secondary()
 		sprintf(write_pool_name, "%s_%d", s_pool_write_name, i);
 		g_mempool_write[i] = find_mempool(write_pool_name);
 
+		char fd_snddata_pool_name[RTE_MEMPOOL_NAMESIZE] = {0};
+		sprintf(fd_snddata_pool_name, "%s_%d", s_pool_fd_snddata_name, i);
+		g_mempool_fd_snddata[i] = find_mempool(fd_snddata_pool_name);
 	}
 	for (uint32_t i = 0; i < TggConfigure::getInstance()->get_bwsvr_count(); i++) {
 		// 初始化bwfdx数组的zones
