@@ -29,6 +29,8 @@
 #define BUFFER_PACKET_LEN 4096 // ws默认缓存是4k，超过4k的连接  10w个连接就是400M，
 #define MAX_WSDATA_LEN 10*1024*1024   // websocket最多缓存10M的数据  暂时不器用，后续如果真的有超过4096的数据包
 
+#define ENQUEUE_TRY_TIMES 10000 // 入队列不能失败，又要防止死循环，这个数字设置足够大
+
 // fdid:fd << 8 & coreid
 // 从fdid中取出coreid和fd   // 确保不同进程中fd的唯一性
 // 直接取出来fd，fd后面的coreid和cid都右移掉
@@ -105,6 +107,12 @@ typedef struct st_ws_data {
     void* data;
 } tgg_ws_data;
 
+typedef struct st_send_data {
+    void* data;
+    struct st_send_data* tail;
+    struct st_send_data* next;
+} tgg_send_data;
+
 // 客户端需要保留的信息  gwrcv维护和使用
 // TODO:是否要考虑断线重连之后上一个连接的数据包会发送到新的连接中来的问题
 typedef struct st_cli_info {
@@ -117,6 +125,8 @@ typedef struct st_cli_info {
     int ip;
     unsigned short port;
     int bwfdx;        // 绑定的bw
+    void* thread;
+    tgg_send_data* send_datalist;
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_cli_info;
 
 // 客户单信息中需要gwbwprc维护和使用的部分
@@ -189,6 +199,7 @@ typedef struct st_write_data {
     int idx;
     unsigned int data_len;
     void* data;        // 携带的数据
+    int ref;
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_write_data;
 
 // 上行透传发送给 gwcliprc 数据结构
