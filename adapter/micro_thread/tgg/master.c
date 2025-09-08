@@ -218,27 +218,30 @@ static void tgg_recv(void *arg)
     //     return;
     // }
     char buf[1024] = {0};
-    unsigned long long hold_time = 0, bf_snd;
+    // unsigned long long hold_time = 0, bf_snd;
     while (g_run_status) {
+        memset(buf, 0, 1024);
         // 1、接收数据  mt_recv在没有数据包的情况下会阻塞，让出cpu给其他的action执行
-        ret = mt_recv(cli_fd, (void *)buf, 1024, 0, 10);
-        hold_time += 10;
+        ret = mt_recv(cli_fd, (void *)buf, 1024, 0, s_fd_timeout);
+        // hold_time += 10;
         if(ret == -5 || ret == -1) {// -5 表示微线程被主动唤醒
             if(tgg_get_cli_snd_data(g_core_id, cli_fd)) {
-                bf_snd = mt_time_ms();
+                // bf_snd = mt_time_ms();
                 ret = do_real_send(cli_fd, idx);
                 tgg_clean_cli_snd_data(g_core_id, cli_fd);
-                hold_time += mt_time_ms() - bf_snd;
+                // hold_time += mt_time_ms() - bf_snd;
                 if(ret < 0) {
                     LOG_ERROR("send data failed, ret:%d, idx:%d.", ret, idx);
                     break;
+                } else {
+                    continue;
                 }
             }
-            if(hold_time < s_fd_timeout) {
-                continue;
-            }
+            // if(hold_time < s_fd_timeout) {
+            //     continue;
+            // }
         }
-        hold_time = 0;
+        // hold_time = 0;
         if(ret == -1 && errno == ETIME) {
             LOG_ERROR("client heart beat timeout, idx:%d.", idx);
             break;
@@ -354,10 +357,10 @@ static void tgg_do_send(tgg_write_data* wdata)
                 }
                 if(try_times < 0) {
                     mt_close(cli_fd);
-                    // mt_thread_wakeup_wait(tgg_get_cli_thread(g_core_id, cli_fd));
                 // } else {
                     LOG_ERROR("add cli[fd:%d, idx:%d] snd data failed, no more available unit in mempool", cli_fd, idx);
                 }
+                mt_thread_wakeup_wait(tgg_get_cli_thread(g_core_id, cli_fd));
                 // int ret = mt_send(cli_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
                 // if (ret == -4) {
                 //     // 主动断开连接
