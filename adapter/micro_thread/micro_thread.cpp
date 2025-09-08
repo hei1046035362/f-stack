@@ -214,6 +214,7 @@ MicroThread::MicroThread(ThreadType type)
     _args = NULL;
     _parent = NULL;
     _fd = -1;
+    _writing = 0;
 }
 
 void MicroThread::CleanState()
@@ -888,7 +889,7 @@ void MtFrame::WaitNotify(utime64_t timeout)
 
 void MtFrame::NotifyThread(MicroThread* thread)
 {
-    if(thread == NULL){
+    if(thread == NULL || thread->GetWriting()){
         return;
     }
     MicroThread* cur_thread = GetActiveThread();
@@ -1464,7 +1465,9 @@ ssize_t MtFrame::send(int fd, const void *buf, size_t nbyte, int flags, int time
         epfd.SetOsfd(fd);
         epfd.EnableOutput();
         epfd.SetOwnerThread(thread);
+        thread->SetWriting(1);
         if (!mtframe->KqueueSchedule(NULL, &epfd, timeout)) {
+            thread->SetWriting(0);
             if(errno != ETIME) {
                 MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
             }
@@ -1482,6 +1485,7 @@ ssize_t MtFrame::send(int fd, const void *buf, size_t nbyte, int flags, int time
             }
             return -3;
         }
+        thread->SetWriting(0);
     }
 
     return nbyte;
