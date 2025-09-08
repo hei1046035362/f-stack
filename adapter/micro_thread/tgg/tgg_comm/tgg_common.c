@@ -721,7 +721,13 @@ int ringbuf_read(int core_id, int fd, std::string& dest, int len, int move_pos)
     int data_size = (wsdata->write_pos >= wsdata->read_pos) ? 
                      (wsdata->write_pos - wsdata->read_pos) : 
                      (wsdata->capacity - wsdata->read_pos + wsdata->write_pos);
-    if (data_size < len) len = data_size;
+	if (len > data_size) {
+        LOG_WARNING("Requested len=%d exceeds available data=%d for core_id=%d, fd=%d",
+                    len, data_size, core_id, fd);
+        len = data_size;
+    }
+
+	dest.reserve(dest.size() + len);
 
     // 分两段读取
     int first_chunk = (wsdata->read_pos + len > wsdata->capacity) ? 
@@ -752,7 +758,6 @@ int ringbuf_write(int core_id, int fd, const char* data, int len)
     		return -1;
     	}
     	s_buffer_count++;
-    	memset(wsdata->data, 0, BUFFER_PACKET_LEN);
     	wsdata->capacity = BUFFER_PACKET_LEN;
     	wsdata->read_pos = 0;
     	wsdata->write_pos = 0;
@@ -760,11 +765,21 @@ int ringbuf_write(int core_id, int fd, const char* data, int len)
     int free_space = wsdata->capacity - ((wsdata->write_pos >= wsdata->read_pos) ? 
                       (wsdata->write_pos - wsdata->read_pos) : 
                       (wsdata->capacity - wsdata->read_pos + wsdata->write_pos));
-    if (free_space < len) len = free_space;
+	if (free_space == 0) {
+        LOG_WARNING("Buffer full for core_id=%d, fd=%d", core_id, fd);
+        return 0;
+    }
+
+    if (len > free_space) {
+        LOG_WARNING("Requested write len=%d exceeds free space=%d for core_id=%d, fd=%d",
+                    len, free_space, core_id, fd);
+        len = free_space;
+    }
 
     // 分两段写入
-    int first_chunk = wsdata->capacity - wsdata->write_pos;
-    if (first_chunk > len) first_chunk = len;
+	int first_chunk = (wsdata->write_pos + len > wsdata->capacity)
+        ? (wsdata->capacity - wsdata->write_pos)
+        : len;
     
     memcpy((char*)wsdata->data + wsdata->write_pos, data, first_chunk);
     
@@ -832,12 +847,16 @@ void release_ws_buffer(int core_id, int fd)
 {
     tgg_ws_data* wsdata = &((&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data);
     if (!wsdata->data) {// 没有数据
+    	LOG_DEBUG("No buffer to release for core_id=%d, fd=%d", core_id, fd);
         return;
     }
     // 释放内存
     rte_mempool_put(g_mempool_ws_buffer, wsdata->data);
     s_buffer_count--;
-    memset(wsdata, 0, sizeof(tgg_ws_data));
+	wsdata->data = nullptr; // 防止悬垂指针
+    wsdata->capacity = 0;
+    wsdata->read_pos = 0;
+    wsdata->write_pos = 0;
 }
 
 int tgg_enqueue_write(int core_id, tgg_write_data* data)
