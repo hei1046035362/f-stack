@@ -278,6 +278,13 @@ public:
         return _flag;
     };
 
+    void SetWriting(int writing) {
+        _writing = writing;
+    }; 
+    int GetWriting() {
+        return _writing;
+    };    
+
     void SetSartFunc(ThreadStart func, void* args) {
         _start = func;
         _args  = args;
@@ -301,6 +308,7 @@ private:
     ThreadStart _start;
     void* _args;
     int   _fd;
+    int _writing;
 
 };
 typedef std::set<MicroThread*> ThreadSet;
