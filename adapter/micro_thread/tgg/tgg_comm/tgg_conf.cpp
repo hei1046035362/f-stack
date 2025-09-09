@@ -184,7 +184,7 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
         RTE_LOG(ERR, USER1, "[%s][%d] invalid gwwrite co_count:[%d].\n", __FILE__, __LINE__, this->gwwrite_co_count);
         return -1;
     } else {
-        this->gwwrite_co_count = 500;// 默认个数
+        this->gwwrite_co_count = 50;// 默认个数
     }
 
     // redis cluster ip
