@@ -48,6 +48,24 @@ int CmdTggGateway::UpdateRealWorkers()
     return 0;
 }
 
+int CmdTggGateway::CleanupAllBwHash()
+{
+    LOG_INFO("ExecCmd CleanupAllBwHash...");
+    tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(sizeof(tgg_bwfdx_data));
+    if(!bwfdxdata) {
+        LOG_ERROR("malloc bwfdxdata failed.");
+        return -1;
+    }
+    bwfdxdata->bwfdx = -1;
+    bwfdxdata->cmd = BWFDX_CMD_CLEAN_BWHASH;
+    if(tgg_enqueue_bwfdx(bwfdxdata)) {
+        LOG_ERROR("Enqueue bwfdxdata failed.");
+        dpdk_rte_free(bwfdxdata);
+    }
+    LOG_INFO("CleanupAllBwHash success.");
+    return 0;
+}
+
 int CmdTggGateway::PrintAllGids()
 {
     LOG_INFO("ExecCmd PrintAllGids...");
@@ -613,6 +631,9 @@ int CmdTggGateway::ExecCmd()
             return ReloadIpFilter();
         case CMD_UPDATE_REAL_WORKERS:
             return UpdateRealWorkers();
+            break;
+        case CMD_CLEAN_ALL_BW_HASHS:
+            return CleanupAllBwHash();
             break;
         case CMD_PRINT_ALL_GIDS:
             return PrintAllGids();
