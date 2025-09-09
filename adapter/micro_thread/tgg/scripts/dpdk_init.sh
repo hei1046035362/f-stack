@@ -11,8 +11,8 @@ get_cpu_cores() {
 
 # 计算大页页数
 calc_hugepages() {
-    local cores=$(get_cpu_cores)  # 核数×3/4
-    echo $(( cores * 3 / 4 * 512 ))                    # 转换为2MB页数
+    local cores=$(get_cpu_cores)  # 核数
+    echo $(( cores * 512 ))                    # 转换为2MB页数
 }
 
 # 设置大页内存
