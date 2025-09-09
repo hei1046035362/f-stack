@@ -124,7 +124,6 @@ static void* deal_trans(void*)
     std::vector<int64_t> vec_bwfdx;
     vec_bwfdx.reserve(5000);// 防止频繁分配赋值内存，预先分配5000个
     tgg_getall_bwfdx(vec_bwfdx);// 一开始就获取所有的在线的bwfdx，防止因重启而丢失数据
-    bool clean_hash_flag = false;// 是否要清理所有的业务hash表
     while(g_run) {
         // 取可用的bw
         update_gwcliprc_heart_beat();
@@ -141,6 +140,10 @@ static void* deal_trans(void*)
                     LOG_INFO("Update Runtime bwworkers");
                     tgg_getall_bwfdx(vec_bwfdx);
                     break;
+                case BWFDX_CMD_CLEAN_BWHASH:
+                    LOG_WARNING("clean all gid,uid and cid hash tables");
+                    clean_all_bussiness_hash();
+                    break;
                 case BWFDX_CMD_PRINTWORKERS:
                     print_current_workers(vec_bwfdx);
                     break;
@@ -152,15 +155,6 @@ static void* deal_trans(void*)
                     break;
             }
             dpdk_rte_free(bwfdxdata);
-        }
-        // 当没有bw连接时，清理所有的业务型(cid, uid, gid, cidgid)hash表
-        if(vec_bwfdx.size() <= 0) {// 防止gwbwprc内存泄漏,没有bwfdx时，证明客户端连接都失效的，可以放心清理，然后让其重连
-            if(clean_hash_flag) {
-                clean_all_bussiness_hash();
-                clean_hash_flag = false;
-            }
-        } else if(!clean_hash_flag) {
-            clean_hash_flag = true;
         }
 
         // 取数据
