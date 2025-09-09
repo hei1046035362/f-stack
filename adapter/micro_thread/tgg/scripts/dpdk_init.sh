@@ -46,12 +46,18 @@ bind_nic() {
     if /usr/local/bin/dpdk-devbind.py -s | grep drv=igb_uio; then
         echo "已有网口绑定igb_uio"
     else
-        echo "尝试将ens6口绑定到igb_uio"
-        local ens6_pci=$(/usr/local/bin/dpdk-devbind.py -s|egrep 'unused=[^,]*,igb_uio|ens6'|awk '{print $1}')
+        echo "查找ens6和eth1口，或者可用的已解绑内核驱动的网口"
+        local ens6_pci=$(/usr/local/bin/dpdk-devbind.py -s|egrep 'unused=[^,]*,igb_uio|ens6|eth1'|awk '{print $1}')
         if ip a|grep ens6;then
+            echo "找到ens6口,先解绑"
             ifconfig ens6 down
             /usr/local/bin/dpdk-devbind.py -u ens6
+        elif ip a|grep eth1;then
+            echo "找到eth1口,先解绑"
+            ifconfig eth1 down
+            /usr/local/bin/dpdk-devbind.py -u eth1
         fi
+        echo "尝试将ens6/eth1口绑定到igb_uio"
         /usr/local/bin/dpdk-devbind.py -b igb_uio $ens6_pci
     fi
 }
