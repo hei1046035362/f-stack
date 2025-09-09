@@ -417,7 +417,7 @@ void tgg_master_init()
 	s_clifdlist_mempool_size = 1024*1024*(1<<(lcore_count-1)); // 每个write_data对应的fd链表(一个data可能要发给多个fd) 使用的内存池大小
 	s_bwrcv_data_mempool_size = s_bwrcv_ring_size * TggConfigure::getInstance()->get_bwsvr_count();// 只有一个内存池
 
-	s_fd_snddata_mempool_size = 2*1024*1024;// 单个进程最多允许200w待发送数据
+	s_fd_snddata_mempool_size = 1024*1024*lcore_count;// 单个进程最多允许100w待发送数据
 
 	s_large_data_mempool_size = 1024*32*lcore_count;// 大块数据，本来就很少，大多是连接创建的时候会有，但是这个是上下行三个队列都会用到
 
