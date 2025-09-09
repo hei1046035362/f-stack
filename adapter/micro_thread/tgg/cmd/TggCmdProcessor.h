@@ -11,6 +11,7 @@ public:
 private:
     int ReloadIpFilter();
     int UpdateRealWorkers();
+    int CleanupAllBwHash();
 
     int PrintAllGids();
     int PrintGidCount();
