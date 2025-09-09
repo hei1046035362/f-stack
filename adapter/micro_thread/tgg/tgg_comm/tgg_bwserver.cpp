@@ -114,7 +114,7 @@ size_t turbo_write(int fd, const void* data, size_t len) {
                 .msg_iov = &iov,
                 .msg_iovlen = 1
             };
-            
+
             // 启用MSG_ZEROCOPY（消除数据拷贝开销）
             sent = sendmsg(fd, &msg, MSG_DONTWAIT | (len > MIN_ZEROCOPY_SIZE ? MSG_ZEROCOPY : 0));
         } 
@@ -127,7 +127,10 @@ size_t turbo_write(int fd, const void* data, size_t len) {
             total_sent += sent;
             continue;
         }
-        
+        if(errno == EPIPE) {
+            LOG_WARNING("fd[%d] is not avaliable anymore, drop data.", fd);
+            return -1;
+        }
         // 5. 协程友好型等待（精准控制超时）
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             struct pollfd pfd = {.fd = fd, .events = POLLOUT, 0};
@@ -290,11 +293,11 @@ static int write_data()
         int prc_id = bwfdx & 0xff;
         int fd = bwfdx >> 8;
         // cli对应的bwfd已经改变或者 bwfdx已关闭，丢弃
-        if(prc_id != g_prc_id || !tgg_get_bwfdx_status((bwfdx & 0xff), fd) || bdata->fd <= 0) {
+        if(prc_id != g_prc_id || !tgg_get_bwfdx_status(prc_id, fd) || bdata->fd <= 0) {
             LOG_ERROR("deal bw write data failed:prc_id[%d] bwdatafdx:bwfdx[%d:%d]," 
                 "cli_fd:%d, idx:%d, status:[%d].", 
                 prc_id, bdata->bwfdx, fd,
-                bdata->fd, bdata->idx, tgg_get_bwfdx_status((bwfdx & 0xff), fd));
+                bdata->fd, bdata->idx, tgg_get_bwfdx_status(prc_id, fd));
             if(bdata->data) {
                 LOG_ERROR("write data:%s", bdata->data);
             }

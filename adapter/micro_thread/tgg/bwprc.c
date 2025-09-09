@@ -94,6 +94,7 @@ void tgg_sig_init()
         perror("Error setting signal handler");
         exit(-1);
     }
+    signal(SIGPIPE, SIG_IGN);
 }
 
 void tgg_process_init()
