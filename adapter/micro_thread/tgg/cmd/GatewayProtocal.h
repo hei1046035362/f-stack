@@ -139,6 +139,8 @@ enum TggGatewayCmd {
     CMD_RELOAD_IP_FILTER = 100,
     // 通知gwcliprc主动更新bwworker(影响负载均衡)，防止bwprc有接入新的bwworker没有及时通知gwcliprc或通知失败的情况。
     CMD_UPDATE_REAL_WORKERS = 101,
+    // 通知gwcliprc清除所有的业务hash表，包含gid,cid,uid三个hash表
+    CMD_CLEAN_ALL_BW_HASHS = 102,
 
     // ********不影响数据流的操作*********
     // 当前网关gid总数和所有的gid打印到文件
