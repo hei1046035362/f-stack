@@ -23,6 +23,7 @@ static int s_bwcount = 0;
                 // 对应的时间在规定时间内没有更新,就视为无人使用，同时要主动检查并结束之前占用这个id的进程
 // int g_prc_id = -1;
 extern int g_register_fd;
+extern int g_reconnect;
 
 static void prc_dpdk_eal_init(int argc, char **argv);
 
@@ -85,6 +86,8 @@ int deal_sigchild(void* arg) {
                     if(tgg_setup_bwprc_monitor(i, pid) < 0) {
                         LOG_ERROR("setup monitor for gwbwprc prc_id[%d] failed, pid:%d", i, pid);
                     }
+                    LOG_INFO("start bwprcv[%d] success.", pid);
+                    g_reconnect = 1;
                 }
             }
         }
@@ -167,7 +170,7 @@ void update_register_heart_beat() {
 }
 
 int local_eventloop_fun(void* arg) {
-    if (!g_run || g_register_fd <= 0)
+    if (!g_run)
         return -1;// 终止coroutine的eventloop
     if(TggConfigure::getInstance()->get_auto_start()) {
         check_bwprc();
@@ -176,32 +179,48 @@ int local_eventloop_fun(void* arg) {
     }
     return 0;
 }
-
 static void main_register_proc()
 {
     set_non_block( g_register_fd );
 
-    register_routine_data wdata = {
+    register_routine_data routine_data = {
         .fd = g_register_fd,
         .ip = TggConfigure::getInstance()->get_register_addr().c_str(),
         .port = TggConfigure::getInstance()->get_register_port(),
         .seckey = "",
-        .ping_interval = 25*1000
+        .ping_interval = 25*1000,
+        .bw_ip = TggConfigure::getInstance()->get_bwsvr_bw_addr().c_str(),
+        .bw_port = TggConfigure::getInstance()->get_bwsvr_bw_port()
     };
     // read操作的写成
+    stCoRoutine_t *connect_co = NULL;
+    co_create( &connect_co, NULL, register_reconnect_routine, &routine_data);
+    co_resume( connect_co );
+
     stCoRoutine_t *read_co = NULL;
-    co_create( &read_co, NULL, register_read_routine, &wdata);
+    co_create( &read_co, NULL, register_read_routine, &routine_data);
     co_resume( read_co );
 
-    wdata.bw_ip = TggConfigure::getInstance()->get_bwsvr_bw_addr().c_str();
-    wdata.bw_port = TggConfigure::getInstance()->get_bwsvr_bw_port();
     // write操作的协程
     stCoRoutine_t *write_co = NULL;
-    co_create( &write_co, NULL, register_write_routine, &wdata);
+    co_create( &write_co, NULL, register_write_routine, &routine_data);
     co_resume( write_co );
 
     // 开始协程循环
     co_eventloop( co_get_epoll_ct(), local_eventloop_fun,0 );
+    
+    if(connect_co) {
+        co_release(connect_co);
+        connect_co = NULL;
+    }
+    if(read_co) {
+        co_release(read_co);
+        read_co = NULL;
+    }
+    if(write_co) {
+        co_release(write_co);
+        write_co = NULL;
+    }
 }
 
 void tgg_sig_init()
@@ -219,6 +238,7 @@ void tgg_sig_init()
         perror("Error setting signal handler");
         exit(-1);
     }
+    signal(SIGPIPE, SIG_IGN);
 }
 
 void tgg_process_init()
@@ -359,32 +379,15 @@ int main(int argc, char *argv[])
         }
         sleep(2);// (兜底)等待gwbwprc的 socket就绪(服务端连gwbwprc的时候，一次连不上，就不连了，但是这时候gwbwprc的socket还没有完全就绪)
     }
-    unsigned int port = TggConfigure::getInstance()->get_register_port();
-    const std::string& ip = TggConfigure::getInstance()->get_register_addr();
-    while(g_run) {
-        g_register_fd = connect_tcp_socket( port, ip.c_str());
-        while (g_register_fd < 0 && g_run) {// 没连上就每隔5s重连一次
-            LOG_INFO("connect to register[%s:%d] failed, check if register server is alive.", ip.c_str(), port);
-            int looptimes = 500; // 没连上的话，每5s重连一次注册中心
-            while(g_run && looptimes > 0) {
-                usleep(10000);
-                looptimes--;
-            }
-            g_register_fd = connect_tcp_socket( port, ip.c_str());
-        }
-        if(g_register_fd > 0) {
-            LOG_INFO("connected to register %s:%d.", ip.c_str(), port);
-        }
 
-        main_register_proc();
+    main_register_proc();
         
-        LOG_WARNING("connection to register is down.");
-    }
     if(TggConfigure::getInstance()->get_auto_start()) {
 
         kill_all_child();
         wait_all_child_exit();
     }
+    print_mem_statistics();
 	// TODO 进程退出时要回收资源
 	tgg_process_uninit();
 	LOG_INFO("-----------main end----------");

@@ -9,6 +9,7 @@ typedef struct register_write_st {
     uint64_t ping_interval;
     const char* bw_ip;
     unsigned short bw_port;
+    void* routine;
 } register_routine_data;
 
 
@@ -17,6 +18,7 @@ int set_non_block(int iSock);
 // 作为客户端的fd
 int connect_tcp_socket(const unsigned short shPort, const char *pszIP);
 
+void *register_reconnect_routine( void *arg );
 void *register_read_routine( void *arg );
 void *register_write_routine( void *arg );
 

@@ -1332,35 +1332,39 @@ static pid_t custom_fork(const char* exec_name, int prc_id, char** args)
 pid_t start_gwrcv_sendary(int lcore_id)
 {
     // 构造参数数组
-    char* proc_id = (char*)malloc(24);
+    char* proc_id = (char*)dpdk_rte_malloc(24);
     sprintf(proc_id, "--proc-id=%d", lcore_id);
-    char **args = (char**)calloc(3, sizeof(char*));
+    char **args = (char**)dpdk_rte_malloc(3* sizeof(char*));
     args[0] = const_cast<char*>("gwrcv");
     args[1] = proc_id;
     args[2] = NULL; // 必须以 NULL 结尾
     pid_t pid = custom_fork("gwrcv", lcore_id, args);
-    free(proc_id);
-    free(args);
+    memset(proc_id, 0, 24);
+    dpdk_rte_free(proc_id);
+    memset(args, 0, 3*sizeof(char*));
+    dpdk_rte_free(args);
     return pid;
 }
 
 pid_t start_gwcliprc(int lcore_id)
 {
-    char **args = (char**)calloc(2, sizeof(char*));
+    char **args = (char**)dpdk_rte_malloc(2* sizeof(char*));
     args[0] = const_cast<char*>("gwcliprc");
     args[1] = NULL; // 必须以 NULL 结尾
     pid_t pid = custom_fork("gwcliprc", lcore_id, args);
-    free(args);
+    memset(args, 0, 2*sizeof(char*));
+    dpdk_rte_free(args);
     return pid;
 }
 
 pid_t start_register(int lcore_id)
 {
-    char **args = (char**)calloc(2, sizeof(char*));
+    char **args = (char**)dpdk_rte_malloc(2* sizeof(char*));
     args[0] = const_cast<char*>("gwregister");
     args[1] = NULL; // 必须以 NULL 结尾
     pid_t pid = custom_fork("gwregister", lcore_id, args);// gwbwserver由register管理，会先启动gwbwserver,然后向注册中心发起连接请求
-    free(args);
+    memset(args, 0, 2*sizeof(char*));
+    dpdk_rte_free(args);
     return pid;
 }
 
@@ -1383,15 +1387,17 @@ static int get_mask_value(uint32_t mask, int index) {
 pid_t start_gwbwprc(int prc_id)
 {
 	int lcore_mask = get_mask_value(TggConfigure::getInstance()->get_bcore_mask(), prc_id);
-    char* proc_mask = (char*)malloc(24);
+    char* proc_mask = (char*)dpdk_rte_malloc(24);
     sprintf(proc_mask, "-c%x", lcore_mask);
-    char **args = (char**)malloc((3) * sizeof(char*));
+    char **args = (char**)dpdk_rte_malloc((3) * sizeof(char*));
     args[0] = const_cast<char*>("gwbwprc");
     args[1] = proc_mask;
     args[2] = NULL; // 必须以 NULL 结尾
     pid_t pid = custom_fork("gwbwprc", prc_id, args);
-    free(proc_mask);
-    free(args);
+    memset(proc_mask, 0, 24);
+    dpdk_rte_free(proc_mask);
+    memset(args, 0, 3*sizeof(char*));
+    dpdk_rte_free(args);
     return pid;
 }
 
