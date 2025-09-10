@@ -64,12 +64,12 @@ void AsyncLogger::log(LogLevel level, const char* file, int line, const char* fo
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
 
-        // 构建完整日志条目
+    // 构建完整日志条目
     std::stringstream ss;
     ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S")
     << '.' << std::setfill('0') << std::setw(3) << ms.count()
     << "[" << levelToString(level) << "]["
-    << std::filesystem::path(file).filename().string()
+    << file //std::filesystem::path(file).filename().string()  // 不可重入函数，在多线程环境下会崩溃
     << ":" << line << "] " << buffer;
 
         // 添加到队列
