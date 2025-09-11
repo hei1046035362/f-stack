@@ -1275,129 +1275,134 @@ void print_mem_statistics()
 
 static int get_exec_path(char* exe_path, const char* exec_name)
 {
-    ssize_t len = readlink("/proc/self/exe", exe_path, PATH_MAX - 1); // 读取符号链接[3,5,6](@ref)
+    ssize_t len = readlink("/proc/self/exe", exe_path, PATH_MAX - 1);
     if (len == -1) {
-        LOG_ERROR("readlink failed");
+        LOG_ERROR("readlink failed: %s", strerror(errno));
         return -1;
     }
     exe_path[len] = '\0';
-    // 提取目录：从末尾向前找到最后一个 '/' 并截断
+    
+    // 查找最后一个斜杠位置
     char *last_slash = strrchr(exe_path, '/');
-    if (last_slash != NULL) {
-        memcpy(last_slash+1, exec_name, strlen(exec_name));
-        last_slash[(1+strlen(exec_name))] = '\0';
-    	LOG_INFO("exec path[%s]", last_slash);
-        return 0;
+    if (!last_slash) {
+        LOG_ERROR("Invalid path format: %s", exe_path);
+        return -1;
     }
-    LOG_ERROR("invalid exec path[%s]", exe_path);
-    return -1;
+    
+    // 安全拼接新文件名
+    size_t name_len = strlen(exec_name);
+    if (last_slash - exe_path + name_len + 1 >= PATH_MAX) {
+        LOG_ERROR("Path too long: %s + %s", exe_path, exec_name);
+        return -1;
+    }
+    
+    // 直接覆盖原文件名部分
+    strcpy(last_slash + 1, exec_name);
+    LOG_DEBUG("Final exec path: %s", exe_path);
+    return 0;
 }
 
-static pid_t custom_fork(const char* exec_name, int prc_id, char** args)
+static pid_t custom_fork(const char* exec_name, int prc_id, char* args[])
 {
     char exe_path[PATH_MAX] = {0};
-    if(get_exec_path(exe_path, exec_name) < 0) {
+    if (get_exec_path(exe_path, exec_name) < 0) {
         return -1;
     }
+    
     pid_t pid = fork();
     if (pid < 0) {
-        printf("fork failed.\n");
+        LOG_ERROR("fork failed: %s", strerror(errno));
         return -1;
     }
-
-    if (pid == 0) {  // 子进程  不能在子进程中调用日志函数，会导致日志线程死锁
-        // 1. 验证路径安全
+    
+    if (pid == 0) {  // 子进程
+        // 验证可执行文件
         if (access(exe_path, X_OK) != 0) {
-            perror("目标程序不可执行");
-            exit(EXIT_FAILURE);
+            fprintf(stderr, "ERROR: Cannot execute %s: %s\n", 
+                    exe_path, strerror(errno));
+            _exit(EXIT_FAILURE);
         }
         
-        struct stat st;
-        if (stat(exe_path, &st) == -1 || !S_ISREG(st.st_mode)) {
-            fprintf(stderr, "错误：无效文件\n");
-            exit(EXIT_FAILURE);
-        }
-        // printf("launch up a new process for [%s]", exe_path);
+        // 执行程序
         execv(exe_path, args);
-
-        // 若execv返回，说明执行失败
-        // LOG_ERROR("execv failed.");
-        // free(args);
-        exit(EXIT_FAILURE);
-    } else {
-    	return pid;
+        
+        // 如果execv返回，说明执行失败
+        fprintf(stderr, "FATAL: execv failed for %s: %s\n", 
+                exe_path, strerror(errno));
+        _exit(EXIT_FAILURE);
     }
+    
+    return pid;
 }
 
 pid_t start_gwrcv_sendary(int lcore_id)
 {
-    // 构造参数数组
-    char* proc_id = (char*)dpdk_rte_malloc(24);
-    sprintf(proc_id, "--proc-id=%d", lcore_id);
-    char **args = (char**)dpdk_rte_malloc(3* sizeof(char*));
-    args[0] = const_cast<char*>("gwrcv");
-    args[1] = proc_id;
-    args[2] = NULL; // 必须以 NULL 结尾
-    pid_t pid = custom_fork("gwrcv", lcore_id, args);
-    memset(proc_id, 0, 24);
-    dpdk_rte_free(proc_id);
-    memset(args, 0, 3*sizeof(char*));
-    dpdk_rte_free(args);
-    return pid;
+    char proc_id[24]; // 栈上分配
+    snprintf(proc_id, sizeof(proc_id), "--proc-id=%d", lcore_id);
+    
+    // 参数数组（栈上分配）
+    char* args[] = {
+        const_cast<char*>("gwrcv"),    // 程序名
+        proc_id,    // 参数
+        NULL        // 结束标记
+    };
+    
+    return custom_fork("gwrcv", lcore_id, args);
 }
 
 pid_t start_gwcliprc(int lcore_id)
 {
-    char **args = (char**)dpdk_rte_malloc(2* sizeof(char*));
-    args[0] = const_cast<char*>("gwcliprc");
-    args[1] = NULL; // 必须以 NULL 结尾
-    pid_t pid = custom_fork("gwcliprc", lcore_id, args);
-    memset(args, 0, 2*sizeof(char*));
-    dpdk_rte_free(args);
-    return pid;
+    // 参数数组（栈上分配）
+    char* args[] = {
+        const_cast<char*>("gwcliprc"), // 程序名
+        NULL        // 结束标记
+    };
+    
+    return custom_fork("gwcliprc", lcore_id, args);
 }
 
 pid_t start_register(int lcore_id)
 {
-    char **args = (char**)dpdk_rte_malloc(2* sizeof(char*));
-    args[0] = const_cast<char*>("gwregister");
-    args[1] = NULL; // 必须以 NULL 结尾
-    pid_t pid = custom_fork("gwregister", lcore_id, args);// gwbwserver由register管理，会先启动gwbwserver,然后向注册中心发起连接请求
-    memset(args, 0, 2*sizeof(char*));
-    dpdk_rte_free(args);
-    return pid;
+    // 参数数组（栈上分配）
+    char* args[] = {
+        const_cast<char*>("gwregister"), // 程序名
+        NULL          // 结束标记
+    };
+    
+    return custom_fork("gwregister", lcore_id, args);
 }
 
-static int get_mask_value(uint32_t mask, int index) {
-    int count = 0;  // 记录当前找到的第几个1
-
-    // 遍历掩码的每一位（0-31位）
+static uint32_t get_mask_value(uint32_t mask, int index)
+{
+    // 使用位操作高效查找第index个置位
+    int count = 0;
     for (int pos = 0; pos < 32; pos++) {
-        uint32_t bit_mask = 1U << pos;  // 生成当前位的掩码
-        if (mask & bit_mask) {          // 检查当前位是否为1
+        if (mask & (1U << pos)) {
             if (count == index) {
-                return bit_mask;  // 找到目标位置，返回该位的掩码值
+                return (1U << pos);
             }
-            count++;  // 已找到的1的数量增加
+            count++;
         }
     }
-    return -1;  // 序号超出范围
+    return 0; // 未找到
 }
 
 pid_t start_gwbwprc(int prc_id)
 {
-	int lcore_mask = get_mask_value(TggConfigure::getInstance()->get_bcore_mask(), prc_id);
-    char* proc_mask = (char*)dpdk_rte_malloc(24);
-    sprintf(proc_mask, "-c%x", lcore_mask);
-    char **args = (char**)dpdk_rte_malloc((3) * sizeof(char*));
-    args[0] = const_cast<char*>("gwbwprc");
-    args[1] = proc_mask;
-    args[2] = NULL; // 必须以 NULL 结尾
-    pid_t pid = custom_fork("gwbwprc", prc_id, args);
-    memset(proc_mask, 0, 24);
-    dpdk_rte_free(proc_mask);
-    memset(args, 0, 3*sizeof(char*));
-    dpdk_rte_free(args);
-    return pid;
+    uint32_t mask_val = get_mask_value(
+        TggConfigure::getInstance()->get_bcore_mask(), 
+        prc_id
+    );
+    
+    char proc_mask[16]; // 栈上分配
+    snprintf(proc_mask, sizeof(proc_mask), "-c%x", mask_val);
+    
+    // 参数数组（栈上分配）
+    char* args[] = {
+        const_cast<char*>("gwbwprc"),  // 程序名
+        proc_mask,   // 掩码参数
+        NULL         // 结束标记
+    };
+    
+    return custom_fork("gwbwprc", prc_id, args);
 }
-
