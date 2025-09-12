@@ -32,14 +32,13 @@ struct ValidationResult {
 class Websocket
 {
 public:
-    Websocket() {}
+    Websocket() {healthcheck=0;}
     ~Websocket() {}
-    void InitWebsocket(int fd, int handshake) {this->fd = fd; this->handshake = handshake;}
 protected:
     int core_id;
     int fd;
-    int handshake;
-
+    int handshake;  // ws的handleshake是否成功
+    int healthcheck;// 标记http请求是否为健康检查
 private:
 
     // 新的连接处理
@@ -48,7 +47,9 @@ private:
     std::string _GenerateAcceptKey(std::string_view key);
 
     int _HandleHandshake(std::string_view request, ValidationResult& req, std::string& response);
-        
+
+    int _AlbHealthCheck(std::string_view request, std::string& response);
+
     /* parse base frame according to
      * https://www.rfc-editor.org/rfc/rfc6455#section-5.2
      */

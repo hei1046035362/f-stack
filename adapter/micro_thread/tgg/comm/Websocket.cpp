@@ -7,6 +7,8 @@
 #include <array>
 #include <string_view>
 #include <openssl/sha.h>
+#include <unistd.h>
+#include <ctime>
 #include "Encrypt.hpp" // 需要使用 Base64 库
 #include "common.hpp"
 #include "tgg_comm/tgg_common.h"
@@ -168,6 +170,29 @@ int Websocket::_HandleHandshake(std::string_view request, ValidationResult& req,
     response.append(accept_key);
     response.append("\r\nServer: tgg_gateway/1.0.0\r\n\r\n");
     return 0;
+}
+
+int Websocket::_AlbHealthCheck(std::string_view request, std::string& response)
+{
+    if((request.size() >= 16) && (request.substr(0, 16) == "GET /healthcheck")) {
+        time_t now = time(nullptr);
+        struct tm tm;
+        gmtime_r(&now, &tm); // 线程安全的 GMT 时间
+        char date_str[128];
+        strftime(date_str, sizeof(date_str), "%a, %d %b %Y %H:%M:%S GMT", &tm);
+        response.clear();
+        response.resize(256);
+        response = "HTTP/1.1 204 No Content\r\nDate: ";
+        response += std::string(date_str);
+        response += "\r\n"
+        "Server: tgg_gateway/1.0.0\r\n"
+        "Connection: keep-alive\r\n"
+        "Content-Length: 0\r\n"
+        "\r\n";
+        healthcheck = 1;
+        return 0;
+    }
+    return -1;
 }
 
 // 编码关闭帧
@@ -408,8 +433,12 @@ int Websocket::ReadData(void* data, int len)
             std::string_view request((char*)input, in_len);
             std::string response;
             if (_HandleHandshake(request, req, response) < 0) {
+                _AlbHealthCheck(request, response);
                 OnSend(response, FD_WRITE);
-                LOG_ERROR("handle shake check failed.");
+                if(!healthcheck)
+                    LOG_ERROR("handle shake check failed.");
+                else
+                    LOG_DEBUG("health check ok.");
                 return -1;
             }
             OnHandShake(request, response, req);
