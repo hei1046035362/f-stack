@@ -107,12 +107,13 @@ int WsConsumer::_Send2Server(std::string_view data, int fd_opt)
 int WsConsumer::ConsumerData(void* data)
 {
     tgg_read_data* rdata = (tgg_read_data*)data;
-    if (!ConnectionValid(rdata->coreid, rdata->fd, data)) {
+    if (!ConnectionValid(rdata->coreid, rdata->fd, rdata)) {
         return -1;
     }
     this->fd = rdata->fd;
-    this->data = data;
+    this->handshake = tgg_get_cli_authorized(rdata->coreid, rdata->fd);
     this->core_id = rdata->coreid;
+    this->data = data;
     if (rdata->fd_opt & FD_CLOSE) {
         // unbind bw connection
         _CleanAndClose();
@@ -123,11 +124,13 @@ int WsConsumer::ConsumerData(void* data)
         return 0;
     }
 
-    InitWebsocket(rdata->fd, tgg_get_cli_authorized(rdata->coreid, rdata->fd));
 
     int ret = ReadData(rdata->data, rdata->data_len);
     if (ret < 0) {
         _CleanAndClose();
+        if(healthcheck) {
+            return 0;
+        }
         return -1;
     }
     // 等于0属于帧不完整，ws缓存了数据不能清理
@@ -152,8 +155,13 @@ bool WsConsumer::ConnectionValid(int core_id, int fd, void* data)
 void WsConsumer::OnClose()
 {
     tgg_set_cli_status(core_id, fd, FD_STATUS_CLOSING);
-    _Send2Server("", FD_CLOSE);
-    SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
+    // TODO 后需全局健康检查的话，healthcheck
+    if(handshake == AUTH_TYPE_HANDLESHAKED/* || healthcheck*/) {// 只有握手成功或者健康检查的包，才发送关闭命令
+        _Send2Server("", FD_CLOSE);
+        SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
+    } else {// 握手失败时，要设置fd的状态,且数据不应继续向后传递
+        tgg_set_cli_idx(core_id, fd, TGG_FD_CLOSING);
+    }
 }
 
 void WsConsumer::OnConnect()
