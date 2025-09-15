@@ -66,12 +66,12 @@ static void main_bw_proc(int prc_id)
     }
 
         // write操作的协程
-    for(int i = 0; i < TggConfigure::getInstance()->get_bwsvr_co_count() ; i++)
-    {
+    // for(int i = 0; i < TggConfigure::getInstance()->get_bwsvr_co_count() ; i++)
+    // {
         stCoRoutine_t *write_co = NULL;
         co_create( &write_co, NULL, write_routine, (void*)&prc_id);
         co_resume( write_co );
-    }
+    // }
     stCoRoutine_t *accept_co = NULL;
     co_create( &accept_co, NULL, accept_routine, 0 );
     co_resume( accept_co );
