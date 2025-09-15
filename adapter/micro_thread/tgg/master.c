@@ -241,6 +241,15 @@ static void tgg_recv(void *arg)
             //     continue;
             // }
         }
+        if(ret == -5) {
+            LOG_DEBUG("socket operation over time.");
+            std::string ping = Websocket::EncodeWebsocketMessage(PING_FRAME, "ping");
+            ret = mt_send(cli_fd, ping.c_str(), ping.size(), 0, 1000);
+            if(ret > 0) {
+                continue;
+            }
+            LOG_WARNING("client is no more exist, try to close.");
+        }
         // hold_time = 0;
         if(ret == -1 && errno == ETIME) {
             LOG_ERROR("client heart beat timeout, idx:%d.", idx);
