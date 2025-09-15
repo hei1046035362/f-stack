@@ -527,7 +527,7 @@ void *write_routine( void *arg )
     map_msgtype[FD_CLOSE] = GatewayProtocal::CMD_ON_CLOSE;
     while(g_run) {
         if(write_data() < 0) {
-            poll(NULL, 0, 10);// sleep 10ms
+            poll(NULL, 0, 5);// sleep 10ms
         }
     }
     return 0;
