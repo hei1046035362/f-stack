@@ -1010,7 +1010,7 @@ void tgg_getall_bwfdx(std::vector<int64_t>& vec_bwfdx)
     }
 }
 
-int tgg_get_load_balance(std::vector<int64_t>& vec_bwfdx, int64_t ipport)
+int tgg_get_load_balance(std::vector<int64_t>& vec_bwfdx, unsigned int ipport)
 {
     // uint64_t now = get_system_ms();
     size_t count = vec_bwfdx.size();
