@@ -393,11 +393,12 @@ send_client_end:
         fd_id_list = fd_id_list->next;
         // clean_fdidnode(tmp);
     }
-    clean_fdidlist(wdata->lst_fd);
-    wdata->lst_fd = NULL;// 清理完必须要置空，否则后续clean_write_data时，会重复释放
     // 所有fd都发送完了之后，需要清理并回收内存
     if(wdata->ref <= 0) {
         clean_write_data(g_core_id, wdata);
+    }else {
+        clean_fdidlist(wdata->lst_fd);
+        wdata->lst_fd = NULL;// 清理完必须要置空，否则后续clean_write_data时，会重复释放
     }
 }
 
