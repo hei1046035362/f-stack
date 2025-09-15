@@ -979,6 +979,9 @@ void clean_bw_data(int prc_id, tgg_bw_data* bdata)
 
 void clean_write_data(int core_id, tgg_write_data* wdata)
 {
+    if(wdata->ref < 0) {
+    	return;
+    }
 	clean_fdidlist(wdata->lst_fd);
     if (wdata->data) {
     	memset(wdata->data, 0, wdata->data_len);
@@ -987,6 +990,7 @@ void clean_write_data(int core_id, tgg_write_data* wdata)
     }
     memset(wdata, 0, sizeof(tgg_write_data));
     high_freq_free(g_mempool_write[core_id], wdata, sizeof(tgg_write_data));
+    wdata->ref = -1;
 }
 
 void clean_fdidnode(tgg_fd_id_list* fdiddata)
@@ -1055,6 +1059,7 @@ tgg_write_data* format_send_data(int core_id, const std::shared_ptr<const std::s
         LOG_ERROR("get mem from write pool failed,code:%d.", ret);
         goto add_data_failed;
     }
+	wdata->ref = 0;
 	if (sdata->size() > 0) {
 		try_times = ENQUEUE_TRY_TIMES;
 		while ((ret = high_freq_malloc(g_mempool_write_data, &wdata->data, sdata->size())) < 0 && try_times-- > 0) {
