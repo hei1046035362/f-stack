@@ -41,6 +41,7 @@
 #include <errno.h>
 #include <setjmp.h>
 #include <stdarg.h>
+#include <time.h>
 
 #include <set>
 #include <vector>
@@ -541,9 +542,12 @@ private:
     };
 
     utime64_t GetSystemMS(void) {
-        struct timeval tv;
-        gettimeofday(&tv, NULL);
-        return (tv.tv_sec * 1000ULL + tv.tv_usec / 1000ULL);
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        return (ts.tv_sec * 1000ULL + ts.tv_nsec / 1000000ULL);
+        // struct timeval tv;
+        // gettimeofday(&tv, NULL);
+        // return (tv.tv_sec * 1000ULL + tv.tv_usec / 1000ULL);
     };
 
     void InsertSleep(MicroThread* thread);

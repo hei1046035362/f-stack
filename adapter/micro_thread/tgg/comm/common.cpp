@@ -82,9 +82,9 @@ std::string uint32_to_hex(uint32_t ip) {
 }
 
 uint64_t get_system_ms(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (tv.tv_sec * 1000ULL + tv.tv_usec / 1000ULL);
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (ts.tv_sec * 1000ULL + ts.tv_nsec / 1000000ULL);
 };
 
 static constexpr unsigned char hexCharToValue(unsigned char c) noexcept {
