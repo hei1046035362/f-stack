@@ -66,7 +66,7 @@ int tgg_init_session(int core_id, int fd, int idx)
         LOG_ERROR("add cid[%d] fdidcid[%ld] failed.", cid, fdidcid);
         return -1;
     }
-    LOG_INFO("add cid[%d] for fdidcid[%ld] success.", cid, fdidcid);
+    LOG_DEBUG("add cid[%d] for fdidcid[%ld] success.", cid, fdidcid);
     tgg_init_cli_bw(core_id, fd, cid);
     return 0;
 }

@@ -145,13 +145,16 @@ std::string Websocket::_GenerateAcceptKey(std::string_view key)
 int Websocket::_HandleHandshake(std::string_view request, ValidationResult& req, std::string& response)
 {
     if((request.size() < 5) || (request.substr(0, 5) != "GET /")) {
-        LOG_DEBUG("Invalid http request:%s", request.data());
+        LOG_DEBUG("Invalid http request, fd:%d", this->fd);
         response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid request method or path";
         return -1;
     }
     req = parse_websocket_request(request);
     if (!req.valid) {
-        LOG_DEBUG("Invalid WebSocket handshake:%s", request.data());
+        if(!_ElbHealthCheck(request, response)) {
+            return -1;
+        }
+        LOG_DEBUG("Invalid WebSocket handshake, fd:%d", this->fd);
         response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid WebSocket handshake headers";
         return -1;
     }
@@ -172,8 +175,10 @@ int Websocket::_HandleHandshake(std::string_view request, ValidationResult& req,
     return 0;
 }
 
-int Websocket::_AlbHealthCheck(std::string_view request, std::string& response)
+int Websocket::_ElbHealthCheck(std::string_view request, std::string& response)
 {
+    if(healthcheck)
+        return 0;
     if((request.size() >= 16) && (request.substr(0, 16) == "GET /healthcheck")) {
         time_t now = time(nullptr);
         struct tm tm;
@@ -393,7 +398,7 @@ int Websocket::ReadData(void* data, int len)
     int buffer_len = ringbuf_size(core_id, fd);
     if(buffer_len < 0) {
         // 缓冲区没有数据
-        LOG_ERROR("read data from ringbuf failed.");
+        LOG_ERROR("read data from ringbuf failed, fd:%d.", fd);
         return -1;
     }
     std::string buffer = get_one_frame_buffer(this->core_id, this->fd, data, len);
@@ -416,7 +421,7 @@ int Websocket::ReadData(void* data, int len)
                 size_t write_len = ringbuf_write(core_id, fd, (char*)input, in_len);
                 if(write_len < in_len) {
                 // 缓冲区剩余长度不够了
-                    LOG_ERROR("free length is not enough.");
+                    LOG_ERROR("free length is not enough, fd:%d.", fd);
                     return -1;
                 }
                 return 0;
@@ -425,7 +430,7 @@ int Websocket::ReadData(void* data, int len)
                 size_t write_len = ringbuf_write(core_id, fd, (char*)input + buf_len, in_len - buf_len);
                 if(write_len < in_len) {
                 // 缓冲区剩余长度不够了
-                    LOG_ERROR("free length is not enough.");
+                    LOG_ERROR("free length is not enough, fd:%d.", fd);
                     return -1;
                 }
             }
@@ -433,10 +438,10 @@ int Websocket::ReadData(void* data, int len)
             std::string_view request((char*)input, in_len);
             std::string response;
             if (_HandleHandshake(request, req, response) < 0) {
-                _AlbHealthCheck(request, response);
+                _ElbHealthCheck(request, response);
                 OnSend(response, FD_WRITE);
                 if(!healthcheck)
-                    LOG_ERROR("handle shake check failed.");
+                    LOG_ERROR("handle shake check failed, fd:%d.", this->fd);
                 else
                     LOG_DEBUG("health check ok.");
                 return -1;
@@ -469,7 +474,7 @@ int Websocket::ReadData(void* data, int len)
             case INCOMPLETE_FRAME:
             // 多个帧的数据(没有fin标记)，每一帧的数据都有websocket的头，这些数据需要合到一起才能算一个完整的数据包
             // 我们不处理数据包，只负责透传，所以不需要处理多个ws包的拼接
-                LOG_WARNING("incomplete frame type %d.", type);
+                LOG_WARNING("incomplete frame type %d, fd:%d.", type, fd);
                 OnMessage(std::string((char*)payload, msg_len));
                 // return 0;
                 break;
@@ -478,7 +483,7 @@ int Websocket::ReadData(void* data, int len)
                 return 1;
                 break;
             case ERROR_FRAME:
-                LOG_ERROR("error frame.");
+                LOG_ERROR("error frame, fd:%d.", fd);
                 return -1;// 返回 -1外部会关闭
                 break;
             case PING_FRAME:
@@ -488,7 +493,7 @@ int Websocket::ReadData(void* data, int len)
                 OnPong(std::string((char*)payload, msg_len));
                 break;
             default:
-                LOG_ERROR("unexpected frame type %d.", type);
+                LOG_ERROR("unexpected frame type %d, fd:%d.", type, fd);
                 break;
         }
     } while(buffer_len > cur_pos);
@@ -510,6 +515,6 @@ void Websocket::SendData(const std::string& data, int fd_opt) {
     if(handshake) {
         SendONnoAuth(data, fd_opt);
     } else {
-        LOG_ERROR("Session should be authorized before send data.");
+        LOG_ERROR("Session should be authorized before send data, fd:%d.", this->fd);
     }
 }
