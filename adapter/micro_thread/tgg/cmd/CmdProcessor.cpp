@@ -125,7 +125,7 @@ int CmdWorkerConnect::ExecCmd()
             LOG_ERROR("WorkerConnect: add bw[%d] fd[%d] failed.", prc_id, fd);
             return -1;
         }
-        LOG_DEBUG("WorkerConnect: added bw[prc:%d,fd:%d] success, total bw count:%d.", 
+        LOG_INFO("WorkerConnect: added bw[prc:%d,fd:%d] success, total bw count:%d.", 
             prc_id, fd, tgg_get_bwfdx_count());
     } catch (...) {
     // 捕获其他任何未预料到的异常
@@ -178,7 +178,7 @@ int CmdGatewayClientConnect::ExecCmd()
             // close(this->fd);// 连接还没有缓存到内存中，不需要清理，直接关闭fd就行
             return -1;
         }
-        LOG_DEBUG("GatewayClientConnect: cmd executed body:%s.", body.data());
+        LOG_INFO("GatewayClientConnect: cmd executed body:%s.", body.data());
     } catch (...) {
     // 捕获其他任何未预料到的异常
         LOG_ERROR("Exception catched.");
@@ -198,7 +198,7 @@ int CmdSendToOne::ExecCmd()
     int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string_view body = get_body_string(jdata);
   // TODO 目前只支持ws发送
-    LOG_DEBUG("SendToOne: cmd executed cid[%d] data:%s.", cid, bin2hex(body).c_str());
+    LOG_INFO("SendToOne: cmd executed cid[%d] data:%s.", cid, bin2hex(body).c_str());
     Send2Client(cid, body, FD_WRITE, !raw);
     return 0;
 }
@@ -271,7 +271,7 @@ int CmdSendToGroup::ExecCmd()
             BatchSend2ClientByfds(lstAllFds, body, FD_WRITE, !raw);
             
             // 日志优化：直接记录gid数量而非完整JSON[1](@ref)
-            LOG_DEBUG("SendToGroup: cmd executed for %d groups", groupArray.Size());
+            LOG_INFO("SendToGroup: cmd executed for %d groups", groupArray.Size());
         }
         tgg_reset_expt_cid(prc_id);
     } else {
@@ -280,7 +280,7 @@ int CmdSendToGroup::ExecCmd()
         return -1;
     }
     
-    LOG_DEBUG("SendToGroup: cmd executed.");
+    LOG_INFO("SendToGroup: cmd executed.");
     return 0;
 }
 
@@ -293,11 +293,11 @@ int CmdKick::ExecCmd()
     Send2Client(cid, "kick", FD_WRITE|FD_CLOSE, !raw);
     int64_t fdidcid = tgg_get_fdbycid(cid);
     if(fdidcid <= 0) {
-        LOG_DEBUG("Kick: cmd executed failed, get fdidcid[%ld] by cid[%d] failed.", fdidcid, cid);
+        LOG_INFO("Kick: cmd executed failed, get fdidcid[%ld] by cid[%d] failed.", fdidcid, cid);
         return -1;
     }
     tgg_free_session(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), cid);
-    LOG_DEBUG("Kick: cmd executed cid[%d].", cid);
+    LOG_INFO("Kick: cmd executed cid[%d].", cid);
     return 0;
 }
 
@@ -308,7 +308,7 @@ int CmdDestroy::ExecCmd()
     Send2Client(cid, "destroy", FD_WRITE|FD_CLOSE, !raw);// TODO 是否要立即销毁，不发送ws的关闭帧(去掉FD_WRITE就行)了
     int64_t fdidcid = tgg_get_fdbycid(cid);
     tgg_free_session(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), cid);
-    LOG_DEBUG("Destroy: cmd executed cid[%d].", cid);
+    LOG_INFO("Destroy: cmd executed cid[%d].", cid);
     return 0;
 }
 
@@ -344,7 +344,7 @@ int CmdSendToALL::ExecCmd()
                 BatchSend2ClientBycids(lstCids, body, FD_WRITE, !raw);
             }
         }
-        LOG_DEBUG("SendToALL: cmd executed cids[%s] body:%s.", ext_data.c_str(), bin2hex(body).c_str());
+        LOG_INFO("SendToALL: cmd executed cids[%s] body:%s.", ext_data.c_str(), bin2hex(body).c_str());
         return 0;
     }
 
@@ -359,7 +359,7 @@ int CmdSendToALL::ExecCmd()
         BatchSend2ClientByfds(lstFds, body, FD_WRITE, !raw);
     }
 
-    LOG_DEBUG("SendToALL: sendto all clients, extend:%s.", ext_data.c_str());
+    LOG_INFO("SendToALL: sendto all clients, extend:%s.", ext_data.c_str());
     return 0;
 }
 
@@ -395,7 +395,7 @@ void CmdSelect::FormatResult(const std::vector<int64_t>& lst_fd, int mask, rapid
         std::string uid = tgg_get_cli_uid(coreid, fd);
         
         if(uid.empty()) {
-            LOG_WARNING("[%s][%d] uid for fd[%d] not exist.", fd);
+            LOG_WARNING("uid for fd[%d] not exist.", fd);
             itFd++;
             continue;
         }
@@ -549,7 +549,7 @@ int CmdSelect::ExecCmd()
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     result.Accept(writer);
-    LOG_DEBUG("Select: cmd executed data: %s", buffer.GetString());
+    LOG_INFO("Select: cmd executed data: %s", buffer.GetString());
     
     return 0;
 }
@@ -577,7 +577,7 @@ int CmdGetGroupIdList::ExecCmd()
     Send2BW(result); // 需确保 Send2BW 支持 std::string 参数[1,7](@ref)
     
     // 记录日志（直接使用序列化字符串）
-    LOG_DEBUG("GetGroupIdList: cmd executed data:%s.", rapidjson_to_string(result).c_str());
+    LOG_INFO("GetGroupIdList: cmd executed data:%s.", rapidjson_to_string(result).c_str());
     return 0;
 }
 
@@ -599,7 +599,7 @@ int CmdSetSession::ExecCmd()
         LOG_ERROR("get fdidcid by cid[%d] failed.", cid);
         return -1;
     }
-    LOG_DEBUG("SetSession: cmd executed cid[%d] data:%s.", cid, session.c_str());
+    LOG_INFO("SetSession: cmd executed cid[%d] data:%s.", cid, session.c_str());
     return tgg_set_cli_reserved(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), session.c_str());
 }
 
@@ -627,7 +627,7 @@ int CmdGetSessionByCid::ExecCmd()
         goto SEND_GET_SESSION;
     }
     result.SetString(session.c_str(), allocator);
-    LOG_DEBUG("GetSession: cmd executed cid[%d] data:%s.", cid, session.c_str());
+    LOG_INFO("GetSession: cmd executed cid[%d] data:%s.", cid, session.c_str());
     Send2BW(result);
     return 0;
 
@@ -655,7 +655,7 @@ int CmdGetAllClientSession::ExecCmd()
             allocator
         );
     }
-    LOG_DEBUG("GetAllClientSession: cmd executed data:%s.", rapidjson_to_string(result).c_str());
+    LOG_INFO("GetAllClientSession: cmd executed data:%s.", rapidjson_to_string(result).c_str());
     Send2BW(result);
     return 0;
 }
@@ -765,7 +765,7 @@ int CmdUpdateSession::ExecCmd()
     std::string data = Php_Serialize(result.GetObject());
     tgg_set_cli_reserved(coreid, clifd, data.c_str());
     
-    LOG_DEBUG("UpdateSession: cmd executed cid[%d] data:%s.", cid, data.c_str());
+    LOG_INFO("UpdateSession: cmd executed cid[%d] data:%s.", cid, data.c_str());
     return 0;
 }
 
@@ -779,7 +779,7 @@ int CmdIsOnline::ExecCmd()
     } else {
         result.SetString("1");
     }
-    LOG_DEBUG("IsOnline: send cid[%d] IsOnline result[%s] to server.", cid, rapidjson_to_string(result).c_str());
+    LOG_INFO("IsOnline: send cid[%d] IsOnline result[%s] to server.", cid, rapidjson_to_string(result).c_str());
     Send2BW(result);
     return 0;
 }
@@ -795,7 +795,7 @@ int CmdBindUid::ExecCmd()
         LOG_ERROR("bind uid failed, uid[%s] and cid[%d] shouldn't be empty.", suid.c_str(), cid);
         return -1;
     }
-    LOG_DEBUG("BindUid: cid[%d] bind to uid[%s].", cid, suid.c_str());
+    LOG_INFO("BindUid: cid[%d] bind to uid[%s].", cid, suid.c_str());
     return tgg_bind_session(suid.c_str(), cid);
 
 }
@@ -807,7 +807,7 @@ int CmdUnBindUid::ExecCmd()
         LOG_ERROR("unbind failed, invalid cid[%d].", cid);
         return -1;
     }
-    LOG_DEBUG("UnBindUid: unbind cid[%d].", cid);
+    LOG_INFO("UnBindUid: unbind cid[%d].", cid);
     return tgg_unbind_session(cid);
     // return tgg_free_session(fdid & 0xff, fdid >> 8);
 }
@@ -856,9 +856,9 @@ int CmdSendToUid::ExecCmd()
     // 5. 批量发送数据
     if (!lst_fds.empty()) {
         BatchSend2ClientByfds(std::move(lst_fds), body, FD_WRITE, !raw);
-        LOG_DEBUG("SendToUid: cmd exec success. Sent to %zu fds", lst_fds.size());
+        LOG_INFO("SendToUid: cmd exec success. Sent to %zu fds", lst_fds.size());
     } else {
-        LOG_DEBUG("SendToUid: no fd found for all uids[%s]", ext_data_str.data());
+        LOG_INFO("SendToUid: no fd found for all uids[%s]", ext_data_str.data());
     }
     return 0;
 }
@@ -890,7 +890,7 @@ int CmdJoinGroup::ExecCmd()
     for(auto group_unit : vec_group) {
         tgg_join_group(group_unit.c_str(), cid);
     }
-    LOG_DEBUG("JoinGroup: cmd executed cid[%d] gid[%s].", cid, group.c_str());
+    LOG_INFO("JoinGroup: cmd executed cid[%d] gid[%s].", cid, group.c_str());
     return 0;
 }
 
@@ -921,7 +921,7 @@ int CmdLeaveGroup::ExecCmd()
     for(auto group_unit : vec_group) {
         tgg_exit_group(group_unit.c_str(), cid);
     }
-    LOG_DEBUG("LeaveGroup: cmd executed cid[%d] gid[%s].", cid, group.c_str());
+    LOG_INFO("LeaveGroup: cmd executed cid[%d] gid[%s].", cid, group.c_str());
     return 0;
 }
 
@@ -948,7 +948,7 @@ int CmdUnGroup::ExecCmd()
         tgg_del_gid_cidgid(group_unit.c_str());// 这里顺序不能动，得先删除hash<cid,gid>中的部分，才能删除hash<gid,list<fdid>>
         tgg_del_gid(group_unit.c_str());
     }
-    LOG_DEBUG("UnGroup: cmd executed gid[%s].", group.c_str());
+    LOG_INFO("UnGroup: cmd executed gid[%s].", group.c_str());
     return 0;
 }
 
@@ -987,7 +987,7 @@ int CmdGetClientSessionsByGroup::ExecCmd()
         }
     }
     Send2BW(result);
-    LOG_DEBUG("GetClientSessionsByGroup: cmd executed gid[%s] data:%s.", group.c_str(), rapidjson_to_string(result).c_str());
+    LOG_INFO("GetClientSessionsByGroup: cmd executed gid[%s] data:%s.", group.c_str(), rapidjson_to_string(result).c_str());
     return 0;
 }
 
@@ -1001,7 +1001,7 @@ int CmdGetClientCountByGroup::ExecCmd()
         std::vector<int64_t> lst_cid;
         tgg_get_allonlinecids(lst_cid);
         result.SetInt(lst_cid.size());
-        LOG_DEBUG("GetAllClientCount:%s.", rapidjson_to_string(result).c_str());
+        LOG_INFO("GetAllClientCount:%s.", rapidjson_to_string(result).c_str());
         Send2BW(result);
         return 0;
     }
@@ -1012,7 +1012,7 @@ int CmdGetClientCountByGroup::ExecCmd()
     }
     result.SetInt(count);
     Send2BW(result);
-    LOG_DEBUG("GetClientCountByGroup: cmd executed gid[%s] data:%s.", group.c_str(), rapidjson_to_string(result).c_str());
+    LOG_INFO("GetClientCountByGroup: cmd executed gid[%s] data:%s.", group.c_str(), rapidjson_to_string(result).c_str());
     return 0;
 }
 
@@ -1047,7 +1047,7 @@ int CmdGetClientIdByUid::ExecCmd()
     }
 
     Send2BW(result);
-    LOG_DEBUG("GetClientIdByUid: cmd executed uid[%s] data:%s.", suid.c_str(), rapidjson_to_string(result).c_str());
+    LOG_INFO("GetClientIdByUid: cmd executed uid[%s] data:%s.", suid.c_str(), rapidjson_to_string(result).c_str());
     return 0;
 }
 
@@ -1091,7 +1091,7 @@ int CmdBatchGetClientIdByUid::ExecCmd()
     }
 
     Send2BW(result);
-    LOG_DEBUG("BatchGetClientIdByUid: cmd executed data:%s.", rapidjson_to_string(result).c_str());
+    LOG_INFO("BatchGetClientIdByUid: cmd executed data:%s.", rapidjson_to_string(result).c_str());
     return 0;
 }
 
@@ -1109,19 +1109,19 @@ static int json_parse_body(unsigned char flag, rapidjson::Document& jdata)
     int body_len = jdata["body_len"].GetInt();
 
     if(body_len <= 2) {
-        LOG_DEBUG("invalid body length:%d.", body_len);
+        // LOG_DEBUG("invalid body length:%d.", body_len);
         return 0;
     }
 
     // 2. 检查body格式
     if(body_len > 2 && body[1] != 0x3a && body[0] != 0x7b) {// 直接发送的数据，不需要解析
-        std::string print_data;
-        if(body[0] == 0xff && body[1] == 0xfe) {
-            message_unpack(body, print_data);
-        } else {
-            print_data.assign(body, body_len); // 避免拷贝
-        }
-        LOG_DEBUG("send to cli data:%s", bin2hex(print_data).c_str());
+        // std::string print_data;
+        // if(body[0] == 0xff && body[1] == 0xfe) {
+        //     message_unpack(body, print_data);
+        // } else {
+        //     print_data.assign(body, body_len); // 避免拷贝
+        // }
+        // LOG_DEBUG("send to cli data:%s", bin2hex(print_data).c_str());
         return 0;
     }
 
@@ -1148,7 +1148,6 @@ static int json_parse_body(unsigned char flag, rapidjson::Document& jdata)
 
         // 5. 检查cmd字段
         if(!obj.HasMember("cmd")) {
-            LOG_DEBUG("no cmd found in body");
             return 0;
         }
         cmd = obj["cmd"].GetInt();
@@ -1217,7 +1216,7 @@ int exec_cmd_processor(int prc_id, int fd, void* data)
     // 解析帧并生成json对象
     BwPackageHandler::decode(bwdata, jdata);
 
-    LOG_DEBUG("jdata:%s", rapidjson_to_string(jdata).c_str());
+    LOG_INFO("jdata:%s", rapidjson_to_string(jdata).c_str());
 
         // 首次连接判断
     int cmd = jdata["cmd"].GetInt();

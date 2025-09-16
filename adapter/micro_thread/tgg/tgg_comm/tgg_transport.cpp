@@ -31,7 +31,7 @@ void Send2Fd(int core_id, int fd, int idx, std::string_view data, int fd_opt, in
     
     if (shared_data->empty()) return;
 
-    LOG_DEBUG("send data coreid:%d fd:%d idx:%d, data:%s.", core_id, fd, idx, bin2hex(std::string_view(*shared_data)).c_str());
+    // LOG_DEBUG("send data coreid:%d fd:%d idx:%d, data:%s.", core_id, fd, idx, bin2hex(std::string_view(*shared_data)).c_str());
     if (enqueue_data_single_fd(core_id, shared_data, fd, idx, fd_opt) < 0) {// 函数内部会循环尝试发送10次
         LOG_ERROR("Enqueue data Failed: coreid:%d fd:%d idx:%d,opt:%d", core_id, fd, idx, fd_opt);
     }
