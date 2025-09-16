@@ -48,7 +48,7 @@ private:
 
     int _HandleHandshake(std::string_view request, ValidationResult& req, std::string& response);
 
-    int _AlbHealthCheck(std::string_view request, std::string& response);
+    int _ElbHealthCheck(std::string_view request, std::string& response);
 
     /* parse base frame according to
      * https://www.rfc-editor.org/rfc/rfc6455#section-5.2

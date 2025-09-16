@@ -288,14 +288,6 @@ static void tgg_recv(void *arg)
         }
         consume_ret = consume_rdata(cli_fd, buf, ret, idx, FD_READ);
         if (consume_ret < 0) {
-            if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
-                // 调试打印
-                if(!strncmp(buf, "GET", 3)) {// GET请求消息
-                    LOG_WARNING("fd:%d idx:%d recv data:%s.", cli_fd, tgg_get_cli_idx(g_core_id, cli_fd), (char*)buf);
-                } else {// 其他消息
-                    LOG_WARNING("fd:%d idx:%d revc data:%s.", cli_fd, tgg_get_cli_idx(g_core_id, cli_fd), bin2hex(std::string_view((char*)buf, ret)).c_str());
-                }
-            }
             LOG_ERROR("consume data failed.");
             break;
         }
@@ -342,13 +334,13 @@ static void tgg_do_send(tgg_write_data* wdata)
     while (fd_id_list) {
         int cli_fd = fd_id_list->fdid;// 数据传递时fdid存的是fd
         int idx = tgg_get_cli_idx(g_core_id, cli_fd);
-        if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
-            if(wdata->data_len > 4 && !strncmp((char*)wdata->data, "HTTP", 4)) {// GET请求消息
-                LOG_DEBUG("fd:%d idx:%d send to clien:%s.", cli_fd, idx, (char*)wdata->data);
-            } else {// 其他消息
-                LOG_DEBUG("fd:%d idx:%d send to clien:%s.", cli_fd, idx, bin2hex(std::string_view((char*)wdata->data, wdata->data_len)).c_str());
-            }
-        }
+        // if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
+        //     if(wdata->data_len > 4 && !strncmp((char*)wdata->data, "HTTP", 4)) {// GET请求消息
+        //         LOG_DEBUG("fd:%d idx:%d send to clien:%s.", cli_fd, idx, (char*)wdata->data);
+        //     } else {// 其他消息
+        //         LOG_DEBUG("fd:%d idx:%d send to clien:%s.", cli_fd, idx, bin2hex(std::string_view((char*)wdata->data, wdata->data_len)).c_str());
+        //     }
+        // }
         // 只有未关闭的连接才需要走以下逻辑，已经关闭的连接，不再发送数据
         if(idx > 0) {
             // 新的连接旧的数据就不要发送了，直接清理空间

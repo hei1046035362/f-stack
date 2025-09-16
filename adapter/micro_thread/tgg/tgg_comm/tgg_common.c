@@ -1207,7 +1207,7 @@ void high_freq_free(struct rte_mempool* pool, void* data, int size)
 		return ;
 	}
 	if(size > COMMON_PACKET_LEN) {
-		LOG_INFO("free an large packet, size:%d", size);
+		LOG_DEBUG("free an large packet, size:%d", size);
 		rte_mempool_put(g_mempool_large_data, data);
 #ifdef DEBUG_MEMPOOL_STATS
 		s_hi_freq_free[reinterpret_cast<uintptr_t>(g_mempool_large_data)]++;
