@@ -136,7 +136,7 @@ static int tgg_hash_del_key(const rte_hash* hash, rte_rcu_qsbr *rcu, const char*
             return -EINVAL;
         }
         // rte_rcu_qsbr_synchronize(rcu, RTE_QSBR_THRID_INVALID);// 等待所有读者退出
-        LOG_INFO("delete hash[%s] key[%s].", hash->name, key);
+        LOG_DEBUG("delete hash[%s] key[%s].", hash->name, key);
         // 释放value的空间
         rte_free(node_list);
     } else {
@@ -172,7 +172,7 @@ static int tgg_hash_del_fdlst4key(const rte_hash* hash, rte_rcu_qsbr *rcu, const
                 node_list->list = current->next;
             }
             dpdk_rte_free(current); // 归还节点到内存池
-            LOG_INFO("deleted hash[%s] key[%s] node[%ld].", hash->name, key, fdidcid);
+            LOG_DEBUG("deleted hash[%s] key[%s] node[%ld].", hash->name, key, fdidcid);
             found = 1;
             break;
         }
@@ -192,7 +192,7 @@ static int tgg_hash_del_fdlst4key(const rte_hash* hash, rte_rcu_qsbr *rcu, const
                 return -EINVAL;
             }
             // rte_rcu_qsbr_synchronize(rcu, RTE_QSBR_THRID_INVALID);// 等待所有读者退出
-            LOG_INFO("delete hash[%s] key[%s].", hash->name, key);
+            LOG_DEBUG("delete hash[%s] key[%s].", hash->name, key);
             // 释放value的空间
             rte_free(node_list);
             return 0;
@@ -297,7 +297,7 @@ static int tgg_hash_add_intkeywithfdlst(const rte_hash* hash, int64_t key, const
     new_node->next = node_list->list;
     node_list->list = new_node;
     rte_rwlock_write_unlock(&node_list->lock);
-    LOG_INFO("added hash[%s] key[%ld] node[%s].", hash->name, key, data);
+    LOG_DEBUG("added hash[%s] key[%ld] node[%s].", hash->name, key, data);
     return 0;
 }
 
@@ -312,7 +312,7 @@ static int tgg_hash_del_intkey_value(const rte_hash* hash, int64_t key, void* va
             return -EINVAL;
         }
         // rte_rcu_qsbr_synchronize(rcu, RTE_QSBR_THRID_INVALID);// 等待所有读者退出
-        LOG_INFO("delete hash[%s] key[%ld].", hash->name, key);
+        LOG_DEBUG("delete hash[%s] key[%ld].", hash->name, key);
         // 释放value的空间
         dpdk_rte_free(value);
     } else {
@@ -329,7 +329,7 @@ static int tgg_hash_del_intkey(const rte_hash* hash, rte_rcu_qsbr *rcu, int64_t 
 
     // 查找哈希表项
     if (rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(int64_t), 0), (void**)&node_list) < 0) {
-        LOG_INFO("delete hash[%s] key[%ld] not found.", hash->name, key);
+        LOG_DEBUG("delete hash[%s] key[%ld] not found.", hash->name, key);
         return -1; // 键不存在
     }
 
@@ -396,7 +396,7 @@ static int tgg_hash_del_idlst4intkey(const rte_hash* hash, rte_rcu_qsbr *rcu, in
             } else {
                 node_list->list = current->next;
             }
-            LOG_INFO("delete hash[%s] key[%d] node[%s].", hash->name, key, id);
+            LOG_DEBUG("delete hash[%s] key[%d] node[%s].", hash->name, key, id);
             dpdk_rte_free(current); // 归还节点到内存池
             found = 1;
             break;
@@ -417,7 +417,7 @@ static int tgg_hash_del_idlst4intkey(const rte_hash* hash, rte_rcu_qsbr *rcu, in
                 return -EINVAL;
             }
             // rte_rcu_qsbr_synchronize(rcu, RTE_QSBR_THRID_INVALID);// 等待所有读者退出
-            LOG_INFO("delete hash[%s] key[%d].", hash->name, key);
+            LOG_DEBUG("delete hash[%s] key[%d].", hash->name, key);
             // 释放value的空间
             rte_free(node_list);
             return 0;
@@ -688,7 +688,7 @@ void tgg_clean_cid()
         if (tgg_del_cid(del_key) < 0 ) {
             LOG_WARNING("delete cid:%d failed.", del_key);
         } else {
-            LOG_INFO("deleted cid:%d.", del_key);
+            LOG_DEBUG("deleted cid:%d.", del_key);
         }
     }
 }
@@ -755,7 +755,7 @@ int tgg_get_gidsbycid(int64_t cid, std::vector<std::string>& lst_gid)
     // ReadLock lock(get_cidgid_lock());
     tgg_fd_hash_svalue* value = (tgg_gid_list*)tgg_hash_get_intkey_value(g_cidgid_hash, cid);
     if(!value) {
-        LOG_INFO("cid [%d] not exist in gid hash.", cid);
+        LOG_DEBUG("cid [%d] not exist in gid hash.", cid);
         return -1;
     }
     lst_gid.reserve(RESERVED_SIZE_FOR_GID_CIDS);
@@ -806,7 +806,7 @@ void tgg_clean_cidgid()
         if (tgg_del_cid_cidgid(del_key) < 0 ) {
             LOG_WARNING("delete cid:%d in cidgid failed.", del_key);
         } else {
-            LOG_INFO("deleted cid:%d in cidgid.", del_key);
+            LOG_DEBUG("deleted cid:%d in cidgid.", del_key);
         }
     }
 }
@@ -905,7 +905,7 @@ int tgg_del_idx(int coreid, int64_t idx)
             LOG_ERROR("Del idx[%d] pos:%d failed.", idx, ret);
             return -EINVAL;
         }
-        LOG_INFO("delete idx[%d] for core[%d].", idx, coreid);
+        LOG_DEBUG("delete idx[%d] for core[%d].", idx, coreid);
     } else {
         LOG_ERROR("Del idx[%d] data failed:%d.", idx, ret);
         return -EINVAL;
