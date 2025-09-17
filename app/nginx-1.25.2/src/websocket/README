@@ -1,0 +1,9 @@
+###
+config# 配置时添加自定义模块
+./configure --add-module=path/to/nginx-websocket-module
+
+# 编译并安装
+make && make install
+
+# 启动Nginx
+nginx
