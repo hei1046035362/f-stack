@@ -116,17 +116,21 @@ typedef struct st_send_data {
 // 客户端需要保留的信息  gwrcv维护和使用
 // TODO:是否要考虑断线重连之后上一个连接的数据包会发送到新的连接中来的问题
 typedef struct st_cli_info {
-    int status;        // 连接是否已关闭
     int idx;        // 和fd一起标识唯一连接，(fd可能被重用了,但是处理方仍不知情)
                     // -1 标识关闭中，后续的数据包不再处理，0标识关闭完成并准备就绪
     int authorized; // 连接确认
-    tgg_ws_data ws_data;    // 缓存websocket的数据，用于处理分包的情况下
-    char ip_str[INET_ADDRSTRLEN];  // ws握手时需要打包发送给bw
     int ip;
     unsigned short port;
     int bwfdx;        // 绑定的bw
+
+    void* ctx;      // nginx 连接对象指针，只需要在当前进程操作，不需要申请和释放
+
+// nginx 框架不需要以下字段
+    int status;        // 连接是否已关闭
     void* thread;
     tgg_send_data* send_datalist;
+    tgg_ws_data ws_data;    // 缓存websocket的数据，用于处理分包的情况下
+    char ip_str[INET_ADDRSTRLEN];  // ws握手时需要打包发送给bw
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_cli_info;
 
 // 客户单信息中需要gwbwprc维护和使用的部分
