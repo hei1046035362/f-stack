@@ -40,6 +40,8 @@ int tgg_add_cli_snd_data(int core_id, int fd, tgg_write_data* wdata);
 void tgg_clean_cli_snd_data(int core_id, int fd);
 void tgg_set_cli_thread(int core_id, int fd, void* pthread);
 void* tgg_get_cli_thread(int core_id, int fd);
+void tgg_set_cli_ctx(int core_id, int fd, void* ctx);
+void* tgg_get_cli_ctx(int core_id, int fd);
 tgg_send_data* tgg_pop_cli_snd_data(int core_id, int fd);
 void tgg_free_cli_snd_data(int core_id, tgg_send_data* wdata);
 // 不能返回引用，内部加锁的
@@ -149,6 +151,7 @@ int tgg_dequeue_bwfdx(tgg_bwfdx_data** data);
 // 下行发送队列
 int tgg_enqueue_write(int core_id, tgg_write_data* data);
 int tgg_dequeue_write(int core_id, tgg_write_data** data);
+int tgg_batch_dequeue_write(int core_id, tgg_write_data** data, int n , int* avaliable);
 
 int tgg_enqueue_master(tgg_send_master_data* data);
 int tgg_dequeue_master(tgg_send_master_data** data);
@@ -207,5 +210,10 @@ void clean_fdidnode(tgg_fd_id_list* fdiddata);
 tgg_write_data* format_send_data(int core_id, const std::shared_ptr<const std::string>& sdata, std::vector<int64_t>& vecfdidx, int fdopt);
 int enqueue_data_batch_fd(int core_id, const std::shared_ptr<const std::string>& data, std::vector<int64_t> vecfdidx, int fdopt);
 int enqueue_data_single_fd(int core_id, const std::shared_ptr<const std::string>& data, int fd, int idx, int fdopt);
+
+// 上行透传
+tgg_trans_data* format_send_server_data(int core_id, int fd, std::string_view sdata, int fdopt);
+int enqueue_data_trans(int core_id, int fd, std::string_view data, int fdopt);
+
 
 #endif  // _TGG_COMMON_H_

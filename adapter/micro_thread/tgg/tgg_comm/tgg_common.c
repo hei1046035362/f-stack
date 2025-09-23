@@ -269,6 +269,15 @@ void* tgg_get_cli_thread(int core_id, int fd)
 	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].thread;
 }
 
+void tgg_set_cli_ctx(int core_id, int fd, void* ctx)
+{
+	((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].ctx = ctx;
+}
+void* tgg_get_cli_ctx(int core_id, int fd)
+{
+	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].ctx;
+}
+
 void tgg_free_cli_snd_data(int core_id, tgg_send_data* data)
 {
 	data->data = NULL;
@@ -875,6 +884,12 @@ int tgg_dequeue_write(int core_id, tgg_write_data** data)
 	return rte_ring_dequeue(g_ring_writes[core_id], (void**)data);
 }
 
+int tgg_batch_dequeue_write(int core_id, tgg_write_data** data, unsigned int n , unsigned int* avaliable)
+{
+	return rte_ring_dequeue_bulk(g_ring_writes[core_id], (void**)data, n, avaliable);
+}
+
+
 tgg_bw_data* get_bwdata_from_transdata(int prc_id, tgg_trans_data* tdata)
 {
 	tgg_bw_data* bdata = NULL;
@@ -1128,6 +1143,73 @@ int enqueue_data_single_fd(int core_id, const std::shared_ptr<const std::string>
 	return enqueue_data_batch_fd(core_id, data, vecfdidx, fdopt);
 }
 
+
+tgg_trans_data* format_send_server_data(int core_id, int fd, std::string_view sdata, int fdopt)
+{
+    if(fd <= 0) {
+        LOG_ERROR("invalid fd:%d.", fd);
+        return NULL;
+    }
+    tgg_trans_data* tdata = NULL;
+    int ret = high_freq_malloc(g_mempool_trans, (void**)&tdata, sizeof(tgg_bw_data));
+        // TODO  建议增加循环处理，内存池不够，可以稍微等待消费端释放
+    if (ret < 0) {
+        LOG_ERROR("get mem from bwrcv pool failed,code:%d.", ret);
+        return NULL;
+    }
+    if(sdata.size() > 0) {
+        ret = high_freq_malloc(g_mempool_trans_data, &tdata->data, sdata.size());
+        if (ret < 0) {
+            high_freq_free(g_mempool_trans, (void*)tdata, sizeof(tgg_trans_data));
+            LOG_ERROR("get mem from bwrcv data pool failed,code:%d.", ret);
+            return NULL;
+        }
+        // bwdata->data = dpdk_rte_malloc(sdata.size());
+        memcpy(tdata->data, sdata.data(), sdata.size());
+    } else {
+        tdata->data = NULL;
+    }
+    tdata->data_len = sdata.size();
+    tdata->fd_opt = fdopt;
+    tdata->fd = fd;
+    tdata->coreid = core_id;
+    tdata->peer_ip = (unsigned int)tgg_get_cli_ip(core_id, fd);
+    tdata->peer_port = (unsigned int)tgg_get_cli_port(core_id, fd);
+    tdata->idx = (unsigned int)tgg_get_cli_idx(core_id, fd);
+    return tdata;
+}
+
+int enqueue_data_trans(int core_id, int fd, std::string_view data, int fdopt)
+{
+    tgg_trans_data* tdata = format_send_server_data(core_id, fd, data, fdopt);
+    if (!tdata) {
+        LOG_ERROR("Format bw server data failed.");
+        return -1;
+    }
+    int maxtry = 10;// 入队列可能会失败最多尝试10次
+    if(tdata->fd_opt & FD_CLOSE) {
+        maxtry = 1000;// 关闭命令必须要发送过去，但是又不能造成死循环，所以这里直接把失败尝试次数提高
+    }
+    int ret = tgg_enqueue_trans(tdata);
+    while (ret < 0 && maxtry > 0 ) {
+        NS_MICRO_THREAD::mt_sleep(10);
+        ret = tgg_enqueue_trans(tdata);
+        maxtry--;
+    }
+    static int loop_times_sndserver = 0;
+    // TODO 前期调试要看是否经常出现重试
+    if (maxtry < 10) {
+        if(loop_times_sndserver++ % 100 == 0) {
+            LOG_ERROR("loop times:%d.", loop_times_sndserver);
+        }
+    }
+    if (ret < 0) {
+        clean_trans_data(tdata);
+        LOG_ERROR("Enqueue bw server data failed.");
+        return -1;
+    }
+    return 0;
+}
 
 #include <sys/prctl.h>
 static void set_core_path(const char *core_path) {
