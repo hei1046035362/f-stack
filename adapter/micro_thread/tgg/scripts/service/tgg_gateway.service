@@ -7,14 +7,19 @@ StartLimitBurst=3
 [Service]
 Type=forking
 User=root
-ExecStartPre=/usr/local/tgg_gateway/bin/gw-pre-start.sh  # 启动前检查脚本
+# 启动前检查脚本
+ExecStartPre=/usr/local/tgg_gateway/bin/gw-pre-start.sh
 ExecStart=/usr/local/tgg_gateway/bin/gw-start.sh
-ExecStop=/usr/local/tgg_gateway/bin/gw-graceful-stop.sh  # 优雅停止脚本
-ExecStopPost=/usr/local/tgg_gateway/bin/gw-force-kill.sh  # 强制终止脚本
+# 优雅停止脚本
+ExecStop=/usr/local/tgg_gateway/bin/gw-graceful-stop.sh
+# 强制终止脚本
+ExecStopPost=/usr/local/tgg_gateway/bin/gw-force-kill.sh
 Restart=on-failure
-RestartSec=5s
-TimeoutStopSec=5s  # 正常停止超时时间
-KillMode=process   # 仅终止主进程
+RestartSec=10s
+# 最大等待停止超时时长
+TimeoutStopSec=30s
+# 仅终止主进程
+KillMode=process
 Environment="PROC_ROOT=/usr/local/tgg_gateway/bin"
 
 # 日志配置 (自动轮转)
