@@ -57,8 +57,20 @@ bind_nic() {
             ifconfig eth1 down
             /usr/local/bin/dpdk-devbind.py -u eth1
         fi
-        echo "尝试将ens6/eth1口绑定到igb_uio"
-        /usr/local/bin/dpdk-devbind.py -b igb_uio $ens6_pci
+        if [ -z "$ens6_pci" ];then
+            echo "尝试绑定到未绑驱动的网口"
+            other_devices=$(/usr/local/bin/dpdk-devbind.py -s | awk '/Other Network devices/{flag=1; next} /^$/{flag=0} flag' | grep -v '^=' | awk '{print $1}')
+            if [ ! -z "$other_devices" ]; then
+                # 取第一个符合条件的PCI地址
+                target_pci=$(echo "$other_devices" | head -n1)
+                echo "找到处于'Other Network devices'状态的网口: PCI=$target_pci 尝试绑定"
+                /usr/local/bin/dpdk-devbind.py -b igb_uio "$target_pci"
+                return
+            fi
+        else
+            echo "尝试将ens6/eth1口绑定到igb_uio"
+            /usr/local/bin/dpdk-devbind.py -b igb_uio $ens6_pci
+        fi
     fi
 }
 
