@@ -124,6 +124,7 @@ void tgg_clean_gw_monitor(int prc_id);
 
 
 pid_t start_gwrcv_sendary(int lcore_id);
+pid_t start_gwrcv_reactor_sendary(int lcore_id);
 pid_t start_gwcliprc(int lcore_id);
 pid_t start_register(int lcore_id);
 pid_t start_gwbwprc(int prc_id);
