@@ -1358,6 +1358,21 @@ pid_t start_gwrcv_sendary(int lcore_id)
     return custom_fork("gwrcv", lcore_id, args);
 }
 
+pid_t start_gwrcv_reactor_sendary(int lcore_id)
+{
+    char proc_id[24]; // 栈上分配
+    snprintf(proc_id, sizeof(proc_id), "--proc-id=%d", lcore_id);
+    
+    // 参数数组（栈上分配）
+    char* args[] = {
+        const_cast<char*>("gwrcv_reactor"),    // 程序名
+        proc_id,    // 参数
+        NULL        // 结束标记
+    };
+    
+    return custom_fork("gwrcv_reactor", lcore_id, args);
+}
+
 pid_t start_gwcliprc(int lcore_id)
 {
     // 参数数组（栈上分配）

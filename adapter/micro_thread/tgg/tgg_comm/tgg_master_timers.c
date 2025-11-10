@@ -141,7 +141,7 @@ void check_gw_monitor(struct rte_timer* tm, void* arg)
             g_pid_check_times[i] = 0;
             pid = -1;
             if(i < g_monitor_count-2) {
-                pid = start_gwrcv_sendary(i);
+                pid = start_gwrcv_reactor_sendary(i);
             } else if (i == g_monitor_count-2) {
                 pid = start_gwcliprc(i);
             } else if (i == g_monitor_count - 1) {
