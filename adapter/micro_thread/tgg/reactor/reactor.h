@@ -26,11 +26,11 @@ typedef enum {
 
 typedef struct client_context_s {
     int fd;
-    char buffer[BUFFER_SIZE];
-    int buffer_len;
-    int write_len;
-    int total_read;
-    int total_write;
+    // char buffer[BUFFER_SIZE];
+    // int buffer_len;
+    // int write_len;
+    // int total_read;
+    // int total_write;
     unsigned int ip;
     unsigned short port;
     int idx;

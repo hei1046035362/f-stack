@@ -10,6 +10,7 @@
 #include "tgg_comm/tgg_conf.h"
 #include "comm/common.hpp"
 #include "comm/log.hpp"
+#include "ff_api.h"
 #include "mt_api.h"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
@@ -275,7 +276,7 @@ void WsConsumer::OnSend(const std::string& msg, int fd_opt)
         LOG_WARNING("send faild, connection is off");
         return;
     }
-    int ret = NS_MICRO_THREAD::mt_send(this->fd, msg.c_str(), msg.size(), 0, 1000);
+    int ret = ff_write(this->fd, msg.c_str(), msg.size());
     if (ret == -4) {
         // 主动断开连接
         LOG_INFO("closing connection affected.");
