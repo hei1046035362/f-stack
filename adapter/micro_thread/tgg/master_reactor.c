@@ -133,7 +133,6 @@ static int consume_rdata(int clt_fd, const char* buf, int len, int idx, enum FD_
 }
 
 static void free_client_context(client_context_t *ctx) {
-    LOG_ERROR("free client.");
     if (ctx) {
         if (ctx->fd >= 0) {
             ff_close(ctx->fd);
@@ -145,7 +144,7 @@ static void free_client_context(client_context_t *ctx) {
 
 static void clean_client_data(int cli_fd, int idx)
 {
-    LOG_ERROR("close client %d.", cli_fd);
+    LOG_DEBUG("close client %d.", cli_fd);
     tgg_del_idx(g_core_id, idx);
     tgg_close_cli(g_core_id, cli_fd);
     release_ws_buffer(g_core_id, cli_fd);
@@ -164,14 +163,6 @@ static void do_real_send(int fd, event_type_t events, void *arg)
     // }
     
     if (!(events & EVENT_WRITE)) {
-        return;
-    }
-
-    if (tgg_get_cli_idx(g_core_id, fd) == TGG_FD_CLOSING) {
-        LOG_ERROR("Client %d closing", fd);
-        reactor_remove_event(fd);
-        clean_client_data(fd, ctx->idx);
-        free_client_context(ctx);
         return;
     }
     
@@ -224,6 +215,13 @@ static void do_real_send(int fd, event_type_t events, void *arg)
             tgg_free_cli_snd_data(g_core_id, data);
         }
     }
+    if (tgg_get_cli_idx(g_core_id, fd) == TGG_FD_CLOSING) {
+        LOG_INFO("Client %d closing", fd);
+        reactor_remove_event(fd);
+        clean_client_data(fd, ctx->idx);
+        free_client_context(ctx);
+        return;
+    }
     reactor_modify_event(fd, EVENT_READ);
     // return ret;
 }
@@ -253,10 +251,10 @@ static void tgg_recv(int fd, event_type_t events, void *arg)
     char buf[1024] = {0};
     int n = 0;
     if(idx == TGG_FD_CLOSED) {
-        LOG_ERROR("Client %d is closed, idx:%d", fd, idx);
+        LOG_INFO("Client %d is closed, idx:%d", fd, idx);
         return;
     }
-    if (events & EVENT_ERROR || idx != ctx->idx) {
+    if (events & EVENT_ERROR) {
         LOG_ERROR("Client %d error, closing", fd);
         goto recv_failed;
         //tgg_close_cli(g_core_id, fd);
@@ -265,14 +263,17 @@ static void tgg_recv(int fd, event_type_t events, void *arg)
     if (!(events & EVENT_READ)) {
         return;
     }
-    
+    if (idx != ctx->idx) {
+        LOG_ERROR("Client %d idx[%d] != ctx->idx[%d] , closing", fd, idx, ctx->idx);
+        goto recv_failed;        
+    }
     // 读取数据
     n = ff_read(fd, buf, 1024);
     if (n <= 0) {
         if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
             LOG_ERROR("Read error from client %d, closing", fd);
         } else {
-            LOG_ERROR("Client %d disconnected", fd);
+            LOG_INFO("Client %d disconnected", fd);
         }
         // clean_client_data(fd, idx);
         goto recv_failed;
@@ -282,9 +283,10 @@ static void tgg_recv(int fd, event_type_t events, void *arg)
         goto recv_failed;
     }
     return;
-recv_failed:
-    if(!(tgg_get_cli_status(g_core_id, fd) & FD_STATUS_CLOSING) && (tgg_get_cli_idx(g_core_id, fd) != TGG_FD_CLOSING)) {// 没发送过close给gwcliprc
-        consume_rdata(fd, NULL, 0, idx, FD_CLOSE);
+recv_failed:                                  
+    if(!(tgg_get_cli_status(g_core_id, fd) & FD_STATUS_CLOSING) && // 没发送过close给gwcliprc
+        (tgg_get_cli_idx(g_core_id, fd) != TGG_FD_CLOSING)) {// ws握手完成
+        consume_rdata(fd, NULL, 0, idx, FD_CLOSE);// 通知bwprc 清理这个客户端相关信息
     }
     clean_client_data(fd, idx);
     reactor_remove_event(fd);
