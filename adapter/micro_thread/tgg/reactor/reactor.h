@@ -11,7 +11,7 @@
 
 #define MAX_EVENTS 1024
 #define BUFFER_SIZE 4096
-#define MAX_CLIENTS 1000
+#define MAX_CLIENTS 1000000
 
 #define DEFAULT_THREADS 1024
 #define MAX_THREADS 1024*16
@@ -49,16 +49,17 @@ typedef struct reactor_event_s {
 } reactor_event_t;
 
 typedef struct reactor_s {
-    // int max_events;
+    reactor_event_t *events;
+    int max_events;
     int epoll_fd;
     void* pthread;
     void* data;
-    // int running;
+    int running;
 } reactor_t;
 
 // extern reactor_t[] g_reactor;
 
-int reactor_create(int max_events, int thread_count = DEFAULT_THREADS);
+int reactor_create(int max_events);
 int reactor_destroy();
 int reactor_add_event(int fd, event_type_t events, 
                      event_callback_t callback, event_callback_t wcallback, void *arg);
