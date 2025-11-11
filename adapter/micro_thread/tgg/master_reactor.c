@@ -234,12 +234,12 @@ static client_context_t *create_client_context(int fd, unsigned int ip, unsigned
     ctx->ip = ip;
     ctx->port = port;
     ctx->idx = idx;
-    ctx->buffer_len = 0;
-    ctx->write_len = 0;
-    ctx->total_read = 0;
-    ctx->total_write = 0;
+    // ctx->buffer_len = 0;
+    // ctx->write_len = 0;
+    // ctx->total_read = 0;
+    // ctx->total_write = 0;
     // ctx->uthread = NULL;
-    memset(ctx->buffer, 0, BUFFER_SIZE);
+    // memset(ctx->buffer, 0, BUFFER_SIZE);
     
     return ctx;
 }
