@@ -404,16 +404,14 @@ void print_queue_counts()
     LOG_WARNING("dequeue success count:%d", s_dequeued_server_count);
 }
 
-void *read_routine( void *arg )
+void *read_routine(void *arg)
 {
     co_enable_hook_sys();
 
     task_t *co = (task_t*)arg;
-    for(;;)
-    {
-        if( -1 == co->fd )
-        {
-            g_read_stack.push( co );
+    for(;;) {
+        if (-1 == co->fd) {
+            g_read_stack.push(co);
             co_yield_ct();
             continue;
         }
@@ -423,97 +421,114 @@ void *read_routine( void *arg )
         uint32_t ip;
         ushort port;
         char ip_str[INET_ADDRSTRLEN] = {0};
+        
         if (get_connection_info(fd, ip_str, &ip, &port) < 0) {
             LOG_ERROR("get peer connection[%d] info failed.", fd);
             close(fd);
-            return 0;
+            continue;
         }
+        
         LOG_INFO("new read routine ip[%s], port[%u].", ip_str, ntohs(port));
-        char recv_buffer[ MAX_PACKET_SIZE ];
+        
+        char recv_buffer[MAX_PACKET_SIZE];
         int exec_ret = 0;
-        // std::vector<char> recv_buffer;
         unsigned int pos = 0;
-        for(;;)
-        {
-            struct pollfd pf = { 0 };
+        
+        for(;;) {
+            struct pollfd pf = {0};
             pf.fd = fd;
-            pf.events = (POLLIN|POLLERR|POLLHUP);
-            co_poll( co_get_epoll_ct(),&pf,1,200);
+            pf.events = (POLLIN | POLLERR | POLLHUP);
+            co_poll(co_get_epoll_ct(), &pf, 1, 200);
 
-            char buf_read[ 4096 ];
-            int ret = read( fd,buf_read,sizeof(buf_read) );
-            if(ret > 0) {
+            char buf_read[4096];
+            int ret = read(fd, buf_read, sizeof(buf_read));
+            
+            if (ret > 0) {
+                // 检查缓冲区是否溢出
+                if (pos + ret > MAX_PACKET_SIZE) {
+                    LOG_ERROR("buffer overflow, pos:%u, ret:%d, max:%d", 
+                             pos, ret, MAX_PACKET_SIZE);
+                    break;
+                }
+                
                 memcpy(recv_buffer + pos, buf_read, ret);
-                if(pos + ret < sizeof(tgg_bw_protocal)) {
-                    pos += ret;
-                    continue;// 分包
-                }
-                tgg_bw_protocal* header = reinterpret_cast<tgg_bw_protocal*>(recv_buffer);
-                unsigned int pack_len = htonl(header->pack_len);
-                // 验证数据包长度有效性[4](@ref)
-                if(pack_len < sizeof(tgg_bw_protocal) || 
-                   pack_len > MAX_PACKET_SIZE) {
-                    LOG_ERROR("invalid packet len[%d], bw[ip:%s,port%d] is closing.", pack_len, ip_str, ntohs(port));
-                    LOG_ERROR("bin data:%s.", bin2hex(std::string_view(recv_buffer)).c_str());
-                    tgg_close_bw_session(g_prc_id, fd);
-                    close( fd );
-                    LOG_ERROR("bw[ip:%s,port%d] closed.", ip_str, ntohs(port));
-                    return 0;
-                }
-                // 够header 但不够一个完整的包，继续收包
-                if(pos + ret < pack_len) {
-                    pos += ret;
-                    continue;// 分包
-                }
-                unsigned int left_len = pos + ret;
-                unsigned int parsed_pos = 0;// 当前缓冲区存放的完整的包的个数
-                do {
+                unsigned int total_len = pos + ret;
+                unsigned int parsed_pos = 0;
+                
+                while (parsed_pos < total_len) {
+                    // 检查是否收到完整包头
+                    if (total_len - parsed_pos < sizeof(tgg_bw_protocal)) {
+                        break;  // 等待更多数据
+                    }
+                    
+                    tgg_bw_protocal* header = reinterpret_cast<tgg_bw_protocal*>(
+                        recv_buffer + parsed_pos);
+                    unsigned int pack_len = htonl(header->pack_len);
+                    
+                    // 验证包长度有效性
+                    if (pack_len < sizeof(tgg_bw_protocal) || 
+                        pack_len > MAX_PACKET_SIZE) {
+                        LOG_ERROR("invalid packet len[%d], ip:%s, port:%d", 
+                                 pack_len, ip_str, ntohs(port));
+                        exec_ret = -1;
+                        break;
+                    }
+                    
+                    // 检查是否收到完整包
+                    if (total_len - parsed_pos < pack_len) {
+                        break;  // 等待更多数据
+                    }
+                    
+                    // 处理完整包
                     tgg_bw_data bwdata = {
                         .fd = fd,
                         .coreid = g_prc_id,
-                        .bwfdx = (fd << 8 ) | g_prc_id,
+                        .bwfdx = (fd << 8) | g_prc_id,
                         .fd_opt = FD_WRITE,
                         .idx = tgg_get_bwfdx_idx(g_prc_id, fd),
                         .data_len = pack_len,
                         .data = recv_buffer + parsed_pos,
-                        .peer_ip = ip,// 下行的ip 端口 暂时没有用到
+                        .peer_ip = ip,
                         .peer_port = ntohs(port),
-                        // .cid = 0// 下行没有cid
                     };
-                    if ((exec_ret = tgg_process_bwrcv_data(&bwdata)) <0)
+                    
+                    if ((exec_ret = tgg_process_bwrcv_data(&bwdata)) < 0) {
                         break;
-                    left_len -= pack_len;
+                    }
+                    
                     parsed_pos += pack_len;
-                    header = reinterpret_cast<tgg_bw_protocal*>(recv_buffer + parsed_pos);
-                    pack_len = htonl(header->pack_len);
-                } while (left_len >= pack_len && left_len > sizeof(tgg_bw_protocal));// 处理粘包
-
-                if(left_len > 0) {
-                    // 把剩余数据移动到前面去,数据提供了长度，因此不需要置空操作
+                }
+                
+                // 移动未处理数据到缓冲区头部
+                unsigned int left_len = total_len - parsed_pos;
+                if (left_len > 0 && parsed_pos > 0) {
                     memmove(recv_buffer, recv_buffer + parsed_pos, left_len);
-                    pos = left_len;
-                } else {// 等于的情况
-                    // 有长度和起始位置字段，不需要置空操作
-                    // memset(recv_buffer, 0, pos);
-                    pos = 0;
+                }
+                pos = left_len;
+                
+                if (exec_ret < 0) {
+                    break;  // 处理错误，退出循环
                 }
             }
-            if(exec_ret < 0) {// 执行命令中触发主动关闭
+            
+            // 错误处理（原有逻辑）
+            if (exec_ret < 0) {
                 LOG_WARNING("we are closing bw[ip:%s,port:%d]", ip_str, ntohs(port));
-            } else if( ret > 0 || ( -1 == ret && EAGAIN == errno ) ) {
+            } else if (ret > 0 || (ret == -1 && errno == EAGAIN)) {
                 continue;
-            } else if(ret != 0) {
-                LOG_WARNING("bw[ip:%s,port:%d] is closing, ret:%d, error:[%d]%s.", ip_str, ntohs(port), ret, errno, strerror(errno));
+            } else if (ret != 0) {
+                LOG_WARNING("bw[ip:%s,port:%d] is closing, ret:%d, error:[%d]%s.", 
+                           ip_str, ntohs(port), ret, errno, strerror(errno));
             } else {
                 LOG_WARNING("catched a close from bw[ip:%s,port:%d]", ip_str, ntohs(port));
             }
-            tgg_close_bw_session(g_prc_id, fd);
-            close( fd );
-            LOG_WARNING("bw[ip:%s,port:%d] closed.", ip_str, ntohs(port));
-            break;
+            
+           break;
         }
-
-    }
+        tgg_close_bw_session(g_prc_id, fd);
+        close(fd);
+        LOG_WARNING("bw[ip:%s,port:%d] closed.", ip_str, ntohs(port));
+     }
     return 0;
 }
 
