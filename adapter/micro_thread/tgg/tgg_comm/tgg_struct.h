@@ -128,6 +128,7 @@ typedef struct st_cli_info {
 // nginx 框架不需要以下字段
     int status;        // 连接是否已关闭
     void* thread;
+    void* curr_data;// 不能放在ngxin的连接池是因为全局内存可能会因为进程异常而泄露
     tgg_send_data* send_datalist;
     tgg_ws_data ws_data;    // 缓存websocket的数据，用于处理分包的情况下
     char ip_str[INET_ADDRSTRLEN];  // ws握手时需要打包发送给bw

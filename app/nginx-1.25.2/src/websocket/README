@@ -1,6 +1,6 @@
 ###
 config# 配置时添加自定义模块
-./configure --add-module=path/to/nginx-websocket-module
+./configure --prefix=/usr/local/nginx_fstack --with-ff_module --add-module=src/websocket
 
 # 编译并安装
 make && make install

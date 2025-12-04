@@ -1,3 +1,6 @@
 ngx_addon_name=ngx_http_websocket_module
+CFLAGS="$CFLAGS -mssse3 -msse4.2 "
+CORE_LIBS="$CORE_LIBS -lstdc++ -lssl -lcrypto"
+CORE_INCS="$CORE_INCS $FF_PATH/adapter/micro_thread/tgg/tgg_comm/ $FF_PATH/adapter/micro_thread/tgg $FF_PATH/app/rapidjson/include"
 HTTP_MODULES="$HTTP_MODULES ngx_http_websocket_module"
-NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_websocket_module.c $ngx_addon_dir/websocket_frame.c $ngx_addon_dir/connection_pool.c $ngx_addon_dir/ring_handler.c "
+NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_websocket_module.cc $ngx_addon_dir/websocket_frame.c $ngx_addon_dir/connection_pool.c $ngx_addon_dir/ring_handler.c $FF_PATH/adapter/micro_thread/tgg/tgg_comm/tgg_common.cpp $FF_PATH/adapter/micro_thread/tgg/tgg_comm/tgg_conf.cpp $FF_PATH/adapter/micro_thread/tgg/tgg_comm/tgg_lock.cpp $FF_PATH/adapter/micro_thread/tgg/tgg_comm/tgg_master_timers.cpp $FF_PATH/adapter/micro_thread/tgg/tgg_comm/tgg_bw_cache.cpp $FF_PATH/adapter/micro_thread/tgg/tgg_comm/tgg_ip_filter.cpp $FF_PATH/adapter/micro_thread/tgg/comm/*.cpp $FF_PATH/adapter/micro_thread/tgg/dpdk_init.cpp $FF_PATH/adapter/micro_thread/tgg/tgg_comm/WsConsumer.cpp "

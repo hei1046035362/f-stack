@@ -286,7 +286,7 @@ struct ff_config {
 extern struct ff_config ff_global_cfg;
 
 int ff_load_config(int argc, char * const argv[]);
-int ff_get_proc_id() { return ff_global_cfg.dpdk.proc_id; }
+int ff_get_proc_id(void);
 #ifdef __cplusplus
 }
 #endif

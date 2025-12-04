@@ -86,7 +86,7 @@ void check_gw_monitor(struct rte_timer* tm, void* arg)
     uint64_t now = get_system_ms();
     for (int i = 0; i < g_monitor_count; ++i)
     {
-        if(i == g_core_id) {// primary进程 自己不能监控自己，由service监控 
+        if(i < g_monitor_count-2) {// primary进程 自己不能监控自己，由service监控 
             continue;
         }
         if(tgg_checkif_gw_monitor_timeout(i, now)) {
@@ -242,10 +242,12 @@ void init_timer()
     rte_timer_init(&timer_task_master_cmd);// 统计并发 周期1s
     rte_timer_reset(&timer_task_master_cmd, hz, PERIODICAL, 
             rte_lcore_id(), deal_master_cmd_dequeue, NULL);
+    LOG_INFO("init timer.");
 }
 
 void stop_timer()
 {
+    LOG_INFO("stop timer...");
     rte_timer_stop_sync(&timer_task_master_cmd);
     rte_timer_stop_sync(&timer_task_concurrency);
     if(TggConfigure::getInstance()->get_auto_start()) {
@@ -256,6 +258,7 @@ void stop_timer()
             rte_timer_stop_sync(&timer_task_update_heartbeat);
         }
     }
+    LOG_INFO("timer stopped.");
 }
 
 int check_if_all_child_up()
@@ -263,7 +266,7 @@ int check_if_all_child_up()
     // int monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
     for (int i = 0; i < g_monitor_count; ++i)// 0号进程 自己不能监控自己，由service监控 
     {
-        if(i == g_core_id) {// primary进程 自己不能监控自己，由service监控 
+        if(i < g_monitor_count-2) {// primary进程 自己不能监控自己，由service监控 
             continue;
         }
         if(tgg_check_gw_monitor_up(i) <= 0) {
@@ -279,7 +282,7 @@ void kill_all_child()
     // int monitor_count = count_ones(TggConfigure::getInstance()->get_lcore_mask()) + 2;// +2 是gwcliprc和register
     for (int i = 0; i < g_monitor_count; ++i)// 0号进程 自己不能监控自己，由service监控 
     {
-        if(i == g_core_id) {// primary进程 自己不能监控自己，由service监控 
+        if(i  < g_monitor_count-2) {// primary进程 自己不能监控自己，由service监控 
             continue;
         }
         pid_t pid = tgg_get_gw_monitor_pid(i);

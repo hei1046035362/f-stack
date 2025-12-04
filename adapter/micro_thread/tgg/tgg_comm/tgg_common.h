@@ -35,6 +35,8 @@ std::string tgg_get_cli_ip_str(int core_id, int fd);
 uint32_t tgg_get_cli_ip(int core_id, int fd);
 ushort tgg_get_cli_port(int core_id, int fd);
 int tgg_get_cli_bwfdx(int core_id, int fd);
+tgg_write_data* tgg_get_cli_blocked_data(int core_id, int fd);
+void tgg_set_cli_blocked_data(int core_id, int fd, void* wdata);
 tgg_send_data* tgg_get_cli_snd_data(int core_id, int fd);
 int tgg_add_cli_snd_data(int core_id, int fd, tgg_write_data* wdata);
 void tgg_clean_cli_snd_data(int core_id, int fd);
@@ -151,7 +153,7 @@ int tgg_dequeue_bwfdx(tgg_bwfdx_data** data);
 // 下行发送队列
 int tgg_enqueue_write(int core_id, tgg_write_data* data);
 int tgg_dequeue_write(int core_id, tgg_write_data** data);
-int tgg_batch_dequeue_write(int core_id, tgg_write_data** data, int n , int* avaliable);
+int tgg_batch_dequeue_write(int core_id, tgg_write_data** data, unsigned int n , unsigned int* avaliable);
 
 int tgg_enqueue_master(tgg_send_master_data* data);
 int tgg_dequeue_master(tgg_send_master_data** data);

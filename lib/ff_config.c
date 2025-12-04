@@ -1308,3 +1308,5 @@ ff_load_config(int argc, char *const argv[])
 
     return 0;
 }
+
+int ff_get_proc_id(void) { return ff_global_cfg.dpdk.proc_id; }
