@@ -16,7 +16,7 @@ static void ngx_start_worker_processes(ngx_cycle_t *cycle, ngx_int_t n,
 static void ngx_start_cache_manager_processes(ngx_cycle_t *cycle,
     ngx_uint_t respawn);
 static void ngx_pass_open_channel(ngx_cycle_t *cycle);
-static void ngx_signal_worker_processes(ngx_cycle_t *cycle, int signo);
+void ngx_signal_worker_processes(ngx_cycle_t *cycle, int signo);
 static ngx_uint_t ngx_reap_children(ngx_cycle_t *cycle);
 static void ngx_master_process_exit(ngx_cycle_t *cycle);
 static void ngx_worker_process_cycle(ngx_cycle_t *cycle, void *data);
@@ -593,7 +593,7 @@ ngx_pass_open_channel(ngx_cycle_t *cycle)
 }
 
 
-static void
+void
 ngx_signal_worker_processes(ngx_cycle_t *cycle, int signo)
 {
     ngx_int_t      i;

@@ -139,12 +139,11 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     }
     // 网关端口
     int ret = get_int_value(&pTgg_Ini, "gateway", "port");
-    if(ret <= 0) return -1;
-    this->port = ret;
-    if(this->port > 65535) {
+    if(ret <= 0 || ret > 65535) {
         RTE_LOG(ERR, USER1, "[%s][%d] invalid gateway port:[%d].\n", __FILE__, __LINE__, this->port);
         return -1;
     }
+    this->port = ret;
 
     // ccore_mask  cli的线程绑定那几个core
     core_mask = pTgg_Ini.getValue("gateway", "ccore_mask");
@@ -252,12 +251,11 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     }
     // 网关对内端口
     ret = get_int_value(&pTgg_Ini, "bwserver", "port");
-    if (ret <= 0) return -1;
-    this->bw_port = (unsigned short)ret;
-    if(this->bw_port > 65535) {
+    if (ret <= 0 || ret > 65535) {
         RTE_LOG(ERR, USER1, "[%s][%d] invalid bwserver port:[%d].\n", __FILE__, __LINE__, ret);
         return -1;
     }
+    this->bw_port = (unsigned short)ret;
     // 监控进程假死的间隔  单位(min)
     this->bw_heart_beat = get_int_value(&pTgg_Ini, "bwserver", "port");
     if (this->bw_heart_beat <= 0) this->bw_heart_beat = 5;
@@ -270,12 +268,11 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
     }
     // 网关对内端口
     ret = get_int_value(&pTgg_Ini, "register", "port");
-    if (ret <= 0) return -1;
-    this->register_port = (unsigned short)ret;
-    if(this->register_port > 65535) {
+    if (ret <= 0 || ret  > 65535) {
         RTE_LOG(ERR, USER1, "[%s][%d] invalid register port:[%d].\n", __FILE__, __LINE__, ret);
         return -1;
     }
+    this->register_port = (unsigned short)ret;
 
     // 网关和bw消息加密的秘钥
     this->secret_key = pTgg_Ini.getValue("bwserver", "secret_key");

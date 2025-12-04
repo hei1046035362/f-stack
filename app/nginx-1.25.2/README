@@ -1,0 +1,9 @@
+
+Documentation is available at http://nginx.org
+
+cd app/nginx-1.25.2
+bash ./configure --prefix=/usr/local/nginx_fstack --with-ff_module --add-module=src/websocket
+make
+make install
+cd ../..
+/usr/local/nginx_fstack/sbin/nginx

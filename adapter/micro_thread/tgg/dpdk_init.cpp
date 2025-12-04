@@ -13,7 +13,7 @@
 #include <rte_hash_crc.h>
 #include <rte_rcu_qsbr.h>
 
-#include "mt_api.h"
+// #include "mt_api.h"
 #include "dpdk_init.h"
 #include "tgg_comm/tgg_struct.h"
 #include "tgg_comm/tgg_lock.h"
@@ -358,6 +358,7 @@ struct rte_hash* init_hash(const char* hash_name, uint32_t ent_cnt, uint32_t key
 	struct rte_hash_parameters hash_params = {
 		.name = hash_name,
 		.entries = ent_cnt*4,
+		.reserved = 0,
 		.key_len = RTE_ALIGN(key_len, 8),
 		.hash_func = rte_hash_crc,
 		.hash_func_init_val = 0,
@@ -537,7 +538,6 @@ void tgg_master_init()
 	g_mempool_large_data = make_mempool(s_pool_large_data_name, s_large_data_mempool_size, MAX_PACKET_LEN);
 	g_mempool_clifdlist_data = make_mempool(s_pool_clifdlist_data_name, s_clifdlist_mempool_size, sizeof(tgg_fd_id_list));
 	g_mempool_ws_buffer = make_mempool(s_pool_ws_buffer_name, s_ws_buffer_mempool_size, BUFFER_PACKET_LEN);
-
 	LOG_INFO("Init dpdk master for tgg done.");
 }
 
@@ -814,6 +814,33 @@ void tgg_register_uninit()
 	tgg_secondary_uninit();
 }
 
+// #include <sys/stat.h>
+// 在次级进程启动时检查
+static bool is_primary_initialized()
+{
+    // 检查共享内存是否存在
+    // 检查信号量状态
+    // 检查文件锁等
+    struct rte_mempool* pool = find_mempool(s_pool_ws_buffer_name);
+    if (pool) {
+        return true;  // 共享内存存在，主进程已初始化
+    }
+    return false;
+}
+
+int wait_primary_up()
+{
+// 次级进程启动逻辑
+    if (!is_primary_initialized()) {
+        printf("Waiting for primary process initialization...\n");
+        sleep(5);  // 等待5秒
+        if (!is_primary_initialized()) {
+            printf("ERROR: Primary process not initialized\n");
+            return -1;
+        }
+    }
+    return 0;
+}
 
 void prc_exit(int exit_code, const char* fmt, ...)
 {

@@ -135,6 +135,7 @@ static struct rte_hash* create_or_lookup_hash(const char* name, bool is_primary)
     struct rte_hash_parameters params = {
         .name = name,
         .entries = HASH_ENTRIES,
+        .reserved = 0,
         .key_len = RTE_ALIGN(sizeof(uint64_t), 8),
         .hash_func = rte_hash_crc, // Fast CRC-based hash function
         .hash_func_init_val = 0,

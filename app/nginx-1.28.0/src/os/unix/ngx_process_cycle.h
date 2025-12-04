@@ -36,6 +36,7 @@ typedef struct {
 
 void ngx_master_process_cycle(ngx_cycle_t *cycle);
 void ngx_single_process_cycle(ngx_cycle_t *cycle);
+void ngx_signal_worker_processes(ngx_cycle_t *cycle, int signo);
 
 #if (NGX_HAVE_FSTACK)
 #define                NGX_FF_PROCESS_NONE         0

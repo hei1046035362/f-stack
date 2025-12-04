@@ -12,7 +12,7 @@
 #include <unistd.h>
 #include <iostream>
 #include "comm/log.hpp"
-#include "mt_api.h"
+// #include "mt_api.h"
 #include "comm/common.hpp"
 
 #include <sys/wait.h>
@@ -46,7 +46,7 @@ extern struct rte_mempool* g_mempool_clifdlist_data;
 extern struct rte_mempool* g_mempool_ws_buffer;
 extern struct rte_mempool* g_mempool_fd_snddata[MAX_LCORE_COUNT];
 
-tgg_stats g_tgg_stats = {0};
+tgg_stats g_tgg_stats = {};
 static bool s_big_endian = false;
 
 union EndiannessTester {
@@ -120,6 +120,12 @@ void tgg_close_cli(int core_id, int fd)
 	cli->idx = TGG_FD_CLOSED;
 	cli->authorized = AUTH_TYPE_UNKNOWN;
 	cli->thread = NULL;
+	if(cli->curr_data) {
+		((tgg_write_data*)(cli->curr_data))->ref--;
+        if(((tgg_write_data*)(cli->curr_data))->ref <= 0) {
+            clean_write_data(core_id, (tgg_write_data*)(cli->curr_data));            
+        }
+	}
 	tgg_clean_cli_snd_data(core_id, fd);
 }
 
@@ -205,6 +211,14 @@ int tgg_get_cli_bwfdx(int core_id, int fd)
 {
 	// SpinLock lock(get_cli_lock());
 	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].bwfdx;	
+}
+tgg_write_data* tgg_get_cli_blocked_data(int core_id, int fd)
+{
+	return (tgg_write_data*)((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].curr_data;
+}
+void tgg_set_cli_blocked_data(int core_id, int fd, void* wdata)
+{
+	((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].curr_data = wdata;
 }
 
 tgg_send_data* tgg_get_cli_snd_data(int core_id, int fd)
@@ -1186,23 +1200,23 @@ int enqueue_data_trans(int core_id, int fd, std::string_view data, int fdopt)
         LOG_ERROR("Format bw server data failed.");
         return -1;
     }
-    int maxtry = 10;// 入队列可能会失败最多尝试10次
-    if(tdata->fd_opt & FD_CLOSE) {
-        maxtry = 1000;// 关闭命令必须要发送过去，但是又不能造成死循环，所以这里直接把失败尝试次数提高
-    }
+    // int maxtry = 10;// 入队列可能会失败最多尝试10次
+    // if(tdata->fd_opt & FD_CLOSE) {
+    //     maxtry = 1000;// 关闭命令必须要发送过去，但是又不能造成死循环，所以这里直接把失败尝试次数提高
+    // }
     int ret = tgg_enqueue_trans(tdata);
-    while (ret < 0 && maxtry > 0 ) {
-        NS_MICRO_THREAD::mt_sleep(10);
-        ret = tgg_enqueue_trans(tdata);
-        maxtry--;
-    }
-    static int loop_times_sndserver = 0;
-    // TODO 前期调试要看是否经常出现重试
-    if (maxtry < 10) {
-        if(loop_times_sndserver++ % 100 == 0) {
-            LOG_ERROR("loop times:%d.", loop_times_sndserver);
-        }
-    }
+    // while (ret < 0 && maxtry > 0 ) {
+    //     NS_MICRO_THREAD::mt_sleep(10);
+    //     ret = tgg_enqueue_trans(tdata);
+    //     maxtry--;
+    // }
+    // static int loop_times_sndserver = 0;
+    // // TODO 前期调试要看是否经常出现重试
+    // if (maxtry < 10) {
+    //     if(loop_times_sndserver++ % 100 == 0) {
+    //         LOG_ERROR("loop times:%d.", loop_times_sndserver);
+    //     }
+    // }
     if (ret < 0) {
         clean_trans_data(tdata);
         LOG_ERROR("Enqueue bw server data failed.");
@@ -1215,7 +1229,9 @@ int enqueue_data_trans(int core_id, int fd, std::string_view data, int fdopt)
 static void set_core_path(const char *core_path) {
     char cmd[256];
     snprintf(cmd, sizeof(cmd), "echo '%s%%e_%%p.core' > /proc/sys/kernel/core_pattern", core_path);
-    system(cmd);  // 需 root 权限
+    if(system(cmd) < 0) {  // 需 root 权限
+    	printf("exec cmd:%s faild.\n", cmd);
+    }
 }
 
 void init_core(const char* core_path)
@@ -1365,13 +1381,13 @@ void print_mem_statistics()
 
 static int get_exec_path(char* exe_path, const char* exec_name)
 {
-    ssize_t len = readlink("/proc/self/exe", exe_path, PATH_MAX - 1);
-    if (len == -1) {
-        LOG_ERROR("readlink failed: %s", strerror(errno));
-        return -1;
-    }
-    exe_path[len] = '\0';
-    
+    // ssize_t len = readlink("/proc/self/exe", exe_path, PATH_MAX - 1);
+    // if (len == -1) {
+    //     LOG_ERROR("readlink failed: %s", strerror(errno));
+    //     return -1;
+    // }
+    // exe_path[len] = '\0';
+
     // 查找最后一个斜杠位置
     char *last_slash = strrchr(exe_path, '/');
     if (!last_slash) {
@@ -1395,6 +1411,7 @@ static int get_exec_path(char* exe_path, const char* exec_name)
 static pid_t custom_fork(const char* exec_name, int prc_id, char* args[])
 {
     char exe_path[PATH_MAX] = {0};
+    memcpy(exe_path, "/usr/local/tgg_gateway/bin/", strlen("/usr/local/tgg_gateway/bin/"));
     if (get_exec_path(exe_path, exec_name) < 0) {
         return -1;
     }
