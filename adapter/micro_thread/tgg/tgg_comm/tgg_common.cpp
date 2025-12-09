@@ -900,7 +900,7 @@ int tgg_dequeue_write(int core_id, tgg_write_data** data)
 
 int tgg_batch_dequeue_write(int core_id, tgg_write_data** data, unsigned int n , unsigned int* avaliable)
 {
-	return rte_ring_dequeue_bulk(g_ring_writes[core_id], (void**)data, n, avaliable);
+	return rte_ring_dequeue_burst(g_ring_writes[core_id], (void**)data, n, avaliable);
 }
 
 
