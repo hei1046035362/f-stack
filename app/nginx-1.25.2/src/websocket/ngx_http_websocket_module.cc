@@ -28,9 +28,10 @@ extern ngx_module_t ngx_http_websocket_module;
 extern struct rte_ring *ws_read_ring;
 extern struct rte_ring *ws_write_ring;
 
-extern int g_fd_limit;
+extern uint32_t g_fd_limit;
 extern int g_core_id;
 extern int64_t g_max_concurency;
+extern uint32_t g_fd_mask;
 // 进程是否退出  master进程退出不需要做什么事情，但是secondary退出前必须要释放他持有的内存
 int g_run_status = 1;
 int g_monitor_count = 0;
@@ -148,8 +149,9 @@ static ngx_int_t extract_ip_port(const struct sockaddr *sa, char* ip_str, unsign
 
 static ngx_int_t init_tgg_cli(ngx_http_request_t *r, ngx_http_websocket_ctx_t *ctx)
 {
+    int fd = r->connection->fd & g_fd_mask;
     // 如果fd还在使用中，拒绝连接
-    if (tgg_get_cli_idx(g_core_id, r->connection->fd) != TGG_FD_CLOSED) {
+    if (tgg_get_cli_idx(g_core_id, fd) != TGG_FD_CLOSED) {
         LOG_ERROR("socket fd[%d] still in use.", r->connection->fd);
         return -1;
     }
@@ -168,7 +170,7 @@ static ngx_int_t init_tgg_cli(ngx_http_request_t *r, ngx_http_websocket_ctx_t *c
     // int idx = -1;
     bool exclude = is_ip_exclude(ip);// exclude的连接只recv，不进入业务逻辑
     if(!exclude) {
-        if(tgg_init_cli(g_core_id, r->connection->fd, ip_str, ip, port) < 0) {
+        if(tgg_init_cli(g_core_id, fd, ip_str, ip, port) < 0) {
             LOG_ERROR("init client info failed.");
             // close(cli_info->cli_fd);
             // tgg_close_cli(g_core_id, cli_info->cli_fd);
@@ -177,26 +179,26 @@ static ngx_int_t init_tgg_cli(ngx_http_request_t *r, ngx_http_websocket_ctx_t *c
         }
         // idx = tgg_get_cli_idx(g_core_id, r->connection->fd);
     }
-    tgg_set_cli_ctx(g_core_id, r->connection->fd, ctx);
+    tgg_set_cli_ctx(g_core_id, fd, ctx);
     return 0;
 }
 
-static void clean_client_data(int cli_fd, int idx)
+static void clean_client_data(int cli_fd)
 {
-    tgg_del_idx(g_core_id, idx);
     tgg_close_cli(g_core_id, cli_fd);
     release_ws_buffer(g_core_id, cli_fd);
 }
 
 static void destroy_tgg_cli(int fd)
 {
+    LOG_INFO("destroy client.");
     ngx_http_websocket_ctx_t *ctx = (ngx_http_websocket_ctx_t*)tgg_get_cli_ctx(g_core_id, fd);
     if(ctx && ctx->connection) {
         ngx_http_close_connection(ctx->connection);
     }
     // ws_connection_pool_remove(fd);
-    int idx = tgg_get_cli_idx(g_core_id, fd);
-    clean_client_data(fd, idx);
+    // int idx = tgg_get_cli_idx(g_core_id, fd);
+    clean_client_data(fd);
 
 }
 
@@ -209,7 +211,8 @@ ngx_http_websocket_upgrade(ngx_http_request_t *r)
     ngx_int_t rc;
     u_char accept_key[29];
     ngx_table_elt_t *h;
-    printf("catch new websocket fd[%d]\n", r->connection->fd);
+    int fd = r->connection->fd & g_fd_mask;
+    LOG_INFO("new websocket fd[%d]", fd);
     // 必须是 GET
     if (!(r->method & NGX_HTTP_GET)) {
         return NGX_HTTP_NOT_ALLOWED;
@@ -327,14 +330,14 @@ ngx_http_websocket_upgrade(ngx_http_request_t *r)
         goto failed;
     }
     raw_data_len = r->header_in->last - r->header_in->pos;
-    trans_upstream_data(g_core_id, r->connection->fd, std::string_view((const char*)r->header_in->pos, raw_data_len), FD_NEW);
+    trans_upstream_data(g_core_id, fd, std::string_view((const char*)r->header_in->pos, raw_data_len), FD_NEW);
 
     LOG_INFO("new websocket client accept.");
     // 返回 DONE，表示协议升级完成
     return NGX_DONE;
 
 failed:
-    destroy_tgg_cli(r->connection->fd);
+    destroy_tgg_cli(fd);
     return NGX_HTTP_INTERNAL_SERVER_ERROR;
 }
 
@@ -343,11 +346,13 @@ static void ngx_http_websocket_handler(ngx_event_t *rev)
 {
     ngx_connection_t *c = (ngx_connection_t *)rev->data;
     ngx_http_request_t *r = (ngx_http_request_t *)c->data;
+    int fd = r->connection->fd & g_fd_mask;
+
     // ngx_http_websocket_ctx_t *ctx = ngx_http_get_module_ctx(r, ngx_http_websocket_module);
     
     if (rev->timedout) {
         ngx_log_error(NGX_LOG_INFO, c->log, 0, "WebSocket timeout");
-        destroy_tgg_cli(r->connection->fd);
+        destroy_tgg_cli(fd);
         return;
     }
     
@@ -360,7 +365,7 @@ static void ngx_http_websocket_handler(ngx_event_t *rev)
     }
     
     if (rc != NGX_OK) {
-        destroy_tgg_cli(r->connection->fd);
+        // destroy_tgg_cli(fd);
         // ws_connection_pool_remove(ctx->client_id);
         // ngx_http_close_connection(c);
         // clean_client_data(cli_fd, idx);
@@ -384,6 +389,7 @@ static ngx_int_t deal_close_fram(int core_id, int fd)
 {
     // tgg_set_cli_status(core_id, fd, FD_STATUS_CLOSING);
     // TODO 后需全局健康检查的话，healthcheck
+    LOG_INFO("close connection");
     if (enqueue_data_trans(core_id, fd, "", FD_CLOSE) < 0) {// 函数内部会循环尝试发送10次
         LOG_ERROR("Send data to server Failed,[core:%d][fd:%d].",
          core_id, fd);
@@ -406,7 +412,7 @@ static ngx_int_t deal_ping_fram(int core_id, int fd, const std::string& response
 static ngx_int_t deal_pong_fram(int core_id, int fd, const std::string& response)
 {
     // 在这里可以获取主动检测结果
-    // printf("recieve pong:%s\r\n", response.c_str());
+    // LOG_DEBUG("recieve pong:%s", response.c_str());
     return 0;
 }
 static int consume_rdata(int clt_fd, const char* buf, int len, int idx, enum FD_OPT opt)
@@ -429,27 +435,33 @@ static ngx_int_t ngx_http_websocket_process_input(ngx_http_request_t *r)
     ngx_connection_t *c = r->connection;
     ngx_http_websocket_ctx_t *ctx = (ngx_http_websocket_ctx_t *)ngx_http_get_module_ctx(r, ngx_http_websocket_module);
     ws_frame_buffer_t *buffer = &ctx->frame_buffer;
+    int fd = r->connection->fd & g_fd_mask;
     
     ssize_t n;
     u_char buf[4096];
     
     // 读取数据
     n = ngx_recv(c, buf, sizeof(buf));
-    if (n == NGX_ERROR) {
-        return NGX_ERROR;
+    if(n <= 0) {
+        if (n == NGX_AGAIN) {
+            return NGX_AGAIN;
+        } else {
+            if(tgg_get_cli_idx(g_core_id, fd) >= 0) {
+                LOG_DEBUG("recv close from client.");
+                consume_rdata(fd, NULL, 0, tgg_get_cli_idx(g_core_id, fd), FD_CLOSE);
+            } else {
+                destroy_tgg_cli(fd);
+            }
+            if(n == 0 /*&& !(tgg_get_cli_status(g_core_id, fd) & FD_STATUS_CLOSING) && tgg_get_cli_idx(g_core_id, fd) != TGG_FD_CLOSING*/) {// 没发送过close给gwcliprc
+                LOG_INFO("WebSocket closed by client");
+                return NGX_DECLINED;
+            } else {
+                LOG_ERROR("WebSocket recv error ret:%d", n);
+                return NGX_ERROR;
+            }
+        }
     }
     
-    if (n == 0) {
-        ngx_log_error(NGX_LOG_INFO, c->log, 0, "WebSocket closed by client");
-    // if(!(tgg_get_cli_status(g_core_id, cli_fd) & FD_STATUS_CLOSING) && tgg_get_cli_idx(g_core_id, cli_fd) != TGG_FD_CLOSING) {// 没发送过close给gwcliprc
-        consume_rdata(r->connection->fd, NULL, 0, tgg_get_cli_idx(g_core_id, r->connection->fd), FD_CLOSE);
-    // }
-        return NGX_ERROR;
-    }
-    
-    if (n == NGX_AGAIN) {
-        return NGX_AGAIN;
-    }
     // consume_ret = consume_rdata(r->connection->fd, buf, n, tgg_get_cli_idx(g_core_id, r->connection->fd), FD_READ);
     // if (consume_ret < 0) {
     //     LOG_ERROR("consume data failed.");
@@ -458,7 +470,6 @@ static ngx_int_t ngx_http_websocket_process_input(ngx_http_request_t *r)
     // 处理数据
     u_char *pos = buf;
     size_t len = n;
-    
     while (len > 0) {
         size_t consumed = ws_frame_parse(r, buffer, pos, len);
         if (consumed == 0) {
@@ -474,21 +485,21 @@ static ngx_int_t ngx_http_websocket_process_input(ngx_http_request_t *r)
             switch (buffer->opcode) {
                 case TEXT_FRAME:
                 case BINARY_FRAME:
-                    trans_upstream_data(g_core_id, r->connection->fd, std::string((char*)buffer->payload, buffer->payload_len), FD_WRITE);
+                    trans_upstream_data(g_core_id, fd, std::string((char*)buffer->payload, buffer->payload_len), FD_WRITE);
                     break;
                 case CLOSING_FRAME:
-                    deal_close_fram(g_core_id, r->connection->fd);
+                    deal_close_fram(g_core_id, fd);
                     // return 1;
                     break;
                 case ERROR_FRAME:
                     LOG_ERROR("error frame, fd:%d.", r->connection->fd);
-                    deal_close_fram(g_core_id, r->connection->fd);
+                    deal_close_fram(g_core_id, fd);
                     break;
                 case PING_FRAME:
-                    deal_ping_fram(g_core_id, r->connection->fd, std::string((char*)buffer->payload, buffer->payload_len));
+                    deal_ping_fram(g_core_id, fd, std::string((char*)buffer->payload, buffer->payload_len));
                     break;
                 case PONG_FRAME:
-                    deal_pong_fram(g_core_id, r->connection->fd, std::string((char*)buffer->payload, buffer->payload_len));
+                    deal_pong_fram(g_core_id, fd, std::string((char*)buffer->payload, buffer->payload_len));
                     break;
                 default:
                     LOG_ERROR("unexpected frame type %d, fd:%d.", buffer->opcode, r->connection->fd);
@@ -547,10 +558,11 @@ static void tgg_connection_write_handler(ngx_event_t *ev)
     // if (n == NGX_ERROR) {
     //     return NGX_ERROR;
     // }
-    tgg_write_data* cur = tgg_get_cli_blocked_data(g_core_id, c->fd);
+    int fd = c->fd & g_fd_mask;
+    tgg_write_data* cur = tgg_get_cli_blocked_data(g_core_id, fd);
     if(cur) {
         ngx_int_t result = ngx_send(c, (u_char*)cur->data, cur->data_len);
-        if (result == NGX_OK) {
+        if (result >= NGX_OK) {
             ((tgg_write_data*)cur)->ref--;
             if(((tgg_write_data*)cur)->ref <= 0) {
                 clean_write_data(g_core_id, (tgg_write_data*)(cur));
@@ -561,42 +573,47 @@ static void tgg_connection_write_handler(ngx_event_t *ev)
             return ;
         } else {
             LOG_ERROR("Write error, core[%d] fd[%d] closed.", g_core_id, c->fd);
-            destroy_tgg_cli(c->fd);
+            destroy_tgg_cli(fd);
+        }
+        if(cur->fd_opt & FD_CLOSE) {
+            destroy_tgg_cli(fd);
         }
     }
     tgg_send_data* data = NULL;
-    int ret = 0;
-    while((data = tgg_pop_cli_snd_data(g_core_id, c->fd)) != NULL) {
+    while((data = tgg_pop_cli_snd_data(g_core_id, fd)) != NULL) {
         if(data && data->data) {
             if(((tgg_write_data*)(data->data))->data) {
-                if(ret >= 0) {
-                    if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
-                        if(((tgg_write_data*)(data->data))->data_len > 4 && !strncmp((char*)(((tgg_write_data*)(data->data))->data), "HTTP", 4)) {// GET请求消息
-                            LOG_DEBUG("fd:%d idx:%d send to clien:%s.", c->fd, ((tgg_write_data*)(data->data))->idx, (char*)(((tgg_write_data*)(data->data))->data));
-                        } else {// 其他消息
-                            LOG_DEBUG("fd:%d idx:%d send to clien:%s.", c->fd, ((tgg_write_data*)(data->data))->idx, bin2hex(std::string_view((char*)(((tgg_write_data*)(data->data))->data), ((tgg_write_data*)(data->data))->data_len)).c_str());
-                        }
+                if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
+                    if(((tgg_write_data*)(data->data))->data_len > 4 && !strncmp((char*)(((tgg_write_data*)(data->data))->data), "HTTP", 4)) {// GET请求消息
+                        LOG_DEBUG("fd:%d idx:%d send to clien:%s.", c->fd, ((tgg_write_data*)(data->data))->idx, (char*)(((tgg_write_data*)(data->data))->data));
+                    } else {// 其他消息
+                        LOG_DEBUG("fd:%d idx:%d send to clien:%s.", c->fd, ((tgg_write_data*)(data->data))->idx, bin2hex(std::string_view((char*)(((tgg_write_data*)(data->data))->data), ((tgg_write_data*)(data->data))->data_len)).c_str());
                     }
-                    ngx_int_t result = ngx_send(c, (u_char*)((tgg_write_data*)(data->data))->data, ((tgg_write_data*)(data->data))->data_len);
-                    if (result == NGX_OK) {
-                        ((tgg_write_data*)(data->data))->ref--;
-                        if(((tgg_write_data*)(data->data))->ref <= 0) {
-                            clean_write_data(g_core_id, (tgg_write_data*)(data->data));
-                        }
-                    } else if (result == NGX_AGAIN) {
-                        // TODO 设计发送次数限制，防止发不出去一直发，超过次数可以直接关闭
-                        tgg_set_cli_blocked_data(g_core_id, c->fd, data->data);
-                        tgg_free_cli_snd_data(g_core_id, data);
-                        LOG_DEBUG("Debuging Try again core[%d] fd[%d].", g_core_id, c->fd);
-                        return ;
-                    } else {
-                        destroy_tgg_cli(c->fd);
-                        LOG_ERROR("Write error, core[%d] fd[%d] closed.", g_core_id, c->fd);
-                        return ;
-                    }
+                }
+                ngx_int_t result = ngx_send(c, (u_char*)((tgg_write_data*)(data->data))->data, ((tgg_write_data*)(data->data))->data_len);
+                if (result >= NGX_OK) {
+                    LOG_DEBUG("send data success, ret:%d", result);
+                    // ((tgg_write_data*)(data->data))->ref--;
+                    // if(((tgg_write_data*)(data->data))->ref <= 0) {
+                    //     clean_write_data(g_core_id, (tgg_write_data*)(data->data));
+                    // }
+                } else if (result == NGX_AGAIN) {
+                    // TODO 设计发送次数限制，防止发不出去一直发，超过次数可以直接关闭
+                    tgg_set_cli_blocked_data(g_core_id, fd, data->data);
+                    tgg_free_cli_snd_data(g_core_id, data);
+                    LOG_DEBUG("Debuging Try again core[%d] fd[%d].", g_core_id, c->fd);
+                    return ;
+                } else {
+                    destroy_tgg_cli(fd);
+                    LOG_ERROR("Write error, core[%d] fd[%d] closed, ret:%d.", g_core_id, c->fd, result);
+                    return ;
                 }
 
                 ((tgg_write_data*)(data->data))->ref--;
+            }
+            if(((tgg_write_data*)(data->data))->fd_opt & FD_CLOSE) {
+                LOG_WARNING("Deal Close cmd.");
+                destroy_tgg_cli(fd);
             }
             if(((tgg_write_data*)(data->data))->ref <= 0) {
                 clean_write_data(g_core_id, (tgg_write_data*)(data->data));
@@ -629,11 +646,19 @@ static void tgg_do_send(tgg_write_data* wdata)
             }
 
             // 是否需要发送数据
-            if (wdata->fd_opt & FD_WRITE) {
+            if (wdata->fd_opt & (FD_WRITE | FD_CLOSE)) {
                 if(tgg_add_cli_snd_data(g_core_id, cli_fd, wdata) < 0) {
-                    ff_close(cli_fd);
+                    // ff_close(cli_fd);
                     LOG_ERROR("add cli[fd:%d, idx:%d] snd data failed, no more available unit in mempool", cli_fd, idx);
-                    tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSING);// 先设置标记，后续数据将不再入写队列
+                    // 队列满时，发送关闭消息，让bwprc先释放，再发送FD_CLOSE过来走正常结束流程
+                    consume_rdata(cli_fd, NULL, 0, tgg_get_cli_idx(g_core_id, cli_fd), FD_CLOSE);
+                    destroy_tgg_cli(cli_fd);
+                    // ngx_http_websocket_ctx_t *ctx = (ngx_http_websocket_ctx_t *)tgg_get_cli_ctx(g_core_id, cli_fd);
+                    // if(!ctx) {
+                    //     LOG_ERROR("add cli[fd:%d, idx:%d] snd data failed, ctx is null", cli_fd, idx);
+                    // }
+                    // ctx->connection->read->handler = ngx_http_websocket_handler;
+                    // ngx_add_event(ctx->connection->read, NGX_READ_EVENT, 0);
                 } else {
                     ngx_http_websocket_ctx_t *ctx = (ngx_http_websocket_ctx_t *)tgg_get_cli_ctx(g_core_id, cli_fd);
                     if(!ctx) {
@@ -644,11 +669,19 @@ static void tgg_do_send(tgg_write_data* wdata)
                 }
             }
 
-            if ( wdata->fd_opt & FD_CLOSE) {
-                LOG_INFO("Closing Connection[%d].", cli_fd);
-                ff_close(cli_fd);
-                tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSING);// 先设置标记，后续数据将不再入写队列
-             }
+            // if ( wdata->fd_opt & FD_CLOSE) {
+            //     LOG_INFO("Closing Connection[%d].", cli_fd);
+            //     // FD_CLOSE 时说明bwprc已经清理完，咱们这边只要清理并关闭fd即可
+            //     destroy_tgg_cli(cli_fd);
+            //     // tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSED);// 先设置标记，后续数据将不再入写队列
+            //     // tgg_del_idx(g_core_id, idx);
+            //     // ngx_http_websocket_ctx_t *ctx = (ngx_http_websocket_ctx_t *)tgg_get_cli_ctx(g_core_id, cli_fd);
+            //     // if(!ctx) {
+            //     //     LOG_ERROR("add cli[fd:%d, idx:%d] snd data failed, ctx is null", cli_fd, idx);
+            //     // }
+            //     // ctx->connection->read->handler = ngx_http_websocket_handler;
+            //     // ngx_add_event(ctx->connection->read, NGX_READ_EVENT, 0);
+            //  }
         } else {
             // 连接标记已设置为关闭，队列中的数据直接丢弃
             LOG_DEBUG("write to client data droped, cause connection[fd:%d] not published[idx:%d].", cli_fd, idx);
@@ -685,14 +718,15 @@ static void ngx_write_queue_timer(ngx_event_t *ev)
     // 批量从全局队列中取出数据
     unsigned int available = 0;
     processed = tgg_batch_dequeue_write(g_core_id, batch_data, BATCH_SIZE, &available);
-    
     if (processed == 0) {
         // 队列为空，延长检查间隔
         ngx_msec_t next_timeout = (available > 0) ? 1 : 10; // 根据队列状态动态调整
         ev->timer.key = ngx_current_msec + next_timeout;
         ngx_add_timer(ev, next_timeout);
         return;
-    }
+    }/* else {
+        LOG_DEBUG("dequeue count : %d, available %d", processed, available);
+    }*/
     
     // int success_count = 0;
     // int error_count = 0;
@@ -701,7 +735,6 @@ static void ngx_write_queue_timer(ngx_event_t *ev)
     for (int i = 0; i < processed; i++) {
         tgg_write_data *wdata = batch_data[i];
         if (!wdata) continue;
-                
         // 添加到连接的发送队列
         tgg_do_send(wdata);
     }
@@ -756,14 +789,15 @@ static ngx_http_module_t ngx_http_websocket_module_ctx = {
 
 static void tgg_recv_clean_prev()
 {
-    for (int i = 0; i < g_fd_limit; ++i)
+    for (int i = 0; i < (int)g_fd_limit; ++i)
     {// 防止secondary进程异常重启后，上一次的缓存没有清理
         int idx = tgg_get_cli_idx(g_core_id, i);
         if( idx > 0 && tgg_check_idx_exist(g_core_id, idx)) {
             // 通知gwbwprc 清理这个链接对应的缓存
             LOG_ERROR("clean prev data coreid[%d] fd[%d] idx[%d].", g_core_id, i, idx);
             consume_rdata(i, NULL, 0, idx, FD_CLOSE);
-            clean_client_data(i, idx);
+            tgg_del_idx(g_core_id, idx);
+            clean_client_data(i);
         }
     }
     tgg_iter_del_idx(g_core_id);
@@ -792,12 +826,12 @@ static ngx_int_t ngx_http_websocket_init_module()
 {
     init_core(s_dump_file);
     if (tgg_init_config(ngx_argc, ngx_argv) < 0) {
-        printf("init config error.\n");
+        LOG_ERROR("init config error.");
         return -1;
     }
     if (AsyncLogger::getInstance().init(TggConfigure::getInstance()->get_log_path(), 
         TggConfigure::getInstance()->get_gateway_log_level()) < 0) {
-        printf("init log error.\n");
+        LOG_ERROR("init log error.");
         return -1;
     }
 
