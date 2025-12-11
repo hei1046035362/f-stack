@@ -23,6 +23,10 @@ if [ -z "$PID" ]; then
     exit 2
 fi
 
+if [ "'$PROGRAM_NAME'" = "'nginx'" ];then
+    PID=$(ps --ppid $(cat /usr/local/nginx_fstack/logs/nginx.pid 2>/dev/null || pgrep -f "nginx: master") -o pid= | head -1)
+fi
+
 # 1. 使用perf记录性能数据[1,3,7](@ref)
 echo "步骤1/4: 使用perf采集性能数据..."
 sudo perf record -o ${PROGRAM_NAME}_perf.data -F 99 -p $PID -g -- sleep $SAMPLING_TIME
