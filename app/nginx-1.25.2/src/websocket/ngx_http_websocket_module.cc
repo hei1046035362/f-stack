@@ -212,31 +212,36 @@ ngx_http_websocket_upgrade(ngx_http_request_t *r)
     u_char accept_key[29];
     ngx_table_elt_t *h;
     int fd = r->connection->fd & g_fd_mask;
-    LOG_INFO("new websocket fd[%d]", fd);
+    LOG_INFO("accept http request, fd[%d]", fd);
     // 必须是 GET
     if (!(r->method & NGX_HTTP_GET)) {
+        LOG_WARNING("Only GET method allowed.");
         return NGX_HTTP_NOT_ALLOWED;
     }
     // 健康检查
-    if(r->uri.len >= 12 && !ngx_strncasecmp(r->uri.data, (u_char*)"/healthcheck", 12)) {
-        r->headers_out.status = NGX_HTTP_NO_CONTENT;
-        r->header_only = 1;
-        r->keepalive = 0;
-        r->lingering_close = 1;
-        rc = ngx_http_send_header(r);
-        if (rc == NGX_ERROR || rc > NGX_OK) {
-            return rc;
-        }
-        return NGX_DONE;
-    }
+    // if(r->uri.len >= 12 && !ngx_strncasecmp(r->uri.data, (u_char*)"/healthcheck", 12)) {
+    //     r->headers_out.status = NGX_HTTP_NO_CONTENT;
+    //     r->header_only = 1;
+    //     r->keepalive = 0;
+    //     r->lingering_close = 1;
+    //     rc = ngx_http_send_header(r);
+    //     if (rc == NGX_ERROR || rc > NGX_OK) {
+    //         LOG_WARNING("healthcheck failed, send header failed.");
+    //         return rc;
+    //     }
+    //     LOG_DEBUG("healthcheck success.");
+    //     return NGX_DONE;
+    // }
 
     upgrade = find_header(r, "Upgrade", 7);
     if (upgrade == NULL || (ngx_strlen(upgrade->value.data) != 9) || ngx_strncasecmp(upgrade->value.data, (u_char*)"websocket", 9) != 0) {
+        LOG_WARNING("Check Upgrade failed.");
         return NGX_DECLINED;
     }
 
     sec_key = find_header(r, "Sec-WebSocket-Key", 17);
     if (sec_key == NULL || sec_key->value.len != 24) {  // Base64 encoded 16-byte nonce
+        LOG_WARNING("Check Sec-WebSocket-Key failed.");
         return NGX_HTTP_BAD_REQUEST;
     }
 
@@ -278,6 +283,7 @@ ngx_http_websocket_upgrade(ngx_http_request_t *r)
     // === 发送 header ===
     rc = ngx_http_send_header(r);
     if (rc == NGX_ERROR || rc > NGX_OK) {
+        LOG_WARNING("ws send header failed.");
         return rc;
     }
 
@@ -340,7 +346,22 @@ failed:
     destroy_tgg_cli(fd);
     return NGX_HTTP_INTERNAL_SERVER_ERROR;
 }
-
+static void send_frame(int fd, const char* data, int data_len)
+{
+    ngx_http_websocket_ctx_t* ctx = (ngx_http_websocket_ctx_t*)tgg_get_cli_ctx(g_core_id, fd);
+    if(ctx && ctx->connection) {
+        ngx_int_t result = NGX_AGAIN, try_times = 10;
+        while (result == NGX_AGAIN && try_times-- > 0) {
+            result = ngx_send(ctx->connection, (u_char*)data, data_len);
+        }
+        if (result < NGX_OK) {
+            // TODO 设计发送次数限制，防止发不出去一直发，超过次数可以直接关闭
+            LOG_ERROR("send frame failed coreid[%d] fd[%d].", g_core_id, fd);
+        }
+    } else {
+        LOG_ERROR("send frame failed ctx[%p] connection[%p] coreid[%d] fd[%d].", ctx, ctx->connection, g_core_id, fd);
+    }
+}
 // WebSocket 事件处理
 static void ngx_http_websocket_handler(ngx_event_t *rev)
 {
@@ -387,6 +408,8 @@ static ngx_int_t trans_upstream_data(int core_id, int fd, std::string_view data,
 
 static ngx_int_t deal_close_fram(int core_id, int fd)
 {
+    std::string result = Websocket::EncodeCloseFrame("");
+    send_frame(fd, result.data(), result.length());
     // tgg_set_cli_status(core_id, fd, FD_STATUS_CLOSING);
     // TODO 后需全局健康检查的话，healthcheck
     LOG_INFO("close connection");
@@ -401,11 +424,12 @@ static ngx_int_t deal_close_fram(int core_id, int fd)
 static ngx_int_t deal_ping_fram(int core_id, int fd, const std::string& response)
 {
     std::string result = Websocket::EncodeWebsocketMessage(PONG_FRAME, response);
-    if (enqueue_data_trans(core_id, fd, result, FD_WRITE) < 0) {// 函数内部会循环尝试发送10次
-        LOG_ERROR("Send data to server Failed,[core:%d][fd:%d].",
-         core_id, fd);
-        return -1;
-    }
+    send_frame(fd, result.data(), result.length());
+    // if (enqueue_data_trans(core_id, fd, result, FD_WRITE) < 0) {// 函数内部会循环尝试发送10次
+    //     LOG_ERROR("Send data to server Failed,[core:%d][fd:%d].",
+    //      core_id, fd);
+    //     return -1;
+    // }
     return 0;
 }
 
@@ -415,20 +439,20 @@ static ngx_int_t deal_pong_fram(int core_id, int fd, const std::string& response
     // LOG_DEBUG("recieve pong:%s", response.c_str());
     return 0;
 }
-static int consume_rdata(int clt_fd, const char* buf, int len, int idx, enum FD_OPT opt)
-{
-    // g_tgg_stats.en_read_stats.malloc_st++;
-    tgg_read_data rdata = {};
-    rdata.fd = clt_fd;
-    rdata.coreid = g_core_id;
-    rdata.idx = idx;
-    rdata.fd_opt = opt;
-    rdata.data_len = len;
-    rdata.data = (void*)buf;
-    WsConsumer cons;
-    int ret = cons.ConsumerData(&rdata);
-    return ret;
-}
+// static int consume_rdata(int clt_fd, const char* buf, int len, int idx, enum FD_OPT opt)
+// {
+//     // g_tgg_stats.en_read_stats.malloc_st++;
+//     tgg_read_data rdata = {};
+//     rdata.fd = clt_fd;
+//     rdata.coreid = g_core_id;
+//     rdata.idx = idx;
+//     rdata.fd_opt = opt;
+//     rdata.data_len = len;
+//     rdata.data = (void*)buf;
+//     WsConsumer cons;
+//     int ret = cons.ConsumerData(&rdata);
+//     return ret;
+// }
 // 处理输入数据（关键修复：添加实现）
 static ngx_int_t ngx_http_websocket_process_input(ngx_http_request_t *r)
 {
@@ -448,7 +472,7 @@ static ngx_int_t ngx_http_websocket_process_input(ngx_http_request_t *r)
         } else {
             if(tgg_get_cli_idx(g_core_id, fd) >= 0) {
                 LOG_DEBUG("recv close from client.");
-                consume_rdata(fd, NULL, 0, tgg_get_cli_idx(g_core_id, fd), FD_CLOSE);
+                trans_upstream_data(g_core_id, fd, "", FD_CLOSE);
             } else {
                 destroy_tgg_cli(fd);
             }
@@ -651,7 +675,7 @@ static void tgg_do_send(tgg_write_data* wdata)
                     // ff_close(cli_fd);
                     LOG_ERROR("add cli[fd:%d, idx:%d] snd data failed, no more available unit in mempool", cli_fd, idx);
                     // 队列满时，发送关闭消息，让bwprc先释放，再发送FD_CLOSE过来走正常结束流程
-                    consume_rdata(cli_fd, NULL, 0, tgg_get_cli_idx(g_core_id, cli_fd), FD_CLOSE);
+                    trans_upstream_data(g_core_id, cli_fd, "", FD_CLOSE);
                     destroy_tgg_cli(cli_fd);
                     // ngx_http_websocket_ctx_t *ctx = (ngx_http_websocket_ctx_t *)tgg_get_cli_ctx(g_core_id, cli_fd);
                     // if(!ctx) {
@@ -720,7 +744,7 @@ static void ngx_write_queue_timer(ngx_event_t *ev)
     processed = tgg_batch_dequeue_write(g_core_id, batch_data, BATCH_SIZE, &available);
     if (processed == 0) {
         // 队列为空，延长检查间隔
-        ngx_msec_t next_timeout = (available > 0) ? 1 : 10; // 根据队列状态动态调整
+        ngx_msec_t next_timeout = (available > 0) ? 1 : 2; // 根据队列状态动态调整
         ev->timer.key = ngx_current_msec + next_timeout;
         ngx_add_timer(ev, next_timeout);
         return;
@@ -795,7 +819,7 @@ static void tgg_recv_clean_prev()
         if( idx > 0 && tgg_check_idx_exist(g_core_id, idx)) {
             // 通知gwbwprc 清理这个链接对应的缓存
             LOG_ERROR("clean prev data coreid[%d] fd[%d] idx[%d].", g_core_id, i, idx);
-            consume_rdata(i, NULL, 0, idx, FD_CLOSE);
+            trans_upstream_data(g_core_id, i, "", FD_CLOSE);
             tgg_del_idx(g_core_id, idx);
             clean_client_data(i);
         }

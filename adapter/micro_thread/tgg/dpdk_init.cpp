@@ -539,7 +539,7 @@ void tgg_master_init()
 	g_mempool_bwrcv_data = make_mempool(s_pool_bwrcv_data_name, s_bwrcv_data_mempool_size, COMMON_PACKET_LEN);
 	g_mempool_large_data = make_mempool(s_pool_large_data_name, s_large_data_mempool_size, MAX_PACKET_LEN);
 	g_mempool_clifdlist_data = make_mempool(s_pool_clifdlist_data_name, s_clifdlist_mempool_size, sizeof(tgg_fd_id_list));
-	g_mempool_ws_buffer = make_mempool(s_pool_ws_buffer_name, s_ws_buffer_mempool_size, BUFFER_PACKET_LEN);
+	g_mempool_ws_buffer = NULL;//make_mempool(s_pool_ws_buffer_name, s_ws_buffer_mempool_size, BUFFER_PACKET_LEN);
 	LOG_INFO("Init dpdk master for tgg done.");
 }
 
