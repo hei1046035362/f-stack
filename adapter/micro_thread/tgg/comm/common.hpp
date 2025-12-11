@@ -28,18 +28,30 @@ int count_ones(unsigned int n);
 int wait_all_child_exit();
 
 #include <map>
-struct HttpRequest {
-    std::string method;
-    std::string uri;
-    std::string protocol;
-    std::string host;
-    std::string content_type;
-    std::vector<std::pair<std::string, std::string>> headers; // 改用vector减少红黑树开销
-    std::vector<std::pair<std::string, std::string>> query;
-    std::vector<std::pair<std::string, std::string>> cookies;
+#include "picohttpparser.h"
+struct http_str_t {
+    const char* data;
+    size_t len;
 };
-void parse_http_request(const char* data, size_t len, HttpRequest& req, bool parse_cookies = true);
-
+struct http_request_t {
+    http_str_t method;
+    http_str_t uri;
+    int minor_version;
+    http_str_t host;
+    http_str_t content_type;
+    // http_str_t path;
+    struct phr_header headers[50]; // 改用vector减少红黑树开销
+    size_t num_headers;
+    struct phr_header query_params[50];
+    size_t num_query_params;
+    struct phr_header cookies[20];
+    size_t num_cookies;
+    int error;
+};
+int parse_http_request(const char* data, size_t len,
+                           http_request_t* req, int parse_cookies_flag = 0);
+int parse_cookies(const char* str, size_t len,
+                        struct phr_header* cookies, int max);
 bool ensure_path_exists(const std::string& path, bool writelog = true);
 
 #endif // __COMMON_HPP__
