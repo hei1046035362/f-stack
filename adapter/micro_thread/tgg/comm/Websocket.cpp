@@ -17,104 +17,116 @@
 #include <version>
 static const size_t WS_MAX_RECV_FRAME_SZ = 10485760;
 
-// 判断字符串是否以子串开头，忽略大小写
-#ifdef __cpp_lib_starts_ends_with  // C++20 feature test macro
-bool strview_starts_with_insensitive(std::string_view str, std::string_view prefix) {
-    if (prefix.size() > str.size()) return false;
-    return std::equal(str.begin(), str.begin() + prefix.size(), prefix.begin(), prefix.end(),
-        [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); });
-}
-#define STRVIEW_STARTS_WITH(str, prefix) strview_starts_with_insensitive(str, prefix)
-#else
-bool strview_starts_with(std::string_view str, std::string_view prefix) {
-    if (prefix.size() > str.size()) return false;
-    return std::equal(str.begin(), str.begin() + prefix.size(), prefix.begin(), prefix.end(),
-        [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); });
-}
-#define STRVIEW_STARTS_WITH(str, prefix) strview_starts_with(str, prefix)
-#endif
+#include "picohttpparser.h"
 
-ValidationResult parse_websocket_request(std::string_view raw_request) {
-    ValidationResult result;
-    if (raw_request.empty()) return result;
+// WebSocket 握手解析结果
 
-    // 1. Parse request line
-    const size_t line_end = raw_request.find("\r\n");
-    if (line_end == std::string_view::npos) return result;
-    std::string_view request_line = raw_request.substr(0, line_end);
-
-    // 2. Extract query parameters
-    size_t query_start = request_line.find('?');
-    if (query_start == std::string_view::npos) return result;
-    query_start++; // Move past '?'
+// 解析 WebSocket 握手请求
+int parse_websocket_handshake(const char* data, size_t len,
+                             ws_handshake_t* handshake) {
+    memset(handshake, 0, sizeof(*handshake));
     
-    constexpr std::array<std::string_view, 2> targets = {"token=", "client_properties="};
-    std::array<size_t, 2> targets_len = {targets[0].size(), targets[1].size()};
-    bool found_token = false, found_client_properties = false;
-
-    for (size_t pos = query_start; pos < request_line.size(); ) {
-        size_t param_end = request_line.find_first_of("& ", pos);
-        if (param_end == std::string_view::npos) param_end = request_line.size();
-        std::string_view param = request_line.substr(pos, param_end - pos);
-
-        if (STRVIEW_STARTS_WITH(param, targets[0])) {
-            result.token = param.substr(targets_len[0]);
-            found_token = true;
-        } else if (STRVIEW_STARTS_WITH(param, targets[1])) {
-            result.client_properties = param.substr(targets_len[1]);
-            found_client_properties = true;
-        }
-
-        if (found_token && found_client_properties) break;
-        pos = param_end + (param_end < request_line.size() ? 1 : 0);
+    // 解析 HTTP 请求
+    const char *method, *path;
+    size_t method_len, path_len;
+    int minor_version;
+    struct phr_header headers[20];
+    size_t num_headers = 20;
+    
+    int ret = phr_parse_request(data, len,
+                               &method, &method_len,
+                               &path, &path_len,
+                               &minor_version,
+                               headers, &num_headers, 0);
+    
+    if (ret <= 0) {
+        LOG_ERROR("parse request failed,data:%s, len:%d, num_headers:%d.", data, len, num_headers);
+        return 0;
     }
-
-    // 3. Validate headers
-    constexpr std::array<std::string_view, 3> required_headers = {
-        "upgrade: websocket",
-        "connection: upgrade",
-        "sec-websocket-version: 13"
-    };
-    std::array<bool, required_headers.size()> found_headers = {false};
-
-    size_t pos = line_end + 2; // Skip request line and \r\n
-    while (pos < raw_request.size()) {
-        size_t next_line = raw_request.find("\r\n", pos);
-        if (next_line == std::string_view::npos) break;
-        std::string_view line = raw_request.substr(pos, next_line - pos);
-        pos = next_line + 2;
-
-        if (line.empty()) break; // End of headers
-
-        // Check required headers
-        for (size_t i = 0; i < required_headers.size(); ++i) {
-            if (!found_headers[i] && STRVIEW_STARTS_WITH(line, required_headers[i])) {
-                found_headers[i] = true;
+    
+    // 检查是否是 GET 请求
+    if (method_len != 3 || strncmp(method, "GET", 3) != 0) {
+        LOG_ERROR("parse request failed,invalid method:%s.", method);
+        return 0;
+    }
+    
+    int has_upgrade = 0;
+    int has_connection = 0;
+    
+    // 检查头部
+    for (size_t i = 0; i < num_headers; i++) {
+        struct phr_header* h = &headers[i];
+        
+        // Upgrade: websocket
+        if (strncasecmp("upgrade", h->name, h->name_len) == 0 &&
+            strncasecmp("websocket", h->value, h->value_len) == 0) {
+            has_upgrade = 1;
+        }
+        
+        // Connection: Upgrade
+        else if (strncasecmp("connection", h->name, h->name_len) == 0) {
+            const char* val = h->value;
+            size_t val_len = h->value_len;
+            
+            // 检查是否包含 "Upgrade"（不区分大小写）
+            for (size_t j = 0; j + 7 <= val_len; j++) {
+                if (strncasecmp(val + j, "upgrade", 7) == 0) {
+                    has_connection = 1;
+                    break;
+                }
             }
         }
-
-        // Extract Sec-WebSocket-Key and Origin
-        if (STRVIEW_STARTS_WITH(line, "sec-websocket-key: ")) {
-            result.sec_websocket_key = line.substr(19);
-            // LOG_INFO("sec_key:%s", result.sec_websocket_key.data());
-        } else if (STRVIEW_STARTS_WITH(line, "origin: ")) {
-            result.origin = line.substr(8);
+        
+        // Sec-WebSocket-Key
+        else if (strncasecmp("sec-websocket-key", h->name, h->name_len) == 0) {
+            handshake->ws_key = h->value;
+            handshake->ws_key_len = h->value_len;
+        }
+        
+        // Sec-WebSocket-Version
+        else if (strncasecmp("sec-websocket-version", h->name, h->name_len) == 0) {
+            handshake->ws_version = h->value;
+            handshake->ws_version_len = h->value_len;
+        }
+        
+        // Host
+        else if (strncasecmp("host", h->name, h->name_len) == 0) {
+            handshake->host = h->value;
+            handshake->host_len = h->value_len;
+        }
+        
+        // Origin
+        else if (strncasecmp("origin", h->name, h->name_len) == 0) {
+            handshake->origin = h->value;
+            handshake->origin_len = h->value_len;
+        }
+        
+        // Cookie
+        else if (strncasecmp("cookie", h->name, h->name_len) == 0) {
+            handshake->num_cookies = parse_cookies(h->value, h->value_len,
+                                                  handshake->cookies, 10);
         }
     }
-
-    // 4. Validate result
-    result.valid = std::all_of(found_headers.begin(), found_headers.end(), [](bool v) { return v; });
-    return result;
+    
+    // 验证握手条件
+    if (has_upgrade && has_connection && 
+        handshake->ws_key && handshake->ws_key_len > 0 &&
+        handshake->ws_version && handshake->ws_version_len > 0) {
+        handshake->is_valid_handshake = 1;
+        return 1;
+    }
+    
+    return 0;
 }
 
 static constexpr std::string_view WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 // 生成websocket连接的唯一键
-std::string Websocket::_GenerateAcceptKey(std::string_view key)
+std::string Websocket::_GenerateAcceptKey(const char* key, size_t len)
 {
     // 预分配拼接内存 (key + GUID)
     thread_local std::string concat_key;
-    concat_key.reserve(key.size() + WS_GUID.size());
-    concat_key.assign(key);
+    concat_key.reserve(len + WS_GUID.size());
+    concat_key.assign(key, len);
     concat_key.append(WS_GUID);
 
     // 计算SHA1 (复用内存)
@@ -142,15 +154,15 @@ std::string Websocket::_GenerateAcceptKey(std::string_view key)
     return base64_result;
 }
 
-int Websocket::_HandleHandshake(std::string_view request, ValidationResult& req, std::string& response)
+int Websocket::_HandleHandshake(std::string_view request, ws_handshake_t& req, std::string& response)
 {
     if((request.size() < 5) || (request.substr(0, 5) != "GET /")) {
         LOG_DEBUG("Invalid http request, fd:%d", this->fd);
         response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid request method or path";
         return -1;
     }
-    req = parse_websocket_request(request);
-    if (!req.valid) {
+    int ret = parse_websocket_handshake(request.data(), request.length(), &req);
+    if (!ret) {
         if(!_ElbHealthCheck(request, response)) {
             return -1;
         }
@@ -158,7 +170,7 @@ int Websocket::_HandleHandshake(std::string_view request, ValidationResult& req,
         response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid WebSocket handshake headers";
         return -1;
     }
-    std::string accept_key = _GenerateAcceptKey(req.sec_websocket_key);
+    std::string accept_key = _GenerateAcceptKey(req.ws_key, req.ws_key_len);
 
     // 构建握手响应
     response.clear();
@@ -434,7 +446,7 @@ int Websocket::ReadData(void* data, int len)
                     return -1;
                 }
             }
-            ValidationResult req;
+            ws_handshake_t req;
             std::string_view request((char*)input, in_len);
             std::string response;
             if (_HandleHandshake(request, req, response) < 0) {

@@ -173,16 +173,16 @@ void WsConsumer::OnConnect()
 }
 
 // 检查请求是否符合tgg的要求，不符合直接断开连接
-static bool tgg_request_valid_check(const ValidationResult &req)
+static bool tgg_request_valid_check(const ws_handshake_t &req)
 {
     // 检查必需的头字段
-    if (req.token.empty() ||
-        req.client_properties.empty()) {
-        LOG_ERROR("token[%s] or properties[%s] can be empty.", 
-            std::string(req.token.data(), req.token.size()).c_str(), 
-            std::string(req.client_properties.data(), req.client_properties.size()).c_str());
-        return false;
-    }
+    // if (req.token.empty() ||
+    //     req.client_properties.empty()) {
+    //     LOG_ERROR("token[%s] or properties[%s] can be empty.", 
+    //         std::string(req.token.data(), req.token.size()).c_str(), 
+    //         std::string(req.client_properties.data(), req.client_properties.size()).c_str());
+    //     return false;
+    // }
     // token 是否能解析出来
     // Encrypt encryptor = GetEncryptor();
     // token = encryptor.Aes128Decrypt(ittoken->second);
@@ -216,7 +216,7 @@ bool WsConsumer::_CheckToken(const std::string& token)
 }
 
 // 握手
-void WsConsumer::OnHandShake(std::string_view request, const std::string& response, struct ValidationResult& req)
+void WsConsumer::OnHandShake(std::string_view request, const std::string& response, struct ws_handshake_t& req)
 {
     if(!tgg_request_valid_check(req)) {
         LOG_ERROR("tgg ws request[%s] check failed.", request.data());

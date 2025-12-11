@@ -20,13 +20,26 @@ enum WebSocketFrameType {
     PONG_FRAME = 0xA
 };
 
-struct ValidationResult {
-    bool valid = false;
-    std::string_view token;
-    std::string_view client_properties;
-    std::string_view sec_websocket_key;
-    std::string_view origin;
-};
+#include "picohttpparser.h"
+struct ws_handshake_t {
+    int is_valid_handshake;
+    const char* ws_key;
+    size_t ws_key_len;
+    const char* ws_version;
+    size_t ws_version_len;
+    
+    // Cookie
+    struct phr_header cookies[10];
+    int num_cookies;
+    
+    // 其他常用头部
+    const char* host;
+    size_t host_len;
+    const char* origin;
+    size_t origin_len;
+} ;
+
+
 // TODO: 为了快速开发，目前websocket的缓存和握手状态都在st_cli_info中，后续需要重新封装一下
 //          方法要和数据隔离
 class Websocket
@@ -44,9 +57,9 @@ private:
     // 新的连接处理
     std::string _ClientConnect(const std::string& request);
     // 生成websocket连接的唯一键
-    std::string _GenerateAcceptKey(std::string_view key);
+    std::string _GenerateAcceptKey(const char* key, size_t len);
 
-    int _HandleHandshake(std::string_view request, ValidationResult& req, std::string& response);
+    int _HandleHandshake(std::string_view request, ws_handshake_t& req, std::string& response);
 
     int _ElbHealthCheck(std::string_view request, std::string& response);
 
@@ -63,7 +76,7 @@ protected:
 public:
     // 所有发送数据都在子类执行，这里只做websocket相关的公共操作
     virtual void OnConnect() = 0;
-    virtual void OnHandShake(std::string_view request, const std::string& response, struct ValidationResult& req) = 0;
+    virtual void OnHandShake(std::string_view request, const std::string& response, struct ws_handshake_t& req) = 0;
     virtual void OnMessage(const std::string& msg) = 0;
     virtual void OnClose() = 0;// 子类继承后要执行clean_buffer清理缓存
     virtual void OnPing(const std::string& response) {};

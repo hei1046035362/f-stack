@@ -22,7 +22,7 @@ protected:
     virtual void OnConnect();
 
     // 握手
-    virtual void OnHandShake(std::string_view request, const std::string& response, struct ValidationResult& req);
+    virtual void OnHandShake(std::string_view request, const std::string& response, struct ws_handshake_t& req);
 
     virtual void OnPing(const std::string& response);
 
@@ -58,6 +58,8 @@ private:
     int _idx;
     void* data;
 };
+
+int enqueue_data_trans(int core_id, int fd, std::string_view data, int fdopt);
 
 
 #endif // __WS_CONSUMER_H__

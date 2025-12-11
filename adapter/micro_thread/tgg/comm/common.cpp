@@ -177,117 +177,157 @@ int wait_all_child_exit()
     return 0;
 }
 
-
-// 1. URL解码优化：预分配内存+避免子串复制
-inline void url_decode_inplace(std::string& src) {
-    size_t src_idx = 0, dst_idx = 0;
-    for (; src_idx < src.size(); ++src_idx) {
-        if (src[src_idx] == '%' && src_idx + 2 < src.size()) {
-            char c1 = std::tolower(src[src_idx + 1]);
-            char c2 = std::tolower(src[src_idx + 2]);
-            uint8_t val = (c1 >= 'a' ? c1 - 'a' + 10 : c1 - '0') * 16 +
-                          (c2 >= 'a' ? c2 - 'a' + 10 : c2 - '0');
-            src[dst_idx++] = static_cast<char>(val);
-            src_idx += 2;
-        } else if (src[src_idx] == '+') {
-            src[dst_idx++] = ' ';
+// 解析查询字符串
+static int parse_query_string(const char* q, size_t qlen, 
+                             struct phr_header* params, int max) {
+    int cnt = 0;
+    const char* end = q + qlen;
+    const char* p = q;
+    
+    while (p < end && cnt < max) {
+        if (*p == '&') { p++; continue; }
+        
+        const char* kstart = p;
+        while (p < end && *p != '=' && *p != '&') p++;
+        size_t klen = p - kstart;
+        
+        const char* vstart = NULL;
+        size_t vlen = 0;
+        
+        if (p < end && *p == '=') {
+            p++;
+            vstart = p;
+            while (p < end && *p != '&') p++;
+            vlen = p - vstart;
         } else {
-            if (dst_idx != src_idx) src[dst_idx] = src[src_idx];
-            dst_idx++;
+            vstart = p;
+            vlen = 0;
         }
+        
+        if (klen > 0) {
+            params[cnt].name = kstart;
+            params[cnt].name_len = klen;
+            params[cnt].value = vstart;
+            params[cnt].value_len = vlen;
+            cnt++;
+        }
+        
+        if (p < end && *p == '&') p++;
     }
-    src.resize(dst_idx);
+    
+    return cnt;
 }
 
-// 2. 高效解析HTTP请求
-void parse_http_request(const char* data, size_t len, HttpRequest& req, bool parse_cookies) {
-    const char* end = data + len;
-    const char* ptr = data;
-
-    // 解析请求行（避免字符串流）
-    while (ptr < end && *ptr != ' ') req.method += *ptr++;
-    while (ptr < end && *ptr == ' ') ptr++; // 跳过空格
-    while (ptr < end && *ptr != ' ') req.uri += *ptr++;
-    while (ptr < end && *ptr == ' ') ptr++;
-    while (ptr < end && *ptr != '\r') req.protocol += *ptr++;
-    if (!req.protocol.empty() && req.protocol.size() > 5) {
-        req.protocol.erase(0, 5); // 原地移除"HTTP/"
-    }
-
-    // 解析头部（零拷贝+预分配）
-    ptr += 2; // 跳过"\r\n"
-    req.headers.reserve(20); // 预分配典型头部数量
-    while (ptr < end - 2) {
-        const char* colon = std::find(ptr, end, ':');
-        if (colon == end) break;
-
-        std::string key(ptr, colon);
-        std::transform(key.begin(), key.end(), key.begin(), 
-                       [](char c) { return std::tolower(c); });
-
-        const char* val_start = colon + 1;
-        while (val_start < end && (*val_start == ' ' || *val_start == '\t')) val_start++;
-        const char* val_end = std::find(val_start, end, '\r');
-        std::string value(val_start, val_end);
-        if(key == "host") {
-            req.host = value;
+// 解析 Cookie
+int parse_cookies(const char* str, size_t len,
+                        struct phr_header* cookies, int max) {
+    int cnt = 0;
+    const char* end = str + len;
+    const char* p = str;
+    char* nstart;
+    char* vstart;
+    size_t nlen;
+    
+    while (p < end && cnt < max) {
+        while (p < end && (*p == ' ' || *p == '\t')) p++;
+        if (p >= end) break;
+        
+        nstart = (char*)p;
+        
+        while (p < end && *p != '=') {
+            if (*p == ';') {
+                cookies[cnt].name = nstart;
+                cookies[cnt].name_len = p - nstart;
+                cookies[cnt].value = p;
+                cookies[cnt].value_len = 0;
+                cnt++;
+                p++;
+                goto next;
+            }
+            p++;
         }
-        else if(key == "content-type") {
-            req.content_type = value;
-        }
-        req.headers.emplace_back(key, value);
-        ptr = val_end + 2; // 跳过"\r\n"
-        if (ptr < end && *ptr == '\r') break; // 空行检测
+        
+        if (p >= end) break;
+        
+        nlen = p - nstart;
+        p++;
+        
+        vstart = (char*)p;
+        while (p < end && *p != ';') p++;
+        
+        cookies[cnt].name = nstart;
+        cookies[cnt].name_len = nlen;
+        cookies[cnt].value = vstart;
+        cookies[cnt].value_len = p - vstart;
+        cnt++;
+        
+        if (p < end && *p == ';') p++;
+        
+    next:
+        continue;
     }
-
-    // 3. 查询参数解析（批量解码+避免流）
-    size_t query_start = 0;
-    while (query_start < req.uri.size() && req.uri[query_start] != '?') query_start++;
-    if (query_start++ < req.uri.size()) {
-        const char* query_str = req.uri.data() + query_start;
-        size_t query_len = req.uri.size() - query_start;
-        std::string query_buf(query_str, query_len);
-        url_decode_inplace(query_buf); // 批量解码整段查询字符串
-
-        const char* qptr = query_buf.data();
-        const char* qend = qptr + query_buf.size();
-        while (qptr < qend) {
-            const char* amp = std::find(qptr, qend, '&');
-            const char* eq = std::find(qptr, amp, '=');
-            std::string key(qptr, eq);
-            std::string val(eq + 1, amp);
-            req.query.emplace_back(std::move(key), std::move(val));
-            qptr = amp + (amp != qend);
+    
+    return cnt;
+}
+static inline int is_space(char c) {
+    return c == ' ' || c == '\t';
+}
+int parse_http_request(const char* data, size_t len,
+                           http_request_t* req, int parse_cookies_flag) {
+    memset(req, 0, sizeof(*req));
+    req->num_headers = 50;
+    
+    // 解析 HTTP 请求
+    int ret = phr_parse_request(data, len,
+                               &req->method.data, &req->method.len,
+                               &req->uri.data, &req->uri.len,
+                               &req->minor_version,
+                               req->headers, &req->num_headers, 0);
+    
+    if (ret <= 0) {
+        LOG_ERROR("parse request failed,data:%s, len:%d, num_headers:%d.", data, len, req->num_headers);
+        req->error = ret;
+        return 0;
+    }
+    for (size_t i = 0; i < req->num_headers; i++) {
+        if(req->headers[i].name_len == 4 && 
+            0 == strncasecmp(req->headers[i].name, "host", req->headers[i].name_len)) {
+            req->host.data = req->headers[i].value;
+            req->host.len = req->headers[i].value_len;
         }
     }
-
-    // 4. Cookie解析（按需触发）
-    if (parse_cookies) {
-        for (const auto& [k, v] : req.headers) {
-            if (k == "cookie") {
-                std::string cookie_buf = v;
-                url_decode_inplace(cookie_buf); // 批量解码
-
-                const char* cptr = cookie_buf.data();
-                const char* cend = cptr + cookie_buf.size();
-                while (cptr < cend) {
-                    while (cptr < cend && std::isspace(*cptr)) cptr++;
-                    const char* semi = std::find(cptr, cend, ';');
-                    const char* eq = std::find(cptr, semi, '=');
-                    if (eq != semi) {
-                        req.cookies.emplace_back(
-                            std::string(cptr, eq),
-                            std::string(eq + 1, semi)
-                        );
-                    }
-                    cptr = semi + (semi != cend);
-                }
+    // 解析查询参数
+    for (size_t i = 0; i < req->uri.len; i++) {
+        if (req->uri.data[i] == '?') {
+            const char* qstr = req->uri.data + i + 1;
+            size_t qlen = req->uri.len - (i + 1);
+            req->num_query_params = parse_query_string(qstr, qlen,
+                                                      req->query_params, 50);
+            break;
+        }
+    }
+    
+    // 解析 Cookie
+    if (parse_cookies_flag) {
+        for (size_t i = 0; i < req->num_headers; i++) {
+            if (strncasecmp("cookie", req->headers[i].name, 
+                           req->headers[i].name_len) == 0) {
+                req->num_cookies = parse_cookies(req->headers[i].value,
+                                                req->headers[i].value_len,
+                                                req->cookies, 20);
                 break;
             }
         }
     }
+    
+    // 记录请求体位置
+    // if ((size_t)ret < len) {
+    //     req->body = data + ret;
+    //     req->body_len = len - ret;
+    // }
+    
+    return 1;
 }
-
 
 bool ensure_path_exists(const std::string& path, bool writelog)
 {

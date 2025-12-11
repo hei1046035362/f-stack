@@ -182,7 +182,7 @@ static const char HTTP_PREFIX[] = "HTTP_";
 static const char UNKNOWN_HOST[] = "unknown";
 
 // 封装发送给bw的握手请求数据
-static std::string build_server_data(const HttpRequest &req, unsigned int ip, 
+static std::string build_server_data(const http_request_t &req, unsigned int ip, 
                              ushort port) {
     tl_buffer.Clear();  // 复用线程局部缓冲区
     tl_writer.Reset(tl_buffer);
@@ -196,13 +196,15 @@ static std::string build_server_data(const HttpRequest &req, unsigned int ip,
     
     // 基础字段（零拷贝引用）
     tl_writer.Key("REQUEST_METHOD");
-    tl_writer.String(req.method.c_str(), req.method.size());
+    tl_writer.String(req.method.data, req.method.len);
     
     tl_writer.Key("REQUEST_URI");
-    tl_writer.String(req.uri.c_str(), req.uri.size());
+    tl_writer.String(req.uri.data, req.uri.len);
     
     tl_writer.Key("SERVER_PROTOCOL");
-    tl_writer.String(("HTTP/" + req.protocol).c_str(), req.protocol.size() + 6);
+    char protocal[10];
+    sprintf(protocal, "HTTP/1.%d", req.minor_version);
+    tl_writer.String(protocal, strlen(protocal));
     
     // 网络信息（SIMD加速IP转换）
     char ip_str[INET_ADDRSTRLEN];
@@ -218,25 +220,26 @@ static std::string build_server_data(const HttpRequest &req, unsigned int ip,
     
     // 主机名（分支预测优化）
     tl_writer.Key("SERVER_NAME");
-    if(!req.host.empty()) {
-        tl_writer.String(req.host.c_str(), req.host.size());
-    } else {
+    if(req.host.len <= 0 || req.host.data[0] == ' ') {
         tl_writer.String(UNKNOWN_HOST);
+    } else {
+        tl_writer.String(req.host.data, req.host.len);
     }
     
     // ===== HEADER转换优化（SIMD加速） =====
-    for (const auto& [key, value] : req.headers) {
+    for (size_t i = 0; i < req.num_headers; i++) {
         // 原位转换：避免临时字符串
         char header_key[256];
         char* dest = header_key;
-        const char* src = key.c_str();
+        const char* src = req.headers[i].name;
+        size_t index = 0;
         
         // 1. 添加"HTTP_"前缀
         memcpy(dest, HTTP_PREFIX, sizeof(HTTP_PREFIX) -1);
         dest += sizeof(HTTP_PREFIX) -1;
         
         // 2. 大写转换+替换字符（向量化处理）
-        while (*src && dest - header_key < 250) {
+        while (*src && index++ < req.headers[i].name_len && dest - header_key < 250) {
             char c = *src++;
             // SIMD友好分支：减少跳转预测失败
             c = (c == '-') ? '_' : c & ~0x20; // 位运算转大写
@@ -245,25 +248,25 @@ static std::string build_server_data(const HttpRequest &req, unsigned int ip,
         *dest = '\0';
         
         tl_writer.Key(header_key);
-        tl_writer.String(value.c_str(), value.size());
+        tl_writer.String(req.headers[i].value, req.headers[i].value_len);
     }
     tl_writer.EndObject(); // server结束
     
     // ===== QUERY参数优化（批量处理） =====
     tl_writer.Key("get");
     tl_writer.StartObject();
-    for (const auto& [key, value] : req.query) {
-        tl_writer.Key(key.c_str(), key.size());
-        tl_writer.String(value.c_str(), value.size());
+    for (size_t i = 0; i < req.num_query_params; i++) {
+        tl_writer.Key(req.query_params[i].name, req.query_params[i].name_len);
+        tl_writer.String(req.query_params[i].value, req.query_params[i].value_len);
     }
     tl_writer.EndObject();
     
     // ===== COOKIE优化（预过滤） =====
     tl_writer.Key("cookie");
     tl_writer.StartObject();
-    for (const auto& [key, value] : req.cookies) {
-        tl_writer.Key(key.c_str(), key.size());
-        tl_writer.String(value.c_str(), value.size());
+    for (size_t i = 0; i < req.num_cookies; i++) {
+        tl_writer.Key(req.cookies[i].name, req.cookies[i].name_len);
+        tl_writer.String(req.cookies[i].value, req.cookies[i].value_len);
     }
     tl_writer.EndObject();
     
@@ -343,8 +346,10 @@ static int write_data()
         std::string sdata;
         if(bdata->data_len > 0) {
             if(bdata->fd_opt & FD_NEW) {
-                struct HttpRequest req;
-                parse_http_request((char*)bdata->data, bdata->data_len, req);
+                struct http_request_t req;
+                if(!parse_http_request((char*)bdata->data, bdata->data_len, &req)) {
+                    LOG_ERROR("parse http request failed:%s.", (char*)bdata->data);
+                }
                 sdata = build_server_data(req, bdata->peer_ip, bdata->peer_port);
                 header.pack_len = (unsigned int)sizeof(tgg_bw_protocal) + sdata.length();
             } else {
