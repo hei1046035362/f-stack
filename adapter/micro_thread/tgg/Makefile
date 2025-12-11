@@ -77,27 +77,27 @@ clean:
 MASTER_OBJ = dpdk_init.o master.o tgg_comm/tgg_common.o tgg_comm/tgg_bwcomm.o tgg_comm/tgg_bw_cache.o comm/log.o\
 			comm/Websocket.o comm/Encrypt.o tgg_comm/WsConsumer.o tgg_comm/tgg_transport.o\
 			tgg_comm/tgg_lock.o comm/RWIni.o tgg_comm/tgg_conf.o comm/common.o tgg_comm/tgg_data_opt.o \
-			tgg_comm/tgg_master_timers.o tgg_comm/tgg_ip_filter.o
+			tgg_comm/tgg_master_timers.o tgg_comm/tgg_ip_filter.o comm/picohttpparser.o
 
 
 CLIPRC_OBJ = cliprc.o dpdk_init.o tgg_comm/tgg_bw_cache.o comm/log.o\
 				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
 				tgg_comm/tgg_lock.o comm/Websocket.o comm/Encrypt.o \
 				tgg_comm/WsConsumer.o tgg_comm/tgg_conf.o comm/common.o \
-				comm/RWIni.o tgg_comm/tgg_cliprc.o tgg_comm/tgg_transport.o
+				comm/RWIni.o tgg_comm/tgg_cliprc.o tgg_comm/tgg_transport.o comm/picohttpparser.o
 
 
 BWSERVER_OBJ = bwprc.o dpdk_init.o cmd/CmdProcessor.o tgg_comm/tgg_bw_cache.o comm/log.o\
 				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
 				tgg_comm/tgg_lock.o comm/Encrypt.o cmd/TggCmdProcessor.o \
 				comm/Serialize.o tgg_comm/tgg_conf.o tgg_comm/tgg_bwserver.o \
-				comm/RWIni.o tgg_comm/tgg_transport.o comm/common.o comm/Websocket.o
+				comm/RWIni.o tgg_comm/tgg_transport.o comm/common.o comm/Websocket.o comm/picohttpparser.o
 
 REGISTER_OBJ = register.o dpdk_init.o tgg_comm/tgg_bw_cache.o comm/log.o\
 				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
 				tgg_comm/tgg_lock.o \
 				tgg_comm/tgg_conf.o tgg_comm/tgg_register.o \
-				comm/RWIni.o comm/common.o
+				comm/RWIni.o comm/common.o comm/picohttpparser.o
 
 # 日志是否写入文件，如果要输出到控制台，屏蔽下面这一行
 C_ARGS += -DLOG_TO_FILE
