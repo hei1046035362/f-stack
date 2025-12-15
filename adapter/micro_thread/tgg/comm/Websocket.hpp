@@ -57,7 +57,8 @@ private:
     // 新的连接处理
     std::string _ClientConnect(const std::string& request);
     // 生成websocket连接的唯一键
-    std::string _GenerateAcceptKey(const char* key, size_t len);
+    int _GenerateAcceptKey(const char* client_key, size_t key_len,
+                                            char* accept_key, size_t& accept_key_capacity);
 
     int _HandleHandshake(std::string_view request, ws_handshake_t& req, std::string& response);
 
