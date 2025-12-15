@@ -101,11 +101,11 @@ int parse_websocket_handshake(const char* data, size_t len,
             handshake->origin_len = h->value_len;
         }
         
-        // Cookie
-        else if (strncasecmp("cookie", h->name, h->name_len) == 0) {
-            handshake->num_cookies = parse_cookies(h->value, h->value_len,
-                                                  handshake->cookies, 10);
-        }
+        // Cookie 解析后移到bwprc
+        // else if (strncasecmp("cookie", h->name, h->name_len) == 0) {
+        //     handshake->num_cookies = parse_cookies(h->value, h->value_len,
+        //                                           handshake->cookies, 10);
+        // }
     }
     
     // 验证握手条件
@@ -119,48 +119,59 @@ int parse_websocket_handshake(const char* data, size_t len,
     return 0;
 }
 
-static constexpr std::string_view WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-// 生成websocket连接的唯一键
-std::string Websocket::_GenerateAcceptKey(const char* key, size_t len)
-{
-    // 预分配拼接内存 (key + GUID)
-    thread_local std::string concat_key;
-    concat_key.reserve(len + WS_GUID.size());
-    concat_key.assign(key, len);
-    concat_key.append(WS_GUID);
+static const char WS_GUID[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+static const size_t WS_GUID_LEN = 36;  // 不包括结尾的\0
+__thread unsigned char tl_sha1_buffer[SHA_DIGEST_LENGTH];
+#define TL_BASE64_BUFFER_LEN 29
+__thread char tl_base64_buffer[TL_BASE64_BUFFER_LEN];  // 20字节SHA1的Base64编码长度是28字节+1结束符
 
-    // 计算SHA1 (复用内存)
-    thread_local std::string sha1_result;
-    sha1_result.resize(SHA_DIGEST_LENGTH);
-    SHA1(reinterpret_cast<const unsigned char*>(concat_key.data()), 
-         concat_key.size(),
-         reinterpret_cast<unsigned char*>(sha1_result.data()));
-
-    // Base64编码 (预计算长度)
-    const size_t encoded_len = (4 * ((SHA_DIGEST_LENGTH + 2) / 3));
-    thread_local std::string base64_result;
-    base64_result.resize(encoded_len);
-    
-    const int actual_len = EVP_EncodeBlock(
-        reinterpret_cast<unsigned char*>(base64_result.data()),
-        reinterpret_cast<const unsigned char*>(sha1_result.data()),
-        SHA_DIGEST_LENGTH
-    );
-
-    // 移除尾部填充的NUL字符
-    if (actual_len > 0 && static_cast<size_t>(actual_len) < base64_result.size()) {
-        base64_result.resize(actual_len);
+int Websocket::_GenerateAcceptKey(const char* client_key, size_t key_len,
+                                            char* accept_key, size_t& accept_key_capacity) {
+    if (!client_key || key_len == 0 || !accept_key || accept_key_capacity < TL_BASE64_BUFFER_LEN) {
+        return -1;
     }
-    return base64_result;
+    
+    // 1. 使用EVP接口，避免拼接内存分配
+    EVP_MD_CTX* mdctx = EVP_MD_CTX_new();
+    if (!mdctx) return -2;
+    
+    if (EVP_DigestInit_ex(mdctx, EVP_sha1(), NULL) != 1) {
+        EVP_MD_CTX_free(mdctx);
+        return -3;
+    }
+    
+    // 更新数据
+    if (EVP_DigestUpdate(mdctx, client_key, key_len) != 1 ||
+        EVP_DigestUpdate(mdctx, WS_GUID, WS_GUID_LEN) != 1) {
+        EVP_MD_CTX_free(mdctx);
+        return -4;
+    }
+    
+    unsigned int sha1_len = 0;
+    if (EVP_DigestFinal_ex(mdctx, tl_sha1_buffer, &sha1_len) != 1) {
+        EVP_MD_CTX_free(mdctx);
+        return -5;
+    }
+    
+    EVP_MD_CTX_free(mdctx);
+    
+    // 2. Base64编码
+    int encoded_len = EVP_EncodeBlock((unsigned char*)accept_key, 
+                                      tl_sha1_buffer, SHA_DIGEST_LENGTH);
+    
+    if (encoded_len != TL_BASE64_BUFFER_LEN-1) {  // SHA1(20字节)的Base64编码应该是28字节
+        return -6;
+    }
+    
+    // 复制结果到输出缓冲区
+    // memcpy(accept_key, tl_base64_buffer, TL_BASE64_BUFFER_LEN-1);
+    // accept_key[TL_BASE64_BUFFER_LEN-1] = '\0';
+    
+    return 0;
 }
 
 int Websocket::_HandleHandshake(std::string_view request, ws_handshake_t& req, std::string& response)
 {
-    if((request.size() < 5) || (request.substr(0, 5) != "GET /")) {
-        LOG_DEBUG("Invalid http request, fd:%d", this->fd);
-        response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid request method or path";
-        return -1;
-    }
     int ret = parse_websocket_handshake(request.data(), request.length(), &req);
     if (!ret) {
         if(!_ElbHealthCheck(request, response)) {
@@ -170,11 +181,18 @@ int Websocket::_HandleHandshake(std::string_view request, ws_handshake_t& req, s
         response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid WebSocket handshake headers";
         return -1;
     }
-    std::string accept_key = _GenerateAcceptKey(req.ws_key, req.ws_key_len);
+    char accept_key[TL_BASE64_BUFFER_LEN] = {0};
+    size_t accept_key_len = TL_BASE64_BUFFER_LEN;
+    ret = _GenerateAcceptKey(req.ws_key, req.ws_key_len, accept_key, accept_key_len);
+    if(ret < 0) {
+        LOG_ERROR("generate accept_key failed, ret:%d", ret);
+        response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid WebSocket handshake headers";
+        return -1;
+    }
 
     // 构建握手响应
     response.clear();
-    size_t RESPONSE_SIZE = 256 + accept_key.size(); // 实测响应平均长度
+    size_t RESPONSE_SIZE = 285; // 实测响应平均长度 256 + 29
     response.reserve(RESPONSE_SIZE);
 
     // 使用单个内存块构建响应（避免多次内存分配）
@@ -182,7 +200,7 @@ int Websocket::_HandleHandshake(std::string_view request, ws_handshake_t& req, s
                    "Upgrade: websocket\r\n"
                    "Connection: Upgrade\r\n"
                    "Sec-WebSocket-Accept: ");
-    response.append(accept_key);
+    response.append(accept_key, accept_key_len-1);
     response.append("\r\nServer: tgg_gateway/1.0.0\r\n\r\n");
     return 0;
 }
