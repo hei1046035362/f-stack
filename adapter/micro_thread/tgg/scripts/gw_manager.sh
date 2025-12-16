@@ -3,8 +3,8 @@
 # 作者：Shell助手（2025-07-17）
 
 # ========== 配置区 ==========
-PROCESS_NAME="gwrcv"                 # 主进程名（用于过滤）
-START_CMD="/data/code/tgg_gateway/adapter/micro_thread/tgg/gwrcv --proc-id=0"  # 启动命令
+PROCESS_NAME="gwrcv_reactor"                 # 主进程名（用于过滤）
+START_CMD="/data/code/tgg_gateway/adapter/micro_thread/tgg/gwrcv_reactor --proc-id=0"  # 启动命令
 PID_FILE="/tmp/gwrcv_master.pid"     # 主进程PID存储文件
 LOG_FILE="/var/log/gwrcv_manager.log" # 操作日志
 GRACEFUL_TIMEOUT=5                    # 优雅终止等待时间（秒）
@@ -44,12 +44,12 @@ start_process() {
 
 # 停止进程（分阶段终止）
 stop_process() {
-    # 获取所有 gwrcv 进程的 PID 并排序
-    pids=$(pidof gwrcv | tr ' ' '\n' | sort -n)
+    # 获取所有 gwrcv_reactor 进程的 PID 并排序
+    pids=$(pidof gwrcv_reactor | tr ' ' '\n' | sort -n)
     
     # 检查是否找到进程
     if [ -z "$pids" ]; then
-        echo "未找到 gwrcv 进程，直接启动新进程"
+        echo "未找到 gwrcv_reactor 进程，直接启动新进程"
         return 1
     fi
     
