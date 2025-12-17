@@ -509,7 +509,8 @@ int Websocket::ReadData(void* data, int len)
                 // return 0;
                 break;
             case CLOSING_FRAME:
-                OnClose();
+                // OnClose();
+                SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
                 return 1;
                 break;
             case ERROR_FRAME:

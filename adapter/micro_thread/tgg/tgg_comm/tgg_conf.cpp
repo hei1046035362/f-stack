@@ -146,6 +146,15 @@ int TggConfigure::init(const char* fstack_conf, const char* tgg_conf)
         return -1;
     }
 
+    // 网关fd 超时时长 默认60s
+    ret = get_int_value(&pTgg_Ini, "gateway", "timeout");
+    this->timeout = ret;
+    if(ret <= 0 || this->timeout > 600) {// 最大不能超过10min
+        RTE_LOG(ERR, USER1, "[%s][%d] invalid gateway timeout:[%d].\n", __FILE__, __LINE__, this->timeout);
+        this->timeout = 60;// 默认最大超时时长60s
+        // return -1;
+    }
+
     // ccore_mask  cli的线程绑定那几个core
     core_mask = pTgg_Ini.getValue("gateway", "ccore_mask");
     int ccore_mask = parse_lcore_mask(core_mask);

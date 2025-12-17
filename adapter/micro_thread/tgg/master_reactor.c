@@ -205,6 +205,18 @@ static void do_real_send(int fd, event_type_t events, void *arg)
                         reactor_modify_event(fd, EVENT_READ);
                         return;
                     }
+                    if ( ((tgg_write_data*)(data->data))->fd_opt & FD_CLOSE) {
+                        LOG_INFO("Closing Connection[%d].", fd);
+                        tgg_set_cli_idx(g_core_id, fd, TGG_FD_CLOSING);// 先设置标记，防止队列没人消费，影响其他连接
+                        // if(wdata->fd_opt & FD_WRITE) {
+                        //  // 这里不能sleep，我们只有一个发送的协程，一旦sleep会影响其他fd的写入
+                        //  // mt_sleep(1000);// ws的关闭帧发送完以后等待客户端先关闭，如果1s后没有关闭，我们要主动结束
+                        //                  // 到了这里后面的数据其实都应该要丢弃了，所以后续数据已经不重要了
+                        // }
+                        // mt_close(cli_fd);// TODO:待优化，在这里结束可能会报错，四次挥手不完整：epoll schedule failed, errno: 62
+                                         // 但正常结束流程里close，需要等待30s，不可配置，freebsd内部控制
+                    }
+
                 }
 
                 ((tgg_write_data*)(data->data))->ref--;
@@ -222,7 +234,9 @@ static void do_real_send(int fd, event_type_t events, void *arg)
         free_client_context(ctx);
         return;
     }
-    reactor_modify_event(fd, EVENT_READ);
+    if(tgg_get_cli_idx(g_core_id, fd) >= 0) {
+        reactor_modify_event(fd, EVENT_READ);
+    }
     // return ret;
 }
 
@@ -288,6 +302,9 @@ recv_failed:
         (tgg_get_cli_idx(g_core_id, fd) != TGG_FD_CLOSING)) {// ws握手完成
         consume_rdata(fd, NULL, 0, idx, FD_CLOSE);// 通知bwprc 清理这个客户端相关信息
     }
+    if((tgg_get_cli_idx(g_core_id, fd) == TGG_FD_CLOSED)) {
+        return;
+    }
     clean_client_data(fd, idx);
     reactor_remove_event(fd);
     free_client_context(ctx);
@@ -344,7 +361,8 @@ static void on_client_connect(void *arg)
         return;
     }
 
-    if (reactor_add_event(cli_info->cli_fd, EVENT_READ, tgg_recv, do_real_send, client_ctx) < 0) {
+    if (reactor_add_event(cli_info->cli_fd, EVENT_READ, tgg_recv, do_real_send, 
+        client_ctx, TggConfigure::getInstance()->get_gateway_fd_timeout()) < 0) {
         LOG_ERROR("add read event for client[%d] failed.", cli_info->cli_fd);
         ff_close(cli_info->cli_fd);
         tgg_close_cli(g_core_id, cli_info->cli_fd);
@@ -358,13 +376,13 @@ static void tgg_do_send(tgg_write_data* wdata)
     while (fd_id_list) {
         int cli_fd = fd_id_list->fdid;// 数据传递时fdid存的是fd
         int idx = tgg_get_cli_idx(g_core_id, cli_fd);
-        // if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
-        //     if(wdata->data_len > 4 && !strncmp((char*)wdata->data, "HTTP", 4)) {// GET请求消息
-        //         LOG_DEBUG("fd:%d idx:%d send to clien:%s.", cli_fd, idx, (char*)wdata->data);
-        //     } else {// 其他消息
-        //         LOG_DEBUG("fd:%d idx:%d send to clien:%s.", cli_fd, idx, bin2hex(std::string_view((char*)wdata->data, wdata->data_len)).c_str());
-        //     }
-        // }
+        if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
+            if(wdata->data_len > 4 && !strncmp((char*)wdata->data, "HTTP", 4)) {// GET请求消息
+                LOG_DEBUG("fd:%d idx:%d send to clien:%s.", cli_fd, idx, (char*)wdata->data);
+            } else {// 其他消息
+                LOG_DEBUG("fd:%d idx:%d send to clien:%s.", cli_fd, idx, bin2hex(std::string_view((char*)wdata->data, wdata->data_len)).c_str());
+            }
+        }
         // 只有未关闭的连接才需要走以下逻辑，已经关闭的连接，不再发送数据
         if(idx > 0) {
             // 新的连接旧的数据就不要发送了，直接清理空间
@@ -398,17 +416,6 @@ static void tgg_do_send(tgg_write_data* wdata)
                 // }
             }
 
-            if ( wdata->fd_opt & FD_CLOSE) {
-                LOG_INFO("Closing Connection[%d].", cli_fd);
-                tgg_set_cli_idx(g_core_id, cli_fd, TGG_FD_CLOSING);// 先设置标记，防止队列没人消费，影响其他连接
-                // if(wdata->fd_opt & FD_WRITE) {
-                //  // 这里不能sleep，我们只有一个发送的协程，一旦sleep会影响其他fd的写入
-                //  // mt_sleep(1000);// ws的关闭帧发送完以后等待客户端先关闭，如果1s后没有关闭，我们要主动结束
-                //                  // 到了这里后面的数据其实都应该要丢弃了，所以后续数据已经不重要了
-                // }
-                // mt_close(cli_fd);// TODO:待优化，在这里结束可能会报错，四次挥手不完整：epoll schedule failed, errno: 62
-                                 // 但正常结束流程里close，需要等待30s，不可配置，freebsd内部控制
-            }
             reactor_modify_event(cli_fd, EVENT_WRITE);
         } else {
             // 连接标记已设置为关闭，队列中的数据直接丢弃
@@ -605,7 +612,7 @@ int main(int argc, char *argv[])
     }
     // 启动定时器
     init_timer();
-    reactor_create(MAX_CLIENTS);
+    reactor_create(MAX_CLIENTS, TggConfigure::getInstance()->get_gateway_fd_timeout());
     // 主循环
     tgg_gw_master();
     reactor_stop();
