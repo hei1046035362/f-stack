@@ -1,5 +1,5 @@
 ngx_addon_name=ngx_http_websocket_module
-CFLAGS="$CFLAGS -mssse3 -msse4.2 "
+CFLAGS="$CFLAGS -mssse3 -msse4.2 -DLOG_TO_FILE "
 CORE_LIBS="$CORE_LIBS -lstdc++ -lssl -lcrypto"
 CORE_INCS="$CORE_INCS $FF_PATH/adapter/micro_thread/tgg/tgg_comm/ $FF_PATH/adapter/micro_thread/tgg $FF_PATH/app/rapidjson/include"
 HTTP_MODULES="$HTTP_MODULES ngx_http_websocket_module"
