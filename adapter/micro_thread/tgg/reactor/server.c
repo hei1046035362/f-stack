@@ -94,7 +94,7 @@ void accept_callback(int fd, event_type_t events, void *arg) {
     
     // 添加到reactor监控读事件
     if (reactor_add_event(server->reactor, client_fd, EVENT_READ, 
-                         client_read_callback, client_ctx) < 0) {
+                         client_read_callback, client_ctx, 25) < 0) {
         ff_uthread_release(client_ctx->uthread);
         free_client_context(client_ctx);
     }
@@ -230,7 +230,7 @@ int server_start(server_t *server) {
     
     // 添加监听socket到reactor
     if (reactor_add_event(server->reactor, server->listen_fd, EVENT_READ, 
-                         accept_callback, server) < 0) {
+                         accept_callback, server, 25) < 0) {
         printf("Add listen event failed\n");
         ff_close(server->listen_fd);
         return -1;

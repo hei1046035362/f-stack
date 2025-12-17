@@ -159,7 +159,6 @@ void WsConsumer::OnClose()
     // TODO 后需全局健康检查的话，healthcheck
     if(handshake == AUTH_TYPE_HANDLESHAKED/* || healthcheck*/) {// 只有握手成功或者健康检查的包，才发送关闭命令
         _Send2Server("", FD_CLOSE);
-        SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     } else {// 握手失败时，要设置fd的状态,且数据不应继续向后传递
         tgg_set_cli_idx(core_id, fd, TGG_FD_CLOSING);
     }
@@ -277,10 +276,7 @@ void WsConsumer::OnSend(const std::string& msg, int fd_opt)
         return;
     }
     int ret = ff_write(this->fd, msg.c_str(), msg.size());
-    if (ret == -4) {
-        // 主动断开连接
-        LOG_INFO("closing connection affected.");
-    } else if (ret < 0) {
+    if (ret <= 0) {
         LOG_ERROR("send data to client fd[%d] idx[%d] error, ret[%d]", this->fd, _idx, ret);
     }
     LOG_DEBUG("OnSend to client fd[%d] idx[%d]: %s", this->fd, _idx, bin2hex(msg).c_str());

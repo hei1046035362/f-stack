@@ -23,6 +23,7 @@ private:
     int gwwrite_co_count;          // gwrcv写协程的个数
     int lcore_mask;         // 收包进程绑定的核
     int ccore_mask;         // cli处理进程绑定的核
+    int timeout;            // 连接超时
     std::vector<int>    lcore_pos;/// 收包进程绑定的核的位置
     std::vector<int>    ccore_pos;/// cli处理进程每个core在掩码中的位置，创建线程池及绑核使用
     std::string addr;        // 网关对外ip  客户端
@@ -60,6 +61,7 @@ public:
     const std::vector<int>& get_ccore_pos() {return ccore_pos;}
     const std::string& get_gateway_addr() {return addr;}
     unsigned short get_gateway_port() {return port;}
+    int get_gateway_fd_timeout() {return timeout;}
     const std::vector<std::string>& get_redis_addrs() {return redis_addrs;}
     const std::string& get_redis_pwd() {return redis_pwd;}
     unsigned int get_bwsvr_count() {return bwsvr_count;}
