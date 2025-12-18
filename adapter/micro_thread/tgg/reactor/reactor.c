@@ -5,6 +5,7 @@
 #include "comm/log.hpp"
 #include <errno.h>
 #include <sys/fcntl.h>
+#include <sys/timerfd.h>
 
 // typedef struct reactors_s {
 //     reactor_event_t *events;
@@ -17,15 +18,28 @@
 
 reactor_t g_reactor;
 
-// 内部函数声明
-static int timeout_heap_init(timeout_heap_t* heap, int capacity);
-static void timeout_heap_free(timeout_heap_t* heap);
-static int timeout_heap_push(timeout_heap_t* heap, int fd, time_t expire_time);
-static int timeout_heap_pop(timeout_heap_t* heap);
-static int timeout_heap_remove(timeout_heap_t* heap, int fd);
-static int timeout_heap_update(timeout_heap_t* heap, int fd, time_t expire_time);
-static void timeout_heap_shift_up(timeout_heap_t* heap, int idx);
-static void timeout_heap_shift_down(timeout_heap_t* heap, int idx);
+static inline uint64_t get_current_ms() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+// 定时器回调函数
+static void on_timer_expired(int fd, void* arg) {
+    reactor_t* reactor = (reactor_t*)arg;
+    
+    if (fd < 0 || fd >= reactor->max_events || !reactor->events[fd].active) {
+        return;
+    }
+    
+    LOG_WARNING("连接超时: fd=%d, 超时时间=%dms", fd, reactor->timeout_ms);
+    
+    // 调用用户回调
+    if (reactor->events[fd].rcallback) {
+        reactor->events[fd].rcallback(fd, EVENT_ERROR, reactor->events[fd].arg);
+    }
+    
+    reactor->stats.timer_expires++;
+}
 
 // 重载位操作运算符
 inline event_type_t operator|(event_type_t lhs, event_type_t rhs) {
@@ -37,182 +51,6 @@ inline event_type_t& operator|=(event_type_t& lhs, event_type_t rhs) {
     return lhs;
 }
 
-// 超时堆初始化
-static int timeout_heap_init(timeout_heap_t* heap, int capacity) {
-    heap->nodes = (timeout_node_t*)calloc(capacity, sizeof(timeout_node_t));
-    if (!heap->nodes) {
-        LOG_ERROR("Failed to allocate timeout heap");
-        return -1;
-    }
-    
-    heap->capacity = capacity;
-    heap->size = 0;
-    
-    // 初始化所有节点的 heap_idx 为 -1
-    for (int i = 0; i < capacity; i++) {
-        heap->nodes[i].heap_idx = -1;
-    }
-    
-    return 0;
-}
-
-// 释放超时堆
-static void timeout_heap_free(timeout_heap_t* heap) {
-    if (heap->nodes) {
-        free(heap->nodes);
-        heap->nodes = NULL;
-    }
-    heap->capacity = 0;
-    heap->size = 0;
-}
-
-// 堆上浮调整
-static void timeout_heap_shift_up(timeout_heap_t* heap, int idx) {
-    while (idx > 0) {
-        int parent = (idx - 1) / 2;
-        if (heap->nodes[parent].expire_time <= heap->nodes[idx].expire_time) {
-            break;
-        }
-        
-        // 交换节点
-        timeout_node_t temp = heap->nodes[parent];
-        heap->nodes[parent] = heap->nodes[idx];
-        heap->nodes[idx] = temp;
-        
-        // 更新索引
-        heap->nodes[parent].heap_idx = parent;
-        heap->nodes[idx].heap_idx = idx;
-        
-        idx = parent;
-    }
-}
-
-// 堆下沉调整
-static void timeout_heap_shift_down(timeout_heap_t* heap, int idx) {
-    int size = heap->size;
-    timeout_node_t* nodes = heap->nodes;
-    
-    while (idx * 2 + 1 < size) {
-        int left = idx * 2 + 1;
-        int right = left + 1;
-        int smallest = idx;
-        
-        if (left < size && nodes[left].expire_time < nodes[smallest].expire_time) {
-            smallest = left;
-        }
-        
-        if (right < size && nodes[right].expire_time < nodes[smallest].expire_time) {
-            smallest = right;
-        }
-        
-        if (smallest == idx) {
-            break;
-        }
-        
-        // 交换节点
-        timeout_node_t temp = nodes[smallest];
-        nodes[smallest] = nodes[idx];
-        nodes[idx] = temp;
-        
-        // 更新索引
-        nodes[smallest].heap_idx = smallest;
-        nodes[idx].heap_idx = idx;
-        
-        idx = smallest;
-    }
-}
-
-// 添加节点到堆
-static int timeout_heap_push(timeout_heap_t* heap, int fd, time_t expire_time) {
-    if (heap->size >= heap->capacity) {
-        LOG_ERROR("Timeout heap is full, capacity: %d", heap->capacity);
-        return -1;
-    }
-    
-    int idx = heap->size;
-    heap->nodes[idx].fd = fd;
-    heap->nodes[idx].expire_time = expire_time;
-    heap->nodes[idx].heap_idx = idx;
-    heap->size++;
-    
-    timeout_heap_shift_up(heap, idx);
-    return 0;
-}
-
-// 删除堆顶节点
-static int timeout_heap_pop(timeout_heap_t* heap) {
-    if (heap->size <= 0) {
-        return -1;
-    }
-    
-    int fd = heap->nodes[0].fd;
-    heap->nodes[0].heap_idx = -1;
-    
-    heap->size--;
-    if (heap->size > 0) {
-        heap->nodes[0] = heap->nodes[heap->size];
-        heap->nodes[0].heap_idx = 0;
-        timeout_heap_shift_down(heap, 0);
-    }
-    
-    return fd;
-}
-
-// 删除指定fd的节点
-static int timeout_heap_remove(timeout_heap_t* heap, int fd) {
-    if (fd < 0 || fd >= heap->capacity) {
-        return -1;
-    }
-    
-    // 查找fd在堆中的位置
-    for (int i = 0; i < heap->size; i++) {
-        if (heap->nodes[i].fd == fd) {
-            int idx = i;
-            heap->nodes[idx].heap_idx = -1;
-            
-            heap->size--;
-            if (heap->size > 0 && idx < heap->size) {
-                heap->nodes[idx] = heap->nodes[heap->size];
-                heap->nodes[idx].heap_idx = idx;
-                
-                // 需要上浮或下沉调整
-                if (idx > 0 && heap->nodes[idx].expire_time < heap->nodes[(idx-1)/2].expire_time) {
-                    timeout_heap_shift_up(heap, idx);
-                } else {
-                    timeout_heap_shift_down(heap, idx);
-                }
-            }
-            return 0;
-        }
-    }
-    
-    return -1;  // 未找到
-}
-
-// 更新节点的超时时间
-static int timeout_heap_update(timeout_heap_t* heap, int fd, time_t expire_time) {
-    if (fd < 0 || fd >= heap->capacity) {
-        return -1;
-    }
-    
-    // 查找fd在堆中的位置
-    for (int i = 0; i < heap->size; i++) {
-        if (heap->nodes[i].fd == fd) {
-            time_t old_expire = heap->nodes[i].expire_time;
-            heap->nodes[i].expire_time = expire_time;
-            
-            if (expire_time < old_expire) {
-                timeout_heap_shift_up(heap, i);
-            } else {
-                timeout_heap_shift_down(heap, i);
-            }
-            return 0;
-        }
-    }
-    
-    // 如果未找到，则添加新节点
-    return timeout_heap_push(heap, fd, expire_time);
-}
 
 int reactor_create(int max_events, int timeout) {
     // 调整线程数
@@ -227,6 +65,9 @@ int reactor_create(int max_events, int timeout) {
     // if (!g_reactor.reactors) {
     //     return 0;
     // }
+    int timer_fd = -1;
+    struct itimerspec timer_spec = {0};
+    struct epoll_event ev;
     g_reactor.events = (reactor_event_t *)calloc(max_events, sizeof(reactor_event_t));
     if (!g_reactor.events) {
         LOG_ERROR("Failed to allocate events array");
@@ -240,16 +81,48 @@ int reactor_create(int max_events, int timeout) {
             LOG_ERROR("Failed to create epoll instance");
             goto create_reactor_failed;
         }
-    // 初始化超时堆
-    if (timeout_heap_init(&g_reactor.timeout_heap, max_events) < 0) {
-        LOG_ERROR("Failed to initialize timeout heap");
+    // 初始化时间轮
+    if (timer_wheel_init(&g_reactor.timer_wheel) < 0) {
+        LOG_ERROR("初始化时间轮失败");
         goto create_reactor_failed;
     }
-    
-    g_reactor.timeout_seconds = timeout;  // 默认60秒超时
+
+    g_reactor.timeout_ms = timeout * 1000;  // 默认60秒超时
         g_reactor.running = 0;
     // }
     g_reactor.max_events = max_events;
+
+    // 初始化统计
+    memset(&g_reactor.stats, 0, sizeof(g_reactor.stats));
+    
+    // 创建timerfd用于精确计时
+    timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+    if (timer_fd < 0) {
+        LOG_WARNING("创建timerfd失败，将使用epoll_wait超时");
+    } else {
+        // 设置100ms间隔
+        timer_spec.it_interval.tv_sec = 0;
+        timer_spec.it_interval.tv_nsec = 100000000;  // 100ms
+        timer_spec.it_value = timer_spec.it_interval;
+        
+        if (timerfd_settime(timer_fd, 0, &timer_spec, NULL) < 0) {
+            LOG_WARNING("设置timerfd失败");
+            close(timer_fd);
+        } else {
+            // 将timerfd添加到reactor
+            memset(&ev, 0, sizeof(ev));
+            ev.events = EPOLLIN;
+            ev.data.fd = timer_fd;
+            
+            if (ff_epoll_ctl(g_reactor.epoll_fd, EPOLL_CTL_ADD, timer_fd, &ev) >= 0) {
+                // 存储timerfd，不设置超时
+                reactor_add_event(timer_fd, EVENT_READ, NULL, NULL, NULL, 0);
+            } else {
+                close(timer_fd);
+            }
+        }
+    }
+
     // for(int i = 0; i < thread_count; i++) {
         // g_reactor.data = (int*) malloc(sizeof(int));
         // if(!g_reactor.data) {
@@ -286,7 +159,7 @@ create_reactor_failed:
             free(g_reactor.events);
             g_reactor.events = NULL;
         }
-        timeout_heap_free(&g_reactor.timeout_heap);
+        timer_wheel_free(&g_reactor.timer_wheel);
         // free(g_reactor.reactors);
         // g_reactor.reactors = NULL;
         g_reactor.running = 0;
@@ -307,6 +180,8 @@ int reactor_destroy() {
         free(g_reactor.events);
         g_reactor.events = NULL;
     }
+    // 释放时间轮中的节点
+    timer_wheel_free(&g_reactor.timer_wheel);
     // free(g_reactor.reactors);
     return 0;
 }
@@ -345,8 +220,8 @@ int reactor_add_event(int fd, event_type_t events,
                g_reactor.epoll_fd, fd, strerror(errno));
         return -1;
     }
-    
-    time_t now = time(NULL);
+
+    uint64_t now = get_current_ms();
 
     g_reactor.events[fd].fd = fd;
     g_reactor.events[fd].events = events;
@@ -356,9 +231,11 @@ int reactor_add_event(int fd, event_type_t events,
     g_reactor.events[fd].active = 1;
     g_reactor.events[fd].last_active = now;
     
-    int timeout = (timeout_seconds > 0) ? timeout_seconds : g_reactor.timeout_seconds;
-    if (timeout > 0) {
-        timeout_heap_update(&g_reactor.timeout_heap, fd, now + timeout);
+    uint64_t expire_ms = now + (timeout_seconds > 0 ? timeout_seconds * 1000 : g_reactor.timeout_ms);
+    // 添加定时器
+    if (expire_ms > now) {
+        timer_wheel_add(&g_reactor.timer_wheel, fd, expire_ms);
+        g_reactor.stats.timer_adds++;
     }
     return 0;
 }
@@ -398,11 +275,14 @@ int reactor_remove_event(int fd) {
     }
     
     if (ff_epoll_ctl(g_reactor.epoll_fd, EPOLL_CTL_DEL, fd, NULL) < 0) {
+        timer_wheel_remove(&g_reactor.timer_wheel, fd);
+        g_reactor.stats.timer_removes++;
         return -1;
     }
     
-    // 从超时堆中移除
-    timeout_heap_remove(&g_reactor.timeout_heap, fd);
+    // 从时间轮移除
+    timer_wheel_remove(&g_reactor.timer_wheel, fd);
+    g_reactor.stats.timer_removes++;
 
     g_reactor.events[fd].active = 0;
     return 0;
@@ -417,18 +297,22 @@ void reactor_run(void* data) {
     struct epoll_event events[MAX_EVENTS];
 
     // 上一次检查超时的时间
-    static time_t last_timeout_check = 0;
+    static uint64_t last_timer_check = get_current_ms();
+    // 上一次统计时间
+    // static time_t last_stat_time = 0;
     
     while (g_reactor.running) {
-        int nfds = ff_epoll_wait(g_reactor.epoll_fd, events, MAX_EVENTS, 1000);
-
-        // 每秒检查一次超时
-        time_t now = time(NULL);
-        if (now - last_timeout_check >= 1) {
-            reactor_check_timeouts();
-            last_timeout_check = now;
+        // 计算下次超时时间
+        int next_timeout = 1000;  // 默认1秒
+        
+        // 检查定时器
+        uint64_t now = get_current_ms();
+        if (now - last_timer_check >= 100) {  // 100ms检查一次
+            reactor_check_timers();
+            last_timer_check = now;
         }
 
+        int nfds = ff_epoll_wait(g_reactor.epoll_fd, events, MAX_EVENTS, next_timeout);
         if(!nfds) {
             NS_MICRO_THREAD::mt_sleep(1);
             continue;
@@ -459,6 +343,18 @@ void reactor_run(void* data) {
                 g_reactor.events[fd].rcallback(fd, revents, g_reactor.events[fd].arg);
             }
         }
+
+        static uint64_t last_stat_time = 0;
+        if (now - last_stat_time >= 10000) {
+            LOG_INFO("定时器统计: 总数=%u, 添加=%lu, 更新=%lu, 移除=%lu, 超时=%lu, 检查次数=%lu",
+                    g_reactor.timer_wheel.count,
+                    g_reactor.stats.timer_adds,
+                    g_reactor.stats.timer_updates,
+                    g_reactor.stats.timer_removes,
+                    g_reactor.stats.timer_expires,
+                    g_reactor.stats.timer_ticks);
+            last_stat_time = now;
+        }
     }
 
     if (g_reactor.epoll_fd >= 0) {
@@ -470,7 +366,7 @@ void reactor_run(void* data) {
         g_reactor.events = NULL;
     }
     // 释放超时堆
-    timeout_heap_free(&g_reactor.timeout_heap);
+    // timeout_heap_free(&g_reactor.timeout_heap);
 
 }
 
@@ -484,12 +380,14 @@ int reactor_update_activity(int fd) {
         return -1;
     }
     
-    time_t now = time(NULL);
+    uint64_t now = get_current_ms();
     g_reactor.events[fd].last_active = now;
     
-    // 更新超时堆中的超时时间
-    if (g_reactor.timeout_seconds > 0) {
-        timeout_heap_update(&g_reactor.timeout_heap, fd, now + g_reactor.timeout_seconds);
+    // 更新定时器
+    if (g_reactor.timeout_ms > 0) {
+        uint64_t expire_ms = now + g_reactor.timeout_ms;
+        timer_wheel_update(&g_reactor.timer_wheel, fd, expire_ms);
+        g_reactor.stats.timer_updates++;
     }
     
     return 0;
@@ -502,60 +400,29 @@ int reactor_set_timeout(int fd, int timeout_seconds) {
     }
     
     if (timeout_seconds <= 0) {
-        // 清除超时
-        timeout_heap_remove(&g_reactor.timeout_heap, fd);
+        timer_wheel_remove(&g_reactor.timer_wheel, fd);
+        g_reactor.stats.timer_removes++;
         return 0;
     }
     
-    time_t now = time(NULL);
+    uint64_t now = get_current_ms();
     g_reactor.events[fd].last_active = now;
     
-    return timeout_heap_update(&g_reactor.timeout_heap, fd, now + timeout_seconds);
-}
-
-// 关闭超时连接
-static void close_timeout_connection(int fd) {
-    LOG_WARNING("connect timeout:%d fd=%d.", g_reactor.timeout_seconds, fd);
-    
-    // 调用用户回调函数通知连接关闭
-    if (g_reactor.events[fd].active && g_reactor.events[fd].rcallback) {
-        g_reactor.events[fd].rcallback(fd, EVENT_ERROR, g_reactor.events[fd].arg);
+    uint64_t expire_ms = now + timeout_seconds * 1000;
+    int ret = timer_wheel_update(&g_reactor.timer_wheel, fd, expire_ms);
+    if (ret < 0) {
+        return -1;
     }
     
-    // 从reactor中移除事件 rcallback中会执行移除操作
-    // reactor_remove_event(fd);
-    
-    // 关闭文件描述符
-    // close(fd);
+    g_reactor.stats.timer_updates++;
+    return 0;
 }
 
-// 检查并处理超时连接
-void reactor_check_timeouts() {
-    time_t now = time(NULL);
+void reactor_check_timers() {
+    int processed = timer_wheel_process(&g_reactor.timer_wheel, on_timer_expired, &g_reactor);
+    g_reactor.stats.timer_ticks++;
     
-    // 检查堆顶元素是否超时
-    while (g_reactor.timeout_heap.size > 0) {
-        timeout_node_t* top = &g_reactor.timeout_heap.nodes[0];
-        
-        if (top->expire_time > now) {
-            break;  // 堆顶未超时，后面的更不会超时
-        }
-        
-        int fd = top->fd;
-        
-        // 验证连接是否仍然活跃
-        if (fd >= 0 && fd < g_reactor.max_events && g_reactor.events[fd].active) {
-            // 再次确认是否真的超时
-            if (now - g_reactor.events[fd].last_active >= g_reactor.timeout_seconds) {
-                close_timeout_connection(fd);
-            } else {
-                // 更新超时时间
-                timeout_heap_update(&g_reactor.timeout_heap, fd, 
-                                   g_reactor.events[fd].last_active + g_reactor.timeout_seconds);
-            }
-        } else {
-            // 连接已不存在，从堆中移除
-            timeout_heap_pop(&g_reactor.timeout_heap);
-        }
+    if (processed > 0) {
+        LOG_DEBUG("处理了 %d 个超时连接", processed);
     }
 }
