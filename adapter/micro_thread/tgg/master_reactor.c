@@ -205,6 +205,8 @@ static void do_real_send(int fd, event_type_t events, void *arg)
                         reactor_modify_event(fd, EVENT_READ);
                         return;
                     }
+                    // 更新活动时间
+                    reactor_update_activity(fd);
                     if ( ((tgg_write_data*)(data->data))->fd_opt & FD_CLOSE) {
                         LOG_INFO("Closing Connection[%d].", fd);
                         tgg_set_cli_idx(g_core_id, fd, TGG_FD_CLOSING);// 先设置标记，防止队列没人消费，影响其他连接
@@ -292,6 +294,9 @@ static void tgg_recv(int fd, event_type_t events, void *arg)
         // clean_client_data(fd, idx);
         goto recv_failed;
     }
+    // 更新活动时间
+    reactor_update_activity(fd);
+
     if (consume_rdata(fd, buf, n, idx, FD_READ) < 0) {
         LOG_ERROR("consume data failed.");
         goto recv_failed;
