@@ -27,15 +27,21 @@ static inline uint64_t get_current_ms() {
 static void on_timer_expired(int fd, void* arg) {
     reactor_t* reactor = (reactor_t*)arg;
     
-    if (fd < 0 || fd >= reactor->max_events || !reactor->events[fd].active) {
+    if (fd < 0 || fd >= reactor->max_events) {
         return;
     }
     
-    LOG_WARNING("连接超时: fd=%d, 超时时间=%dms", fd, reactor->timeout_ms);
+    reactor_event_t* event = &reactor->events[fd];
+    if (!event->active) {
+        // LOG_WARNING("定时器触发但连接已关闭: fd=%d", fd);
+        return;
+    }
+    
+    LOG_WARNING("time expired: fd=%d, timeout=%dms", fd, reactor->timeout_ms);
     
     // 调用用户回调
-    if (reactor->events[fd].rcallback) {
-        reactor->events[fd].rcallback(fd, EVENT_ERROR, reactor->events[fd].arg);
+    if (event->rcallback) {
+        event->rcallback(fd, EVENT_ERROR, event->arg);
     }
     
     reactor->stats.timer_expires++;
@@ -65,9 +71,9 @@ int reactor_create(int max_events, int timeout) {
     // if (!g_reactor.reactors) {
     //     return 0;
     // }
-    int timer_fd = -1;
-    struct itimerspec timer_spec = {0};
-    struct epoll_event ev;
+    // int timer_fd = -1;
+    // struct itimerspec timer_spec = {0};
+    // struct epoll_event ev;
     g_reactor.events = (reactor_event_t *)calloc(max_events, sizeof(reactor_event_t));
     if (!g_reactor.events) {
         LOG_ERROR("Failed to allocate events array");
@@ -94,34 +100,6 @@ int reactor_create(int max_events, int timeout) {
 
     // 初始化统计
     memset(&g_reactor.stats, 0, sizeof(g_reactor.stats));
-    
-    // 创建timerfd用于精确计时
-    timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
-    if (timer_fd < 0) {
-        LOG_WARNING("创建timerfd失败，将使用epoll_wait超时");
-    } else {
-        // 设置100ms间隔
-        timer_spec.it_interval.tv_sec = 0;
-        timer_spec.it_interval.tv_nsec = 100000000;  // 100ms
-        timer_spec.it_value = timer_spec.it_interval;
-        
-        if (timerfd_settime(timer_fd, 0, &timer_spec, NULL) < 0) {
-            LOG_WARNING("设置timerfd失败");
-            close(timer_fd);
-        } else {
-            // 将timerfd添加到reactor
-            memset(&ev, 0, sizeof(ev));
-            ev.events = EPOLLIN;
-            ev.data.fd = timer_fd;
-            
-            if (ff_epoll_ctl(g_reactor.epoll_fd, EPOLL_CTL_ADD, timer_fd, &ev) >= 0) {
-                // 存储timerfd，不设置超时
-                reactor_add_event(timer_fd, EVENT_READ, NULL, NULL, NULL, 0);
-            } else {
-                close(timer_fd);
-            }
-        }
-    }
 
     // for(int i = 0; i < thread_count; i++) {
         // g_reactor.data = (int*) malloc(sizeof(int));
@@ -313,7 +291,10 @@ void reactor_run(void* data) {
         }
 
         int nfds = ff_epoll_wait(g_reactor.epoll_fd, events, MAX_EVENTS, next_timeout);
-        if(!nfds) {
+        if (nfds <= 0) {
+            if (nfds < 0 && errno != EINTR) {
+                LOG_ERROR("epoll_wait ERROR(%d): %s", errno, strerror(errno));
+            }
             NS_MICRO_THREAD::mt_sleep(1);
             continue;
         }
@@ -328,13 +309,11 @@ void reactor_run(void* data) {
             event_type_t revents = static_cast<event_type_t>(0);
             if (events[i].events & EPOLLIN) {
                 revents |= EVENT_READ;
-                // 更新活动时间
-                reactor_update_activity(fd);
                 g_reactor.events[fd].rcallback(fd, revents, g_reactor.events[fd].arg);
             }
             if (events[i].events & EPOLLOUT) {
                 revents |= EVENT_WRITE;
-                reactor_update_activity(fd);
+                // reactor_update_activity(fd);
                 g_reactor.events[fd].wcallback(fd, revents, g_reactor.events[fd].arg);
             }
             if (events[i].events & (EPOLLERR | EPOLLHUP)) {
@@ -346,7 +325,7 @@ void reactor_run(void* data) {
 
         static uint64_t last_stat_time = 0;
         if (now - last_stat_time >= 10000) {
-            LOG_INFO("定时器统计: 总数=%u, 添加=%lu, 更新=%lu, 移除=%lu, 超时=%lu, 检查次数=%lu",
+            LOG_DEBUG("定时器统计: 总数=%u, 添加=%lu, 更新=%lu, 移除=%lu, 超时=%lu, 检查次数=%lu",
                     g_reactor.timer_wheel.count,
                     g_reactor.stats.timer_adds,
                     g_reactor.stats.timer_updates,
@@ -423,6 +402,6 @@ void reactor_check_timers() {
     g_reactor.stats.timer_ticks++;
     
     if (processed > 0) {
-        LOG_DEBUG("处理了 %d 个超时连接", processed);
+        LOG_DEBUG("processed %d timerout", processed);
     }
 }

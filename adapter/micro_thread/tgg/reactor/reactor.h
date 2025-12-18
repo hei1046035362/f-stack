@@ -13,9 +13,10 @@
 #include <rte_common.h>
 #include <rte_cycles.h>
 
-#define TIME_WHEEL_SIZE 512
+#define TIME_WHEEL_SIZE 600
 #define TIMER_GRANULARITY 1000   // 1秒粒度
 #define MAX_TIMER_LEVELS 4       // 4级时间轮
+#define TIME_UNIT_MS 100          // 每个时间单位100毫秒
 
 #define MAX_EVENTS 4096
 #define BUFFER_SIZE 4096
@@ -27,7 +28,7 @@
 // 从nginx借鉴的定时器结构
 typedef struct timer_node_s {
     int fd;
-    uint64_t expire;            // 绝对超时时间（毫秒）
+    uint64_t expire_time;            // 绝对超时时间（毫秒）
     struct timer_node_s* next;
     struct timer_node_s* prev;
     int slot;                   // 在时间轮中的槽位
@@ -40,15 +41,23 @@ typedef struct timer_slot_s {
     timer_node_t* tail;
 } timer_slot_t;
 
-// 多级时间轮（借鉴nginx）
 typedef struct timer_wheel_s {
-    timer_slot_t* levels[MAX_TIMER_LEVELS];  // 多级时间轮
-    int level_sizes[MAX_TIMER_LEVELS];       // 每级大小
-    uint64_t current_time;                   // 当前时间（毫秒）
-    uint64_t last_check;                     // 上次检查时间
-    timer_node_t* nodes[MAX_CLIENTS];    // FD到节点的映射
-    uint32_t count;                          // 定时器总数
+    timer_slot_t slots[TIME_WHEEL_SIZE];
+    int current_slot;
+    uint64_t current_time;
+    uint64_t last_check_time;             // 上次检查时间
+    timer_node_t* nodes[MAX_CLIENTS];
+    int count;
 } timer_wheel_t;
+// // 多级时间轮（借鉴nginx）
+// typedef struct timer_wheel_s {
+//     timer_slot_t* levels[MAX_TIMER_LEVELS];  // 多级时间轮
+//     int level_sizes[MAX_TIMER_LEVELS];       // 每级大小
+//     uint64_t current_time;                   // 当前时间（毫秒）
+//     uint64_t last_check;                     // 上次检查时间
+//     timer_node_t* nodes[MAX_CLIENTS];    // FD到节点的映射
+//     uint32_t count;                          // 定时器总数
+// } timer_wheel_t;
 
 
 typedef enum {
