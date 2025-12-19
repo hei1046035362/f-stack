@@ -21,6 +21,8 @@ extern "C" {
 #include "comm/Encrypt.hpp"
 #include "tgg_master_timers.h"
 #include <unistd.h>
+
+#define MAX_WS_GET_LEN 4096
 // 模块上下文引用
 extern ngx_module_t ngx_http_websocket_module;
 
@@ -119,6 +121,51 @@ static ngx_table_elt_t *find_header(ngx_http_request_t *r, const char *name, siz
     return NULL;
 }
 
+// 查找特定请求头
+static ngx_int_t get_header(ngx_http_request_t *r, u_char* data, ngx_int_t left_len)
+{
+    ngx_list_part_t *part;
+    ngx_table_elt_t *h;
+    ngx_uint_t i;
+    
+    part = &r->headers_in.headers.part;
+    h = (ngx_table_elt_t*)part->elts;
+    ngx_int_t reserved = left_len;
+    ngx_int_t pos = 0;
+    for (i = 0; /* void */; i++) {
+        if (i >= part->nelts) {
+            if (part->next == NULL) {
+                break;
+            }
+            
+            part = part->next;
+            h = (ngx_table_elt_t*)part->elts;
+            i = 0;
+        }
+        if(int(pos + h[i].key.len + h[i].value.len + 4) > reserved) {
+            LOG_ERROR("request content length exceed max buffer_len:%d.", reserved);
+            return 0;
+        }
+        memcpy(data+pos, h[i].key.data, h[i].key.len);
+        pos += h[i].key.len;
+        data[pos++] = ':';
+        data[pos++] = ' ';
+        memcpy(data+pos, h[i].value.data, h[i].value.len);
+        pos += h[i].value.len;
+        data[pos++] = '\r';
+        data[pos++] = '\n';
+        
+        // if (h[i].key.len == len && ngx_strncasecmp(h[i].key.data, (u_char*)name, len) == 0) {
+        //     return &h[i];
+        // }
+    }
+    data[pos++] = '\r';
+    data[pos++] = '\n';
+    data[pos] = '\0';
+    return pos;
+}
+
+
 static ngx_int_t extract_ip_port(const struct sockaddr *sa, char* ip_str, unsigned short* port, int* ip) {
     if (sa == NULL) return -1;
     
@@ -206,12 +253,15 @@ static ngx_int_t
 ngx_http_websocket_upgrade(ngx_http_request_t *r)
 {
     ngx_table_elt_t *upgrade, *sec_key;
-    size_t raw_data_len;
+    size_t header_len;
+    size_t request_len;
+    // size_t raw_data_len;
     ngx_http_websocket_ctx_t *ctx = NULL;
     ngx_int_t rc;
     u_char accept_key[29];
     ngx_table_elt_t *h;
     int fd = r->connection->fd & g_fd_mask;
+    u_char* raw_data;
     LOG_INFO("accept http request, fd[%d]", fd);
     // 必须是 GET
     if (!(r->method & NGX_HTTP_GET)) {
@@ -335,10 +385,27 @@ ngx_http_websocket_upgrade(ngx_http_request_t *r)
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "No header_in buffer");
         goto failed;
     }
-    raw_data_len = r->header_in->last - r->header_in->pos;
-    trans_upstream_data(g_core_id, fd, std::string_view((const char*)r->header_in->pos, raw_data_len), FD_NEW);
+    raw_data = (u_char*)ngx_pcalloc(r->pool, MAX_WS_GET_LEN);
+    request_len = r->request_end - r->request_start;
+    memcpy(raw_data, (const char*)r->request_start, request_len);
+    raw_data[request_len++] = '\r';
+    raw_data[request_len++] = '\n';
+    header_len = get_header(r, raw_data + request_len, MAX_WS_GET_LEN - request_len);
+    if(header_len == 0) {
+        ngx_pfree(r->pool, raw_data);
+        LOG_ERROR("get ws headers failed.");
+        goto failed;
+    }
+    LOG_INFO("new websocket client accept raw_data:%s.", raw_data);
 
-    LOG_INFO("new websocket client accept.");
+    trans_upstream_data(g_core_id, fd, std::string_view((const char*)raw_data, request_len+header_len), FD_NEW);
+    ngx_pfree(r->pool, raw_data);
+    // LOG_INFO("new websocket client accept request:%.*s.", (const char*)r->request_end - (const char*)r->request_start, (const char*)r->request_start);
+    // LOG_INFO("new websocket client accept rline:%.*s.", r->request_line.len, (const char*)r->request_line.data);
+    // LOG_INFO("new websocket client accept uri:%.*s.", r->uri.len, (const char*)r->uri.data);
+    // LOG_INFO("new websocket client accept args:%.*s.", r->args.len, (const char*)r->args.data);
+    // LOG_INFO("new websocket client accept exten:%s.*.", r->exten.len, (const char*)r->exten.data);
+    // LOG_INFO("new websocket client accept header_start:%.*s.", (const char*)r->header_end - (const char*)r->header_start, (const char*)r->header_start);
     // 返回 DONE，表示协议升级完成
     return NGX_DONE;
 
@@ -498,6 +565,7 @@ static ngx_int_t ngx_http_websocket_process_input(ngx_http_request_t *r)
         size_t consumed = ws_frame_parse(r, buffer, pos, len);
         if (consumed == 0) {
             ngx_log_error(NGX_LOG_ERR, c->log, 0, "WebSocket frame parse error");
+            ws_frame_buffer_reset(r, buffer);
             return NGX_ERROR;
         }
         
@@ -544,7 +612,7 @@ static ngx_int_t ngx_http_websocket_process_input(ngx_http_request_t *r)
             // }
             
             // 重置缓冲区
-            ws_frame_buffer_reset(buffer);
+            ws_frame_buffer_reset(r, buffer);
         }
     }
     

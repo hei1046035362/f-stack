@@ -52,6 +52,6 @@ void ngx_http_websocket_calc_accept(u_char *key, size_t key_len, u_char *accept)
 size_t ws_frame_parse(ngx_http_request_t* r, ws_frame_buffer_t *buffer, u_char *data, size_t len);
 ngx_int_t ngx_http_websocket_send_frame(ngx_connection_t *c, uint8_t opcode, uint8_t fin, ngx_str_t payload);
 void ws_frame_buffer_init(ws_frame_buffer_t *buffer);
-void ws_frame_buffer_reset(ws_frame_buffer_t *buffer);
+void ws_frame_buffer_reset(ngx_http_request_t* r, ws_frame_buffer_t *buffer);
 
 #endif // NGX_HTTP_WEBSOCKET_FRAME_H

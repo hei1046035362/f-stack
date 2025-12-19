@@ -9,10 +9,11 @@ void ws_frame_buffer_init(ws_frame_buffer_t *buffer)
 {
     ngx_memzero(buffer, sizeof(ws_frame_buffer_t));
     buffer->state = WS_FRAME_HEADER;
+    buffer->payload = NULL;
 }
 
 // 重置帧缓冲区
-void ws_frame_buffer_reset(ws_frame_buffer_t *buffer)
+void ws_frame_buffer_reset(ngx_http_request_t* r, ws_frame_buffer_t *buffer)
 {
     buffer->payload_len = 0;
     buffer->header_len = 0;
@@ -21,6 +22,10 @@ void ws_frame_buffer_reset(ws_frame_buffer_t *buffer)
     buffer->state = WS_FRAME_HEADER;
     buffer->opcode = 0;
     buffer->fin = 0;
+    if(buffer->payload) {
+        ngx_pfree(r->pool, buffer->payload);
+        buffer->payload = NULL;
+    }
 }
 
 // 计算 WebSocket Accept 密钥
