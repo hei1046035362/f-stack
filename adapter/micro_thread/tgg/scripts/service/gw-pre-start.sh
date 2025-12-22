@@ -2,7 +2,7 @@
 # 检查并终止遗留进程（最多等待5秒）
 
 # 定义进程名称列表
-PROCESSES=("gwrcv_reactor" "gwbwprc" "gwcliprc" "gwregister")
+PROCESSES=("gwrcv" "gwbwprc" "gwcliprc" "gwregister")
 
 for proc in "${PROCESSES[@]}"; do
     # 查找并杀死进程
