@@ -22,7 +22,7 @@ void tgg_register_uninit();
 void init_flag_for_process();
 void prc_exit(int exit_code, const char* fmt, ...);
 
-int wait_primary_up();
+bool is_primary_initialized();
 
 
 #endif //_DPDK_INIT_H_
