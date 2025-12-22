@@ -74,12 +74,12 @@ clean:
 	@rm -f $(BINARY) *.a *.o gwrcv gwprc  tgg_comm/*.o cmd/*.o comm/*.o reactor/*.o
 
 
-MASTER_OBJ = dpdk_init.o master.o tgg_comm/tgg_common.o tgg_comm/tgg_bwcomm.o tgg_comm/tgg_bw_cache.o comm/log.o\
-			comm/Websocket.o comm/Encrypt.o tgg_comm/WsConsumer.o tgg_comm/tgg_transport.o\
-			tgg_comm/tgg_lock.o comm/RWIni.o tgg_comm/tgg_conf.o comm/common.o tgg_comm/tgg_data_opt.o \
-			tgg_comm/tgg_master_timers.o tgg_comm/tgg_ip_filter.o comm/picohttpparser.o
+# MASTER_OBJ = dpdk_init.o master.o tgg_comm/tgg_common.o tgg_comm/tgg_bwcomm.o tgg_comm/tgg_bw_cache.o comm/log.o\
+# 			comm/Websocket.o comm/Encrypt.o tgg_comm/WsConsumer.o tgg_comm/tgg_transport.o\
+# 			tgg_comm/tgg_lock.o comm/RWIni.o tgg_comm/tgg_conf.o comm/common.o tgg_comm/tgg_data_opt.o \
+# 			tgg_comm/tgg_master_timers.o tgg_comm/tgg_ip_filter.o comm/picohttpparser.o
 
-MASTER_REACTOR_OBJ = dpdk_init.o master_reactor.o reactor/reactor.o reactor/timeout_wheel.o tgg_comm/tgg_common.o tgg_comm/tgg_bwcomm.o tgg_comm/tgg_bw_cache.o comm/log.o\
+MASTER_OBJ = dpdk_init.o master_reactor.o reactor/reactor.o reactor/timeout_wheel.o tgg_comm/tgg_common.o tgg_comm/tgg_bwcomm.o tgg_comm/tgg_bw_cache.o comm/log.o\
 			comm/Websocket.o comm/Encrypt.o tgg_comm/WsConsumer.o tgg_comm/tgg_transport.o\
 			tgg_comm/tgg_lock.o comm/RWIni.o tgg_comm/tgg_conf.o comm/common.o tgg_comm/tgg_data_opt.o \
 			tgg_comm/tgg_master_timers.o tgg_comm/tgg_ip_filter.o comm/picohttpparser.o
@@ -111,9 +111,9 @@ gwrcv: $(MASTER_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
 	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl -lz -lssl $(FF_LIBS) -L$(FF_PATH)/adapter/micro_thread -lmt $(CRESET)
 
-gwrcv_reactor: $(MASTER_REACTOR_OBJ)
-	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
-	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl -lz -lssl $(FF_LIBS) -L$(FF_PATH)/adapter/micro_thread -lmt $(CRESET)
+# gwrcv: $(MASTER_REACTOR_OBJ)
+# 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
+# 	@$(CC) -O -gdwarf-2 -o $@ $^ -ldl -lz -lssl $(FF_LIBS) -L$(FF_PATH)/adapter/micro_thread -lmt $(CRESET)
 
 gwcliprc: $(CLIPRC_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
@@ -127,12 +127,11 @@ gwregister: $(REGISTER_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
 	@$(CC) -O -gdwarf-2 -o $@ $^  -ldl -lz -lcolib -lssl $(FF_LIBS) $(CRESET)
 
-all: gwrcv gwrcv_reactor gwcliprc gwbwprc gwregister
+all: gwrcv gwcliprc gwbwprc gwregister
 
 install:
 	mkdir -p $(INSTALL_PATH)/bin
 	cp -f gwrcv $(INSTALL_PATH)/bin/gwrcv
-	cp -f gwrcv_reactor $(INSTALL_PATH)/bin/gwrcv_reactor
 	cp -f gwcliprc $(INSTALL_PATH)/bin/gwcliprc
 	cp -f gwbwprc $(INSTALL_PATH)/bin/gwbwprc
 	cp -f gwregister $(INSTALL_PATH)/bin/gwregister
