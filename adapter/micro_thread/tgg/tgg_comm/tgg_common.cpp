@@ -1367,7 +1367,7 @@ void print_mem_statistics()
 	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_bwrcv_data->name, rte_mempool_avail_count(g_mempool_bwrcv_data), rte_mempool_in_use_count(g_mempool_bwrcv_data));
 	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_large_data->name, rte_mempool_avail_count(g_mempool_large_data), rte_mempool_in_use_count(g_mempool_large_data));
 	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_clifdlist_data->name, rte_mempool_avail_count(g_mempool_clifdlist_data), rte_mempool_in_use_count(g_mempool_clifdlist_data));
-	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_ws_buffer->name, rte_mempool_avail_count(g_mempool_ws_buffer), rte_mempool_in_use_count(g_mempool_ws_buffer));
+	// LOG_WARNING("%s available count:%ld used count:%u", g_mempool_ws_buffer->name, rte_mempool_avail_count(g_mempool_ws_buffer), rte_mempool_in_use_count(g_mempool_ws_buffer));
 
 	// const char* dump_mem = "/var/log/tgg_gateway/mem_stat.log"
 	// FILE* file = open(dump_mem, "w+");
