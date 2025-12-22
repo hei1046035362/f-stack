@@ -488,7 +488,7 @@ static ngx_int_t deal_close_fram(int core_id, int fd)
     return 0;
 }
 
-static ngx_int_t deal_ping_fram(int core_id, int fd, const std::string& response)
+static ngx_int_t deal_ping_fram(int core_id, int fd, std::string_view response)
 {
     std::string result = Websocket::EncodeWebsocketMessage(PONG_FRAME, response);
     send_frame(fd, result.data(), result.length());
@@ -500,7 +500,7 @@ static ngx_int_t deal_ping_fram(int core_id, int fd, const std::string& response
     return 0;
 }
 
-static ngx_int_t deal_pong_fram(int core_id, int fd, const std::string& response)
+static ngx_int_t deal_pong_fram(int core_id, int fd, std::string_view response)
 {
     // 在这里可以获取主动检测结果
     // LOG_DEBUG("recieve pong:%s", response.c_str());
@@ -577,7 +577,7 @@ static ngx_int_t ngx_http_websocket_process_input(ngx_http_request_t *r)
             switch (buffer->opcode) {
                 case TEXT_FRAME:
                 case BINARY_FRAME:
-                    trans_upstream_data(g_core_id, fd, std::string((char*)buffer->payload, buffer->payload_len), FD_WRITE);
+                    trans_upstream_data(g_core_id, fd, std::string_view((char*)buffer->payload, buffer->payload_len), FD_WRITE);
                     break;
                 case CLOSING_FRAME:
                     deal_close_fram(g_core_id, fd);
@@ -588,10 +588,10 @@ static ngx_int_t ngx_http_websocket_process_input(ngx_http_request_t *r)
                     deal_close_fram(g_core_id, fd);
                     break;
                 case PING_FRAME:
-                    deal_ping_fram(g_core_id, fd, std::string((char*)buffer->payload, buffer->payload_len));
+                    deal_ping_fram(g_core_id, fd, std::string_view((char*)buffer->payload, buffer->payload_len));
                     break;
                 case PONG_FRAME:
-                    deal_pong_fram(g_core_id, fd, std::string((char*)buffer->payload, buffer->payload_len));
+                    deal_pong_fram(g_core_id, fd, std::string_view((char*)buffer->payload, buffer->payload_len));
                     break;
                 default:
                     LOG_ERROR("unexpected frame type %d, fd:%d.", buffer->opcode, r->connection->fd);
