@@ -818,30 +818,14 @@ void tgg_register_uninit()
 
 // #include <sys/stat.h>
 // 在次级进程启动时检查
-static bool is_primary_initialized()
+bool is_primary_initialized()
 {
-    // 检查共享内存是否存在
-    // 检查信号量状态
-    // 检查文件锁等
-    struct rte_mempool* pool = find_mempool(s_pool_ws_buffer_name);
+    // 检查所有的内存是否都已初始化完成
+    struct rte_mempool* pool = find_mempool(s_pool_clifdlist_data_name);
     if (pool) {
         return true;  // 共享内存存在，主进程已初始化
     }
     return false;
-}
-
-int wait_primary_up()
-{
-// 次级进程启动逻辑
-    if (!is_primary_initialized()) {
-        printf("Waiting for primary process initialization...\n");
-        sleep(5);  // 等待5秒
-        if (!is_primary_initialized()) {
-            printf("ERROR: Primary process not initialized\n");
-            return -1;
-        }
-    }
-    return 0;
 }
 
 void prc_exit(int exit_code, const char* fmt, ...)

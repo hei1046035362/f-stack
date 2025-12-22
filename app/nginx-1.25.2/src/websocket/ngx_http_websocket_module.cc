@@ -914,6 +914,21 @@ void tgg_sig_init()
         exit(-1);
     }
 }
+
+int wait_primary_up()
+{
+// 次级进程启动逻辑
+    int try_times = 30;// 最长等待30s
+    while (!is_primary_initialized() && try_times-- > 0 && g_run_status) {
+        sleep(1);
+    }
+    if (!is_primary_initialized()) {
+        LOG_INFO("Primary process not initialized");
+        return -1;
+    }
+    return 0;
+}
+
 static ngx_int_t ngx_http_websocket_init_module()
 {
     init_core(s_dump_file);
