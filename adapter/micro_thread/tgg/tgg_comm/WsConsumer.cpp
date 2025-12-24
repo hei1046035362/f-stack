@@ -245,23 +245,23 @@ void WsConsumer::OnHandShake(std::string_view request, const std::string& respon
     }
 }
 
-void WsConsumer::OnPing(const std::string& response)
+void WsConsumer::OnPing(const std::string_view response)
 {
     std::string result = EncodeWebsocketMessage(PONG_FRAME, response);
     OnSend(result, FD_WRITE);
 }
 
-void WsConsumer::OnPong(const std::string& response)
+void WsConsumer::OnPong(const std::string_view response)
 {
     // 在这里可以获取主动检测结果
     // printf("recieve pong:%s\r\n", response.c_str());
 }
 
-void WsConsumer::OnMessage(const std::string& msg)
+void WsConsumer::OnMessage(const std::string_view msg)
 {
     int cli_status = tgg_get_cli_authorized(this->core_id, this->fd);
     if(cli_status != AUTH_TYPE_HANDLESHAKED) {
-        LOG_ERROR("cli[coreid:%d fd:%d] status[%d] is not handleshaked, msg[%s] droped.", this->core_id, this->fd, cli_status, msg.c_str());
+        LOG_ERROR("cli[coreid:%d fd:%d] status[%d] is not handleshaked, msg[%s] droped.", this->core_id, this->fd, cli_status, msg.data());
         return;
     }
     if(_Send2Server(msg, FD_WRITE) == NO_BW_AVALIABLE) {
@@ -269,13 +269,13 @@ void WsConsumer::OnMessage(const std::string& msg)
     }
 }
 
-void WsConsumer::OnSend(const std::string& msg, int fd_opt)
+void WsConsumer::OnSend(const std::string_view msg, int fd_opt)
 {
     if((tgg_get_cli_status(this->core_id, this->fd) & FD_STATUS_DISCONNECTED)) {
         LOG_WARNING("send faild, connection is off");
         return;
     }
-    int ret = ff_write(this->fd, msg.c_str(), msg.size());
+    int ret = ff_write(this->fd, msg.data(), msg.size());
     if (ret <= 0) {
         LOG_ERROR("send data to client fd[%d] idx[%d] error, ret[%d]", this->fd, _idx, ret);
     }

@@ -347,7 +347,7 @@ static int write_data()
         if(bdata->data_len > 0) {
             if(bdata->fd_opt & FD_NEW) {
                 struct http_request_t req;
-                if(!parse_http_request((char*)bdata->data, bdata->data_len, &req)) {
+                if(!parse_http_request((char*)bdata->data, bdata->data_len, &req, 1)) {
                     LOG_ERROR("parse http request failed:%s.", (char*)bdata->data);
                 }
                 sdata = build_server_data(req, bdata->peer_ip, bdata->peer_port);

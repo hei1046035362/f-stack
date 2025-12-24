@@ -58,7 +58,7 @@ void AsyncLogger::log(LogLevel level, const char* file, int line, const char* fo
         now.time_since_epoch()) % 1000;
 
         // 格式化日志消息
-    char buffer[1024];
+    char buffer[4096];
     va_list args;
     va_start(args, format);
     vsnprintf(buffer, sizeof(buffer), format, args);

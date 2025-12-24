@@ -713,42 +713,61 @@ void tgg_clean_gw_monitor(int prc_id)
 	memset(prc, 0, sizeof(pid_data));
 }
 
-int ringbuf_read(int core_id, int fd, std::string& dest, int len, int move_pos)
+int ringbuf_read(int core_id, int fd, char* dest, int len)
 {
 	// 同一个连接的数据都是串行的，同一个连接的ws的缓存只有cliprc进程处理，不需要加锁
-	tgg_ws_data* wsdata = &((&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data);
+    tgg_ws_data* wsdata = &((&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data);
     if (!wsdata->data) {// 第一次缓存
-    	LOG_DEBUG("get ws data failed.");
-	    return 0;
+        return 0;
     }
     int data_size = (wsdata->write_pos >= wsdata->read_pos) ? 
                      (wsdata->write_pos - wsdata->read_pos) : 
-                     (wsdata->capacity - wsdata->read_pos + wsdata->write_pos);
+                     (BUFFER_PACKET_LEN - wsdata->read_pos + wsdata->write_pos);
 	if (len > data_size) {
         LOG_WARNING("Requested len=%d exceeds available data=%d for core_id=%d, fd=%d",
                     len, data_size, core_id, fd);
         len = data_size;
     }
 
-	dest.reserve(dest.size() + len);
+	// dest.reserve(dest.size() + len);
 
     // 分两段读取
-    int first_chunk = (wsdata->read_pos + len > wsdata->capacity) ? 
-                       (wsdata->capacity - wsdata->read_pos) : len;
+    int first_chunk = (wsdata->read_pos + len > BUFFER_PACKET_LEN) ? 
+                       (BUFFER_PACKET_LEN - wsdata->read_pos) : len;
+    memcpy(dest, (char*)wsdata->data + wsdata->read_pos, first_chunk);
     
-    dest.append(static_cast<const char*>(wsdata->data) + wsdata->read_pos, first_chunk);
-    
-    if (len > first_chunk) {
-        dest.append(static_cast<const char*>(wsdata->data), len - first_chunk);
+    if (len > first_chunk) {// 越过环形队列的尾部，从队列头部开始继续取数据
+        memcpy(dest + first_chunk, wsdata->data, len - first_chunk);
     }
-    if(move_pos) {
-    	wsdata->read_pos = (wsdata->read_pos + len) % wsdata->capacity;
-    	if (wsdata->read_pos == wsdata->write_pos) {
-    		release_ws_buffer(core_id, fd);
-    		LOG_DEBUG("release ws buffer for fd: %d coreid: %d after full consumption", fd, core_id);
-        }
-    }
+    // if(move_pos) {
+    //     LOG_DEBUG("prev read_pos:%d, len:%d, write_pos:%d", wsdata->read_pos, len, wsdata->write_pos);
+    // 	wsdata->read_pos = (wsdata->read_pos + len) & BUFFER_PACKET_MASK;
+    // 	if (wsdata->read_pos == wsdata->write_pos) {
+    // 		release_ws_buffer(core_id, fd);
+    // 		LOG_DEBUG("release ws buffer for fd: %d coreid: %d after full consumption, read_pos:%d, len:%d, write_pos:%d",
+    //          fd, core_id, wsdata->read_pos, len, wsdata->write_pos);
+    //     }
+    // }
     return len;
+}
+
+void ringbuf_move_read_pos(int core_id, int fd, int len)
+{
+    if(len <= 0 ) {
+        return;
+    }
+    tgg_ws_data* wsdata = &((&((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd])->ws_data);
+    if (!wsdata->data) {// 第一次缓存
+        return;
+    }
+    // LOG_WARNING("prev read_pos:%d, write_pos:%d.", wsdata->read_pos, wsdata->write_pos);
+    wsdata->read_pos = (wsdata->read_pos + len) & BUFFER_PACKET_MASK;
+    if (wsdata->read_pos == wsdata->write_pos) {
+        release_ws_buffer(core_id, fd);
+        // LOG_DEBUG("release ws buffer for fd: %d coreid: %d after full consumption, read_pos:%d, len:%d, write_pos:%d",
+        //  fd, core_id, wsdata->read_pos, len, wsdata->write_pos);
+    }
+    // LOG_WARNING("read_pos:%d, write_pos:%d.", wsdata->read_pos, wsdata->write_pos);
 }
 
 int64_t s_buffer_count = 0;
@@ -761,13 +780,12 @@ int ringbuf_write(int core_id, int fd, const char* data, int len)
     		return -1;
     	}
     	s_buffer_count++;
-    	wsdata->capacity = BUFFER_PACKET_LEN;
     	wsdata->read_pos = 0;
     	wsdata->write_pos = 0;
     }
-    int free_space = wsdata->capacity - ((wsdata->write_pos >= wsdata->read_pos) ? 
+    int free_space = BUFFER_PACKET_LEN - ((wsdata->write_pos >= wsdata->read_pos) ? 
                       (wsdata->write_pos - wsdata->read_pos) : 
-                      (wsdata->capacity - wsdata->read_pos + wsdata->write_pos));
+                      (BUFFER_PACKET_LEN - wsdata->read_pos + wsdata->write_pos));
 	if (free_space == 0) {
         LOG_WARNING("Buffer full for core_id=%d, fd=%d", core_id, fd);
         return 0;
@@ -780,8 +798,8 @@ int ringbuf_write(int core_id, int fd, const char* data, int len)
     }
 
     // 分两段写入
-	int first_chunk = (wsdata->write_pos + len > wsdata->capacity)
-        ? (wsdata->capacity - wsdata->write_pos)
+	int first_chunk = (wsdata->write_pos + len > BUFFER_PACKET_LEN)
+        ? (BUFFER_PACKET_LEN - wsdata->write_pos)
         : len;
     
     memcpy((char*)wsdata->data + wsdata->write_pos, data, first_chunk);
@@ -790,7 +808,7 @@ int ringbuf_write(int core_id, int fd, const char* data, int len)
         memcpy(wsdata->data, data + first_chunk, len - first_chunk);
     }
     
-    wsdata->write_pos = (wsdata->write_pos + len) % wsdata->capacity;
+    wsdata->write_pos = (wsdata->write_pos + len) & BUFFER_PACKET_MASK;
     return len;
 }
 
@@ -805,7 +823,7 @@ int ringbuf_size(int core_id, int fd)
     if (wsdata->write_pos >= wsdata->read_pos) {
         return wsdata->write_pos - wsdata->read_pos;
     }
-    return wsdata->capacity - wsdata->read_pos + wsdata->write_pos;
+    return BUFFER_PACKET_LEN - wsdata->read_pos + wsdata->write_pos;
 }
 
 int ringbuf_space(int core_id, int fd)
@@ -815,35 +833,43 @@ int ringbuf_space(int core_id, int fd)
     	LOG_DEBUG("get ws data failed.");
 	    return -1;
     }
-    return wsdata->capacity - ringbuf_size(core_id, fd) - 1;
+    return BUFFER_PACKET_LEN - ringbuf_size(core_id, fd) - 1;
 }
     
-std::string get_one_frame_buffer(int core_id, int fd, void* data, int len)
+int get_one_frame_buffer(int core_id, int fd, void* data, int len, char* buffer)
 {
 	// SpinLock lock(get_cli_lock());
-	std::string buffer;
-    int reserved_len = ringbuf_size(core_id, fd);
-    if (reserved_len <= 0) {// 上一次缓存没有遗留数据
-    	buffer.append(static_cast<const char*>(data), len);
-    	return buffer;
+	// char buffer[4096];
+    int cached_len = ringbuf_size(core_id, fd);// 获取之前缓存数据的大小
+    if (cached_len <= 0) {// 上一次缓存没有遗留数据
+    	memcpy(buffer, (char*)data, len);
+    	return len;
     }
-    ringbuf_read(core_id, fd, buffer, reserved_len, 1);
+    if(cached_len + len > BUFFER_PACKET_LEN) {// 数据超出了最大允许缓存包的大小
+        LOG_ERROR("buffer len[%d] exceed packet len:%d.", cached_len+len, BUFFER_PACKET_LEN);
+        return -1;
+    }
+    int read_len = ringbuf_read(core_id, fd, buffer, cached_len);
+    if(read_len != cached_len) {
+        LOG_ERROR("read_len:%d < cached_len:%d.", read_len, cached_len);
+        return -1;
+    }
     // 把当前数据附加进去
-	buffer.append(static_cast<const char*>(data), len);
-    return buffer;
+	memcpy(buffer + read_len, data, len);
+    // LOG_INFO("get cached buffer len:%d read_len:%d, buffer:%s.", len, read_len, bin2hex(std::string_view(buffer, read_len+len)).data());
+    return read_len + len;
 }
 
-std::string get_whole_buffer(int core_id, int fd)
+int get_whole_buffer(int core_id, int fd, char* buffer)
 {
 	// SpinLock lock(get_cli_lock());
-	std::string buffer;
-    int reserved_len = ringbuf_size(core_id, fd);
-    if (reserved_len <= 0) {// 上一次缓存没有遗留数据
-    	return buffer;
+	// std::string buffer;
+    int cached_len = ringbuf_size(core_id, fd);
+    if (cached_len <= 0) {// 上一次缓存没有遗留数据
+    	return 0;
     }
     // 取上一次剩余数据
-    ringbuf_read(core_id, fd, buffer, reserved_len, 0);
-    return buffer;
+    return ringbuf_read(core_id, fd, buffer, cached_len);;
 }
 
 void release_ws_buffer(int core_id, int fd)
@@ -857,7 +883,6 @@ void release_ws_buffer(int core_id, int fd)
     rte_mempool_put(g_mempool_ws_buffer, wsdata->data);
     s_buffer_count--;
 	wsdata->data = nullptr; // 防止悬垂指针
-    wsdata->capacity = 0;
     wsdata->read_pos = 0;
     wsdata->write_pos = 0;
 }
@@ -1187,7 +1212,7 @@ int high_freq_malloc(struct rte_mempool* pool, void** data, int size)
 	}
 	int ret = -1;
 	if(size > COMMON_PACKET_LEN) {
-		LOG_INFO("recieved an large packet, size:%d", size);
+		LOG_INFO("recieved an large packet, name:%s size:%d", pool->name, size);
 		ret = rte_mempool_get(g_mempool_large_data, data);
 #ifdef DEBUG_MEMPOOL_STATS
 		if(!ret)
@@ -1210,7 +1235,7 @@ void high_freq_free(struct rte_mempool* pool, void* data, int size)
 		return ;
 	}
 	if(size > COMMON_PACKET_LEN) {
-		LOG_DEBUG("free an large packet, size:%d", size);
+		LOG_DEBUG("free an large packet, name:%s size:%d", pool->name, size);
 		rte_mempool_put(g_mempool_large_data, data);
 #ifdef DEBUG_MEMPOOL_STATS
 		s_hi_freq_free[reinterpret_cast<uintptr_t>(g_mempool_large_data)]++;

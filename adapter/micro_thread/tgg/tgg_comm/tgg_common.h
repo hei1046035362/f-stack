@@ -131,12 +131,13 @@ pid_t start_gwbwprc(int prc_id);
 
 // 给ws操作缓存的函数  
 // int cache_ws_buffer(int core_id, int fd, void* data, int len, int pos = 0, int iscomplete = 1);
-std::string get_one_frame_buffer(int core_id, int fd, void* data, int len);
-std::string get_whole_buffer(int core_id, int fd);
+int get_one_frame_buffer(int core_id, int fd, void* data, int len, char* buffer);
+int get_whole_buffer(int core_id, int fd, char* buffer);
 void release_ws_buffer(int core_id, int fd);
 
 // move_pos 是否要移动读指针
-int ringbuf_read(int core_id, int fd, std::string& dest, int len, int move_pos);
+int ringbuf_read(int core_id, int fd, char* dest, int len);
+void ringbuf_move_read_pos(int core_id, int fd, int len);
 int ringbuf_write(int core_id, int fd, const char* data, int len);
 int ringbuf_size(int core_id, int fd);
 int ringbuf_space(int core_id, int fd);

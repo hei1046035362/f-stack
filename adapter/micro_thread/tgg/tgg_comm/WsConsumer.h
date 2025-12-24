@@ -24,14 +24,14 @@ protected:
     // 握手
     virtual void OnHandShake(std::string_view request, const std::string& response, struct ws_handshake_t& req);
 
-    virtual void OnPing(const std::string& response);
+    virtual void OnPing(const std::string_view response);
 
-    virtual void OnPong(const std::string& response);
+    virtual void OnPong(const std::string_view response);
 
-    virtual void OnMessage(const std::string& msg);
+    virtual void OnMessage(const std::string_view msg);
 
     // 这个接口只负责发送(入队列)，加解密都不做
-    virtual void OnSend(const std::string& msg, int fd_opt);
+    virtual void OnSend(const std::string_view msg, int fd_opt);
 
     virtual void OnClose();
 
