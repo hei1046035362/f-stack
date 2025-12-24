@@ -312,90 +312,94 @@ int
 Websocket::_GetWsFrame(unsigned char *in_buffer, size_t buf_len,
     unsigned char **payload_ptr, size_t *out_len)
 {
-        unsigned char opcode;
-        unsigned char fin;
-        unsigned char masked;
-        size_t payload_len;
-        size_t pos;
-        int length_field;
+    unsigned char opcode;
+    unsigned char fin;
+    unsigned char masked;
+    size_t payload_len;
+    size_t pos = 2;  // 前2字节是基本头部
+    int length_field;
 
-        if (buf_len < 2) {
+    if (buf_len < 2) {
+        return INCOMPLETE_DATA;
+    }
+
+    opcode = in_buffer[0] & 0x0F;
+    fin = (in_buffer[0] >> 7) & 0x01;
+    masked = (in_buffer[1] >> 7) & 0x01;
+    length_field = in_buffer[1] & (~0x80);
+
+    if (length_field <= 125) {
+        payload_len = length_field;
+    } else if (length_field == 126) {
+        uint16_t tmp16;
+        if (buf_len < 4)
             return INCOMPLETE_DATA;
-        }
-
-        opcode = in_buffer[0] & 0x0F;
-        fin = (in_buffer[0] >> 7) & 0x01;
-        masked = (in_buffer[1] >> 7) & 0x01;
-
-        payload_len = 0;
-        pos = 2;
-        length_field = in_buffer[1] & (~0x80);
-
-        if (length_field <= 125) {
-            payload_len = length_field;
-        } else if (length_field == 126) { /* msglen is 16bit */
-            uint16_t tmp16;
-            if (buf_len < 4)
-                return INCOMPLETE_DATA;
-            memcpy(&tmp16, in_buffer + pos, 2);
-            payload_len = ntohs(tmp16);
-            pos += 2;
-        } else if (length_field == 127) { /* msglen is 64bit */
-            int i;
-            uint64_t tmp64 = 0;
-            if (buf_len < 10)
-                return INCOMPLETE_DATA;
-            /* swap bytes from big endian to host byte order */
-            for (i = 56; i >= 0; i -= 8) {
-                tmp64 |= (uint64_t)in_buffer[pos++] << i;
-            }
-            if (tmp64 > WS_MAX_RECV_FRAME_SZ) {
-                /* Implementation limitation, we support up to 10 MiB
-                 * length, as a DoS prevention measure.
-                 */
-                LOG_ERROR("frame length %lu exceeds %lu.\n",
-                    tmp64, (uint64_t)WS_MAX_RECV_FRAME_SZ);
-                /* Calling code needs these values; do the best we can here.
-                 * Caller will close the connection anyway.
-                 */
-                *payload_ptr = in_buffer + pos;
-                *out_len = 0;
-                return ERROR_FRAME;
-            }
-            payload_len = (size_t)tmp64;
-        }
-        if (buf_len < payload_len + pos + (masked ? 4u : 0u)) {
+        memcpy(&tmp16, in_buffer + pos, 2);
+        payload_len = ntohs(tmp16);
+        pos += 2;
+    } else if (length_field == 127) {
+        uint64_t tmp64 = 0;
+        if (buf_len < 10)
             return INCOMPLETE_DATA;
+        
+        // 读取64位长度（大端序）
+        for (int i = 0; i < 8; i++) {
+            tmp64 = (tmp64 << 8) | (uint64_t)in_buffer[pos + i];
         }
-
-        /* According to RFC it seems that unmasked data should be prohibited
-         * but we support it for nonconformant clients
-         */
-        if (masked) {
-            unsigned char *c, *mask;
-            size_t i;
-
-            mask = in_buffer + pos; /* first 4 bytes are mask bytes */
-            pos += 4;
-
-            /* unmask data */
-            c = in_buffer + pos;
-            for (i = 0; i < payload_len; i++) {
-                c[i] = c[i] ^ mask[i % 4u];
-            }
-        }
-
-        *payload_ptr = in_buffer + pos;
-        *out_len = payload_len;
-
-        /* are reserved for further frames */
-        if ((opcode >= 3 && opcode <= 7) || (opcode >= 0xb))
+        pos += 8;
+        
+        if (tmp64 > WS_MAX_RECV_FRAME_SZ) {
+            LOG_ERROR("frame length %lu exceeds %lu.\n",
+                tmp64, (uint64_t)WS_MAX_RECV_FRAME_SZ);
+            *payload_ptr = NULL;
+            *out_len = 0;
             return ERROR_FRAME;
-
-        if (opcode <= 0x3 && !fin) {
-            return INCOMPLETE_FRAME;
         }
-        return opcode;
+        payload_len = (size_t)tmp64;
+    } else {
+        payload_len = length_field;
+    }
+
+    // 计算掩码密钥位置
+    if (masked) {
+        // 检查是否有足够的空间包含掩码密钥
+        if (buf_len < pos + 4) {
+            return INCOMPLETE_DATA;
+        }
+    }
+
+    // 检查是否有足够的空间包含完整载荷
+    size_t total_frame_len = pos + (masked ? 4 : 0) + payload_len;
+    if (buf_len < total_frame_len) {
+        // LOG_INFO("buf_len:%zu, needed:%zu", buf_len, total_frame_len);
+        return INCOMPLETE_DATA;
+    }
+
+    // 处理掩码
+    if (masked) {
+        unsigned char *mask = in_buffer + pos;  // 掩码密钥位置
+        pos += 4;  // 跳过掩码密钥
+        
+        // 解掩码载荷
+        unsigned char *payload = in_buffer + pos;
+        for (size_t i = 0; i < payload_len; i++) {
+            payload[i] = payload[i] ^ mask[i % 4];
+        }
+    }
+
+    *payload_ptr = in_buffer + pos;
+    *out_len = payload_len;
+
+    // 检查操作码
+    if ((opcode >= 3 && opcode <= 7) || (opcode >= 0xb)) {
+        return ERROR_FRAME;
+    }
+
+    if (opcode <= 0x3 && !fin) {
+        return INCOMPLETE_FRAME;
+    }
+    
+    return opcode;
 }
 
 #include <cstring>
@@ -425,21 +429,28 @@ static inline int check_if_http_end(const char* data, size_t len) {
 // 缓存区域换成环形缓冲区了，连接建立时创建，关闭时销毁，不再每次缓冲数据时分配
 int Websocket::ReadData(void* data, int len)
 {
-    int buffer_len = ringbuf_size(core_id, fd);
-    if(buffer_len < 0) {
+    int left_len = ringbuf_size(core_id, fd);
+    if(left_len < 0) {
         // 缓冲区没有数据
         LOG_ERROR("read data from ringbuf failed, fd:%d.", fd);
         return -1;
     }
-    std::string buffer = get_one_frame_buffer(this->core_id, this->fd, data, len);
-    buffer_len += len;
+    int buffer_len = left_len + len;
+    char buffer[4096] = {0};
+    int read_len = get_one_frame_buffer(this->core_id, this->fd, data, len, buffer);
+    if(read_len != buffer_len) {
+        LOG_ERROR("read data from ringbuf failed, read_len:%d not match expect_len:%d, fd:%d.", 
+            fd, read_len, buffer_len);
+        return -1;
+    }
+    // LOG_INFO("whole buffer:%s len:%d.\n", bin2hex(std::string_view((char*)buffer, read_len)).data(), read_len);
     int cur_pos = 0;
     do {
         int type;
         unsigned char *payload;
         size_t msg_len, in_len, header_sz;
         // std::string completedata = get_one_frame_buffer(this->core_id, this->fd, data, len);
-        unsigned char* input = (unsigned char*)(buffer.c_str() + cur_pos);
+        unsigned char* input = (unsigned char*)(buffer + cur_pos);
         in_len = buffer_len - cur_pos;
         if (in_len <= 0)
         {// 没有数据了 直接返回
@@ -448,8 +459,8 @@ int Websocket::ReadData(void* data, int len)
         if (handshake != AUTH_TYPE_HANDLESHAKED) {
             size_t buf_len = check_if_http_end((const char*)input, in_len);
             if(buf_len <= 0) { // 分包
-                size_t write_len = ringbuf_write(core_id, fd, (char*)input, in_len);
-                if(write_len < in_len) {
+                int write_len = ringbuf_write(core_id, fd, (char*)data, len);
+                if(write_len < len) {
                 // 缓冲区剩余长度不够了
                     LOG_ERROR("free length is not enough, fd:%d.", fd);
                     return -1;
@@ -478,18 +489,31 @@ int Websocket::ReadData(void* data, int len)
             }
             OnHandShake(request, response, req);
             cur_pos += in_len;
+            ringbuf_move_read_pos(this->core_id, this->fd, cur_pos < left_len ? cur_pos : left_len);
             continue;
         }
+        // LOG_INFO("input:%s len:%d cur_pos:%d.", bin2hex(std::string_view((char*)input, in_len)).data(), in_len, cur_pos);
         type = _GetWsFrame(input, in_len, &payload, &msg_len);
         if (type == INCOMPLETE_DATA) {
             /* incomplete data received, wait for next chunk */
             // 数据不完整，先缓存起来，等待下一个包，一个websocket包分在两个分片中  buflen<packetlen
             // 也就是还没有缓存一个完整的websocket包，不用解析，等待下一个包进来拼接在一起
-            size_t write_len = ringbuf_write(core_id, fd, (char*)input, in_len);
-            if(write_len < in_len) {
-            // 缓冲区剩余长度不够了
-                LOG_ERROR("free length is not enough.");
-                return -1;
+            int write_len;
+            if (cur_pos == 0) {
+                write_len = ringbuf_write(core_id, fd, (char*)data, len);
+                if(write_len < len) {
+                // 缓冲区剩余长度不够了
+                    LOG_ERROR("free length is not enough.");
+                    return -1;
+                }
+            } else {
+                ringbuf_move_read_pos(this->core_id, this->fd, cur_pos < left_len ? cur_pos : left_len);
+                write_len = ringbuf_write(core_id, fd, (char*)input, in_len);
+                if(write_len < (int)in_len) {
+                // 缓冲区剩余长度不够了
+                    LOG_ERROR("free length is not enough.");
+                    return -1;
+                }
             }
             return 0;
         }
@@ -499,39 +523,47 @@ int Websocket::ReadData(void* data, int len)
         switch (type) {
             case TEXT_FRAME:
             case BINARY_FRAME:
-                OnMessage(std::string((char*)payload, msg_len));
+                OnMessage(std::string_view((char*)payload, msg_len));
                 break;
             case INCOMPLETE_FRAME:
             // 多个帧的数据(没有fin标记)，每一帧的数据都有websocket的头，这些数据需要合到一起才能算一个完整的数据包
             // 我们不处理数据包，只负责透传，所以不需要处理多个ws包的拼接
                 LOG_WARNING("incomplete frame type %d, fd:%d.", type, fd);
-                OnMessage(std::string((char*)payload, msg_len));
+                OnMessage(std::string_view((char*)payload, msg_len));
+                if(in_len > msg_len) {
+                    LOG_ERROR("incomplete frame type %d, fd:%d, data:%s.",
+                     type, fd, bin2hex(std::string_view((char*)input, in_len)).data());
+                    return -1;
+                }
                 // return 0;
                 break;
             case CLOSING_FRAME:
                 // OnClose();
                 SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
+                ringbuf_move_read_pos(this->core_id, this->fd, cur_pos < left_len ? cur_pos : left_len);
                 return 1;
                 break;
             case ERROR_FRAME:
-                LOG_ERROR("error frame, fd:%d.", fd);
+                LOG_ERROR("error frame, fd:%d data:%s len:%d.", fd, bin2hex(std::string_view((char*)payload, msg_len)).data(), msg_len);
                 return -1;// 返回 -1外部会关闭
                 break;
             case PING_FRAME:
-                OnPing(std::string((char*)payload, msg_len));
+                OnPing(std::string_view((char*)payload, msg_len));
                 break;
             case PONG_FRAME:
-                OnPong(std::string((char*)payload, msg_len));
+                OnPong(std::string_view((char*)payload, msg_len));
                 break;
             default:
                 LOG_ERROR("unexpected frame type %d, fd:%d.", type, fd);
+                return -1;
                 break;
         }
     } while(buffer_len > cur_pos);
+    ringbuf_move_read_pos(this->core_id, this->fd, cur_pos < left_len ? cur_pos : left_len);
     return 1;
 }
 
-void Websocket::SendONnoAuth(const std::string& data, int fd_opt)
+void Websocket::SendONnoAuth(const std::string_view data, int fd_opt)
 {
     std::string result;
     if(fd_opt & FD_CLOSE) {
@@ -542,7 +574,7 @@ void Websocket::SendONnoAuth(const std::string& data, int fd_opt)
     OnSend(result, fd_opt);
 }
 
-void Websocket::SendData(const std::string& data, int fd_opt) {
+void Websocket::SendData(const std::string_view data, int fd_opt) {
     if(handshake) {
         SendONnoAuth(data, fd_opt);
     } else {

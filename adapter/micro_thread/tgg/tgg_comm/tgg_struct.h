@@ -27,6 +27,7 @@
 #define MAX_PACKET_LEN 8192  // 目前已知的情况：需要在ws的GET请求中加入一些其他信息，再传给服务端，所以这里要比ws缓存数据大一些
 
 #define BUFFER_PACKET_LEN 4096 // ws默认缓存是4k，超过4k的连接  10w个连接就是400M，
+#define BUFFER_PACKET_MASK 4095 // 掩码，使取余计算性能更高（对4096取余）
 #define MAX_WSDATA_LEN 10*1024*1024   // websocket最多缓存10M的数据  暂时不器用，后续如果真的有超过4096的数据包
 
 #define ENQUEUE_TRY_TIMES 10000 // 入队列不能失败，又要防止死循环，这个数字设置足够大
@@ -103,7 +104,7 @@ typedef struct st_ws_data {
     int write_pos;    // 偏移量，
                 // 1、方便取数据的时候通过偏移量直接取到有效数据部分
                 // 2、这里的data存放的是fd读取的数据，为减少拷贝，不能改变data的位置，所以加一个pos
-    int capacity;
+    // int capacity;
     void* data;
 } tgg_ws_data;
 

@@ -128,7 +128,7 @@ std::string hex2bin(const std::string& hex) {
     return binary;
 }
 
-std::string bin2hex(std::string_view input, bool bForLog, bool uppercase) {
+std::string bin2hex(const std::string_view input, bool bForLog, bool uppercase) {
     if(bForLog && AsyncLogger::getInstance().getloglevel() != LogLevel::DEBUG) {
         return "";
     }
