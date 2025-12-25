@@ -500,6 +500,7 @@ int Websocket::ReadData(void* data, int len)
             // 也就是还没有缓存一个完整的websocket包，不用解析，等待下一个包进来拼接在一起
             int write_len;
             if (cur_pos == 0) {
+                // 没消费过，就只缓存
                 write_len = ringbuf_write(core_id, fd, (char*)data, len);
                 if(write_len < len) {
                 // 缓冲区剩余长度不够了
@@ -507,6 +508,7 @@ int Websocket::ReadData(void* data, int len)
                     return -1;
                 }
             } else {
+                // 消费过就要移动读指针
                 ringbuf_move_read_pos(this->core_id, this->fd, cur_pos < left_len ? cur_pos : left_len);
                 write_len = ringbuf_write(core_id, fd, (char*)input, in_len);
                 if(write_len < (int)in_len) {

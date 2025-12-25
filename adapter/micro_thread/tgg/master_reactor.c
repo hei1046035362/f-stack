@@ -264,7 +264,7 @@ static void tgg_recv(int fd, event_type_t events, void *arg)
 {
     client_context_t *ctx = (client_context_t *)arg;
     int idx = tgg_get_cli_idx(g_core_id, fd);
-    char buf[1024] = {0};
+    char buf[BUFFER_PACKET_LEN] = {0};
     int n = 0;
     if(idx == TGG_FD_CLOSED) {
         LOG_INFO("Client %d is closed, idx:%d", fd, idx);
@@ -284,7 +284,7 @@ static void tgg_recv(int fd, event_type_t events, void *arg)
         goto recv_failed;        
     }
     // 读取数据
-    n = ff_read(fd, buf, 1024);
+    n = ff_read(fd, buf, BUFFER_PACKET_LEN);
     if (n <= 0) {
         if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
             LOG_ERROR("Read error from client %d, closing", fd);
@@ -404,21 +404,10 @@ static void tgg_do_send(tgg_write_data* wdata)
                     mt_sleep(1);
                 }
                 if(try_times < 0) {
-                    // mt_close(cli_fd);
-                // } else {
-                    LOG_ERROR("add cli[fd:%d, idx:%d] snd data failed, no more available unit in mempool", cli_fd, idx);
+                    LOG_ERROR("add cli[fd:%d, idx:%d] snd data failed, exceed try_times", cli_fd, idx);
+                    ff_close(cli_fd);
+                    goto send_client_end;
                 }
-
-                // mt_thread_wakeup_wait(tgg_get_cli_thread(g_core_id, cli_fd));
-                // int ret = mt_send(cli_fd, (void *)wdata->data, wdata->data_len, 0, 1000);
-                // if (ret == -4) {
-                //     // 主动断开连接
-                //     LOG_INFO("closing connection affected.");
-                // } else if (ret < 0) {
-                //     LOG_ERROR("send data to client fd[%d] idx[%d] error, ret[%d]", cli_fd, idx, ret);
-                // } else {
-                //     g_tgg_stats.en_read_stats.enqueue++;
-                // }
             }
 
             reactor_modify_event(cli_fd, EVENT_WRITE);
@@ -443,11 +432,6 @@ send_client_end:
 
 static void tgg_send(void *arg)
 {
-    // std::vector< std::list<void*> > vec_queue;
-    // vec_queue.reserve(TggConfigure::getInstance()->get_gwwrite_co_count());
-    // for(int i = 0; i < TggConfigure::getInstance()->get_gwwrite_co_count(); ++i) {
-    //  mt_start_thread((void *)tgg_do_send, vec_queue[i]);
-    // }
     while(g_run_status) {
         tgg_write_data* wdata = NULL;
         if (tgg_dequeue_write(g_core_id, &wdata) < 0) {
@@ -467,9 +451,9 @@ static void tgg_send(void *arg)
 static int tgg_gw_master()
 {
     // 启动发送线程
-    for(int i = 0; i < TggConfigure::getInstance()->get_gwwrite_co_count(); ++i) {
+    // for(int i = 0; i < TggConfigure::getInstance()->get_gwwrite_co_count(); ++i) {
         mt_start_thread((void *)tgg_send, NULL);
-    }
+    // }
 
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
