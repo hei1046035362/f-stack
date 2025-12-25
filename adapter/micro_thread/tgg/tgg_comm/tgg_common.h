@@ -45,7 +45,7 @@ void tgg_free_cli_snd_data(int core_id, tgg_send_data* wdata);
 // 不能返回引用，内部加锁的
 std::string tgg_get_cli_uid(int core_id, int fd);
 int tgg_get_cli_cid(int core_id, int fd);
-std::string tgg_get_cli_reserved(int core_id, int fd);
+const char* tgg_get_cli_reserved(int core_id, int fd);
 int tgg_set_cli_idx(int core_id, int fd, int idx);
 int tgg_set_cli_status(int core_id, int fd, int status);
 int tgg_set_cli_authorized(int core_id, int fd, int authorized);

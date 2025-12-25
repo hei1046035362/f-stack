@@ -182,50 +182,17 @@ static const char HTTP_PREFIX[] = "HTTP_";
 static const char UNKNOWN_HOST[] = "unknown";
 
 // 封装发送给bw的握手请求数据
-static std::string build_server_data(const http_request_t &req, unsigned int ip, 
-                             ushort port) {
-    tl_buffer.Clear();  // 复用线程局部缓冲区
-    tl_writer.Reset(tl_buffer);
-    
-    // 1. 直接流式构建JSON（避免DOM树开销）
-    tl_writer.StartObject();
-    
-    // ===== SERVER_VARS 优化区块 =====
-    tl_writer.Key("server");
-    tl_writer.StartObject();
-    
-    // 基础字段（零拷贝引用）
-    tl_writer.Key("REQUEST_METHOD");
-    tl_writer.String(req.method.data, req.method.len);
-    
-    tl_writer.Key("REQUEST_URI");
-    tl_writer.String(req.uri.data, req.uri.len);
-    
-    tl_writer.Key("SERVER_PROTOCOL");
-    char protocal[10];
+static int build_server_data(const http_request_t &req, unsigned int ip, 
+                             ushort port, char* data) {
+    char protocal[10] = {0};
     sprintf(protocal, "HTTP/1.%d", req.minor_version);
-    tl_writer.String(protocal, strlen(protocal));
-    
-    // 网络信息（SIMD加速IP转换）
-    char ip_str[INET_ADDRSTRLEN];
+
+    char ip_str[INET_ADDRSTRLEN] = {0};
     inet_ntop(AF_INET, &ip, ip_str, sizeof(ip_str));
-    tl_writer.Key("REMOTE_ADDR");
-    tl_writer.String(ip_str, strlen(ip_str));
-    
-    tl_writer.Key("REMOTE_PORT");
-    tl_writer.Uint(port);
-    
-    tl_writer.Key("SERVER_PORT");
-    tl_writer.Uint(TggConfigure::getInstance()->get_gateway_port());
-    
-    // 主机名（分支预测优化）
-    tl_writer.Key("SERVER_NAME");
-    if(req.host.len <= 0 || req.host.data[0] == ' ') {
-        tl_writer.String(UNKNOWN_HOST);
-    } else {
-        tl_writer.String(req.host.data, req.host.len);
-    }
-    
+
+    // 请求行头
+    char header[1024] = {0};
+    size_t pos = 0;
     // ===== HEADER转换优化（SIMD加速） =====
     for (size_t i = 0; i < req.num_headers; i++) {
         // 原位转换：避免临时字符串
@@ -246,34 +213,185 @@ static std::string build_server_data(const http_request_t &req, unsigned int ip,
             *dest++ = c;
         }
         *dest = '\0';
-        
-        tl_writer.Key(header_key);
-        tl_writer.String(req.headers[i].value, req.headers[i].value_len);
+        size_t need_len = strlen(header_key) + req.headers[i].value_len + 11;
+        if(pos + need_len > 1023) {
+            LOG_ERROR("headers length exceed reserved.");
+            return -1;
+        }
+        int writen = sprintf(header + pos, "\"%s\":\"%.*s\",", header_key, (int)req.headers[i].value_len, req.headers[i].value);
+        if(writen < 0) {
+            LOG_ERROR("sprintf header failed:\"%s\":\"%.*s\",", header_key, (int)req.headers[i].value_len, req.headers[i].value);
+            return -1;
+        }
+        pos += writen;
     }
-    tl_writer.EndObject(); // server结束
-    
-    // ===== QUERY参数优化（批量处理） =====
-    tl_writer.Key("get");
-    tl_writer.StartObject();
+    if(pos > 0) {
+        header[pos] = '\0';
+    }
+    // 请求行参数
+    char param[1024] = {0};
+    pos = 0;
     for (size_t i = 0; i < req.num_query_params; i++) {
-        tl_writer.Key(req.query_params[i].name, req.query_params[i].name_len);
-        tl_writer.String(req.query_params[i].value, req.query_params[i].value_len);
+        size_t need_len = req.query_params[i].name_len + req.query_params[i].value_len + 6;
+        if(pos + need_len > 1023) {
+            LOG_ERROR("query_params length exceed reserved.");
+            return -1;
+        }
+        int writen = sprintf(param + pos, "\"%.*s\":\"%.*s\",", (int)req.query_params[i].name_len, req.query_params[i].name,
+            (int)req.query_params[i].value_len, req.query_params[i].value);
+        if(writen < 0) {
+            LOG_ERROR("sprintf param failed:\"%.*s\":\"%.*s\",", (int)req.query_params[i].name_len, req.query_params[i].name,
+            (int)req.query_params[i].value_len, req.query_params[i].value);
+            return -1;
+        }
+        pos += writen;
     }
-    tl_writer.EndObject();
-    
-    // ===== COOKIE优化（预过滤） =====
-    tl_writer.Key("cookie");
-    tl_writer.StartObject();
+    if(pos > 0) {
+        param[pos] = '\0';
+    }
+
+    // 请求行参数
+    char cookie[1024] = {0};
+    pos = 0;
     for (size_t i = 0; i < req.num_cookies; i++) {
-        tl_writer.Key(req.cookies[i].name, req.cookies[i].name_len);
-        tl_writer.String(req.cookies[i].value, req.cookies[i].value_len);
+        size_t need_len = req.cookies[i].name_len + req.cookies[i].value_len + 6;
+        if(pos + need_len > 1023) {
+            LOG_ERROR("cookies length exceed reserved.");
+            return -1;
+        }
+        int writen = sprintf(cookie + pos, "\"%.*s\":\"%.*s\",", (int)req.cookies[i].name_len, req.cookies[i].name,
+            (int)req.cookies[i].value_len, req.cookies[i].value);
+        if(writen < 0) {
+            LOG_ERROR("sprintf cookie failed:\"%.*s\":\"%.*s\",", (int)req.cookies[i].name_len, req.cookies[i].name,
+            (int)req.cookies[i].value_len, req.cookies[i].value);
+            return -1;
+        }
+        pos += writen;
     }
-    tl_writer.EndObject();
+    if(pos > 0) {
+        cookie[pos] = '\0';
+    }
+    int host_len = req.host.len > 0 ? req.host.len : sizeof(UNKNOWN_HOST);
+    int writen = sprintf(data, 
+        "{\"server\":{"
+                "\"REQUEST_METHOD\":\"%.*s\","
+                "\"REQUEST_URI\":\"%.*s\","
+                "\"SERVER_PROTOCOL\":\"%s\","
+                "\"REMOTE_ADDR\":\"%s\","
+                "\"REMOTE_PORT\":\"%u\","
+                "\"SERVER_PORT\":\"%u\","
+                "\"SERVER_NAME\":\"%.*s\","
+                "%s"// headers
+            "},"
+            "\"get\":{%s},"
+            "\"cookie\":{%s}"
+        "}",
+         (int)req.method.len, req.method.data,
+         (int)req.uri.len, req.uri.data,
+         protocal,
+         ip_str,
+         port,
+         TggConfigure::getInstance()->get_gateway_port(),
+         host_len, req.host.len > 0 ? req.host.data : UNKNOWN_HOST,
+         header,
+         param,
+         cookie
+    );
+    if(writen < 0) {
+        LOG_ERROR("format server data failed.");
+        return -1;
+    }
+    return 0;
+    // tl_buffer.Clear();  // 复用线程局部缓冲区
+    // tl_writer.Reset(tl_buffer);
     
-    tl_writer.EndObject(); // 根对象结束
+    // // 1. 直接流式构建JSON（避免DOM树开销）
+    // tl_writer.StartObject();
     
-    // 直接返回缓冲区引用（避免二次拷贝）
-    return {tl_buffer.GetString(), tl_buffer.GetSize()};
+    // // ===== SERVER_VARS 优化区块 =====
+    // tl_writer.Key("server");
+    // tl_writer.StartObject();
+    
+    // // 基础字段（零拷贝引用）
+    // tl_writer.Key("REQUEST_METHOD");
+    // tl_writer.String(req.method.data, req.method.len);
+    
+    // tl_writer.Key("REQUEST_URI");
+    // tl_writer.String(req.uri.data, req.uri.len);
+    
+    // tl_writer.Key("SERVER_PROTOCOL");
+    // char protocal[10];
+    // sprintf(protocal, "HTTP/1.%d", req.minor_version);
+    // tl_writer.String(protocal, strlen(protocal));
+    
+    // // 网络信息（SIMD加速IP转换）
+    // char ip_str[INET_ADDRSTRLEN];
+    // inet_ntop(AF_INET, &ip, ip_str, sizeof(ip_str));
+    // tl_writer.Key("REMOTE_ADDR");
+    // tl_writer.String(ip_str, strlen(ip_str));
+    
+    // tl_writer.Key("REMOTE_PORT");
+    // tl_writer.Uint(port);
+    
+    // tl_writer.Key("SERVER_PORT");
+    // tl_writer.Uint(TggConfigure::getInstance()->get_gateway_port());
+    
+    // // 主机名（分支预测优化）
+    // tl_writer.Key("SERVER_NAME");
+    // if(req.host.len <= 0 || req.host.data[0] == ' ') {
+    //     tl_writer.String(UNKNOWN_HOST);
+    // } else {
+    //     tl_writer.String(req.host.data, req.host.len);
+    // }
+    
+    // // ===== HEADER转换优化（SIMD加速） =====
+    // for (size_t i = 0; i < req.num_headers; i++) {
+    //     // 原位转换：避免临时字符串
+    //     char header_key[256];
+    //     char* dest = header_key;
+    //     const char* src = req.headers[i].name;
+    //     size_t index = 0;
+        
+    //     // 1. 添加"HTTP_"前缀
+    //     memcpy(dest, HTTP_PREFIX, sizeof(HTTP_PREFIX) -1);
+    //     dest += sizeof(HTTP_PREFIX) -1;
+        
+    //     // 2. 大写转换+替换字符（向量化处理）
+    //     while (*src && index++ < req.headers[i].name_len && dest - header_key < 250) {
+    //         char c = *src++;
+    //         // SIMD友好分支：减少跳转预测失败
+    //         c = (c == '-') ? '_' : c & ~0x20; // 位运算转大写
+    //         *dest++ = c;
+    //     }
+    //     *dest = '\0';
+        
+    //     tl_writer.Key(header_key);
+    //     tl_writer.String(req.headers[i].value, req.headers[i].value_len);
+    // }
+    // tl_writer.EndObject(); // server结束
+    
+    // // ===== QUERY参数优化（批量处理） =====
+    // tl_writer.Key("get");
+    // tl_writer.StartObject();
+    // for (size_t i = 0; i < req.num_query_params; i++) {
+    //     tl_writer.Key(req.query_params[i].name, req.query_params[i].name_len);
+    //     tl_writer.String(req.query_params[i].value, req.query_params[i].value_len);
+    // }
+    // tl_writer.EndObject();
+    
+    // // ===== COOKIE优化（预过滤） =====
+    // tl_writer.Key("cookie");
+    // tl_writer.StartObject();
+    // for (size_t i = 0; i < req.num_cookies; i++) {
+    //     tl_writer.Key(req.cookies[i].name, req.cookies[i].name_len);
+    //     tl_writer.String(req.cookies[i].value, req.cookies[i].value_len);
+    // }
+    // tl_writer.EndObject();
+    
+    // tl_writer.EndObject(); // 根对象结束
+    
+    // // 直接返回缓冲区引用（避免二次拷贝）
+    // return {tl_buffer.GetString(), tl_buffer.GetSize()};
 }
 
 
@@ -323,7 +441,8 @@ static int write_data()
             clean_bw_data(prc_id, bdata);
             continue;
         }
-        std::string result;
+        //std::string result;
+        char result[4096] = {0};
         tgg_bw_protocal header = {
             .pack_len = (unsigned int)sizeof(tgg_bw_protocal) + bdata->data_len,
             .cmd = (unsigned char)map_msgtype[bdata->fd_opt],
@@ -336,29 +455,41 @@ static int write_data()
             .gateway_port = TggConfigure::getInstance()->get_gateway_port(),
             .ext_len = 0// TODO 暂时不知道上行数据是否能用上
         };
-        std::string ext_data = tgg_get_cli_reserved(bdata->coreid, bdata->fd);
+        const char* ext_data = tgg_get_cli_reserved(bdata->coreid, bdata->fd);
         if(bdata->fd_opt & FD_CLOSE) {// 要在发送给bw之前先回给客户端，否则客户端收到的消息可能不及时，write会导致协程切换
             // 这里发送给客户端和清理hash表信息的顺序待商榷
             LOG_WARNING("catched an close cmd, coreid[%d] fd[%d] idx[%d] cid:%d.", bdata->coreid, bdata->fd, bdata->idx, cid);
             Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
             tgg_free_session(bdata->coreid, bdata->fd, cid);
         }
-        std::string sdata;
+        char sdata[4096] = {0};
+        size_t sdata_len = 0;
+        // std::string sdata;
         if(bdata->data_len > 0) {
             if(bdata->fd_opt & FD_NEW) {
                 struct http_request_t req;
                 if(!parse_http_request((char*)bdata->data, bdata->data_len, &req, 1)) {
-                    LOG_ERROR("parse http request failed:%s.", (char*)bdata->data);
+                    LOG_ERROR("parse http request failed:%s, idx:%d.", (char*)bdata->data, bdata->idx);
+                    Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
+                    tgg_free_session(bdata->coreid, bdata->fd, cid);
+                    continue;
                 }
-                sdata = build_server_data(req, bdata->peer_ip, bdata->peer_port);
-                header.pack_len = (unsigned int)sizeof(tgg_bw_protocal) + sdata.length();
+                if (build_server_data(req, bdata->peer_ip, bdata->peer_port, sdata) < 0) {
+                    LOG_ERROR("build_server_data failed, idx:%d", bdata->idx);
+                    Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
+                    tgg_free_session(bdata->coreid, bdata->fd, cid);
+                    continue;
+                }
+                sdata_len = strlen(sdata);// build_server_data 格式化后的数据为json字符串，可以用strlen
+                header.pack_len = (unsigned int)sizeof(tgg_bw_protocal) + sdata_len;
             } else {
-                sdata = std::move(std::string((char*)bdata->data, bdata->data_len));
+                memcpy(sdata, (char*)bdata->data, bdata->data_len);
+                sdata_len = bdata->data_len;
             }
             if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
                 std::string print_data;
                 if(bdata->data_len > 4 && *((unsigned short*)bdata->data) == 0xfeff) {
-                    message_unpack(sdata, print_data);
+                    message_unpack(sdata, sdata_len, print_data);
                 } else {
                     print_data = sdata;
                 }
@@ -366,10 +497,10 @@ static int write_data()
             }
         }
         clean_bw_data(prc_id, bdata);// 在调用write之前清理数据，防止协程切换导致的地址变化
-        BwPackageHandler::encode(result, &header, sdata, ext_data);
+        size_t ret_len = BwPackageHandler::encode(result, &header, sdata, sdata_len, ext_data);
 
         // int ret = co_write_complete(fd, result.c_str(), result.length());
-        int ret = turbo_write(fd, result.c_str(), result.length());
+        int ret = turbo_write(fd, result, ret_len);
         // int ret = splice_write(pipefd, fd, result.c_str(), result.length());
         // int ret = write(fd, result.c_str(), result.length());
         if(-1 == ret) {

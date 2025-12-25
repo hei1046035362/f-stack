@@ -14,7 +14,7 @@ tgg_bw_info* get_valid_bwinfo_by_fd(int fd);
 int message_pack(uint16_t command, uint32_t seq, uint8_t protocol,
             uint8_t compressFormat, std::string_view body, std::string& result);
 
-int message_unpack(const std::string& packedData, std::string& result);
+int message_unpack(const char* packedData, size_t sdata_len, std::string& result);
 
 template <typename T>
 int write_list_to_file(const std::string& filename, 
