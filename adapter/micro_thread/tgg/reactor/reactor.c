@@ -322,18 +322,18 @@ void reactor_run(void* data) {
                 g_reactor.events[fd].rcallback(fd, revents, g_reactor.events[fd].arg);
             }
         }
-
-        static uint64_t last_stat_time = 0;
-        if (now - last_stat_time >= 10000) {
-            LOG_DEBUG("定时器统计: 总数=%u, 添加=%lu, 更新=%lu, 移除=%lu, 超时=%lu, 检查次数=%lu",
-                    g_reactor.timer_wheel.count,
-                    g_reactor.stats.timer_adds,
-                    g_reactor.stats.timer_updates,
-                    g_reactor.stats.timer_removes,
-                    g_reactor.stats.timer_expires,
-                    g_reactor.stats.timer_ticks);
-            last_stat_time = now;
-        }
+        // 调试打印reactor的相关统计信息
+        // static uint64_t last_stat_time = 0;
+        // if (now - last_stat_time >= 10000) {
+        //     LOG_DEBUG("定时器统计: 总数=%u, 添加=%lu, 更新=%lu, 移除=%lu, 超时=%lu, 检查次数=%lu",
+        //             g_reactor.timer_wheel.count,
+        //             g_reactor.stats.timer_adds,
+        //             g_reactor.stats.timer_updates,
+        //             g_reactor.stats.timer_removes,
+        //             g_reactor.stats.timer_expires,
+        //             g_reactor.stats.timer_ticks);
+        //     last_stat_time = now;
+        // }
     }
 
     if (g_reactor.epoll_fd >= 0) {
