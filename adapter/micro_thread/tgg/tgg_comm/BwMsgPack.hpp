@@ -29,18 +29,22 @@ constexpr bool is_scalar()
 class BwPackageHandler {
 public:
     // 获取整个包的buffer，对应encode函数   外部需要填充bwdata->flag和bwdata->cmd 两个字段，ip和port默认都是不填的，可选
-    static void encode(std::string &result, tgg_bw_protocal* bwdata, 
-        const std::string& body, const std::string& extend_data = "")
+    static size_t encode(char* result, tgg_bw_protocal* bwdata, 
+        const char* body, int body_len, const char* extend_data = "")
      {
-        bwdata->ext_len = extend_data.length() > 0 ? extend_data.length() : 0;
-        bwdata->pack_len = sizeof(tgg_bw_protocal) + bwdata->ext_len + body.size();
+        if(extend_data == NULL || extend_data[0] == '0') {
+            bwdata->ext_len = 0;
+        } else {
+            bwdata->ext_len = strlen(extend_data);
+        }
+        bwdata->pack_len = sizeof(tgg_bw_protocal) + bwdata->ext_len + body_len;
 
-        result.resize(bwdata->pack_len);
+        // result.resize(bwdata->pack_len);
         // 拼接ext_data和body
         if (bwdata->ext_len > 0) {
-            result.replace(sizeof(tgg_bw_protocal), bwdata->ext_len, extend_data);
+            memcpy(result + sizeof(tgg_bw_protocal), extend_data, bwdata->ext_len);
         }
-        result.replace(sizeof(tgg_bw_protocal) + bwdata->ext_len, body.size(), body);
+        memcpy(result + sizeof(tgg_bw_protocal) + bwdata->ext_len, body, body_len);
 
         if(big_endian()) {
             bwdata->pack_len = htonl(bwdata->pack_len);
@@ -49,7 +53,8 @@ public:
             bwdata->gateway_port = htons(bwdata->gateway_port);
             bwdata->ext_len = htonl(bwdata->ext_len);
         }
-        std::memcpy(&result[0], bwdata, sizeof(tgg_bw_protocal));
+        memcpy(result, bwdata, sizeof(tgg_bw_protocal));
+        return (sizeof(tgg_bw_protocal) + bwdata->ext_len + body_len);
     }
 
     // 从二进制数据转换为数组，对应decode函数

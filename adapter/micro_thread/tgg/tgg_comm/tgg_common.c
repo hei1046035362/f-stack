@@ -289,7 +289,7 @@ int tgg_get_cli_cid(int core_id, int fd)
 	return ((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd].cid;	
 }
 
-std::string tgg_get_cli_reserved(int core_id, int fd)
+const char* tgg_get_cli_reserved(int core_id, int fd)
 {
 	// SpinLock lock(get_cli_lock());
 	return ((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd].reserved;	

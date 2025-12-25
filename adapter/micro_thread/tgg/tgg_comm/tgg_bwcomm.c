@@ -92,14 +92,14 @@ int gzdeflate(std::string_view input, std::string& outBuffer) {
     return 0;
 }
 
-int gzinflate(std::string_view input, std::string& outBuffer)
+int gzinflate(const char* input, size_t input_len, char* outBuffer)
 {
     // 预计最大的解压后缓冲区大小，这里设置为输入字符串大小的10倍（可根据实际情况调整）
-    uLongf outBufferSize = input.length() * 2;
+    uLongf outBufferSize = input_len * 2;
 
     // 分配解压后的输出缓冲区
     // std::string outBuffer;
-    outBuffer.resize(outBufferSize);
+    // outBuffer.resize(outBufferSize);
 
     // 调用inflate函数进行解压
     z_stream inflateStream;
@@ -113,15 +113,15 @@ int gzinflate(std::string_view input, std::string& outBuffer)
         return -1;
     }
 
-    inflateStream.avail_in = input.length();
-    inflateStream.next_in = (Bytef*)input.data();
+    inflateStream.avail_in = input_len;
+    inflateStream.next_in = (z_const Bytef*)input;
     inflateStream.avail_out = outBufferSize;
-    inflateStream.next_out = (Bytef*)outBuffer.c_str();
+    inflateStream.next_out = (Bytef*)outBuffer;
 
     // 执行解压操作
     if (inflate(&inflateStream, Z_FINISH)!= Z_STREAM_END) {
         inflateEnd(&inflateStream);
-        LOG_ERROR("inflate failed.");
+        LOG_ERROR("inflate failed, input:%s.", bin2hex(std::string_view(input, input_len)).c_str());
         return -1;
     }
 
@@ -133,7 +133,7 @@ int gzinflate(std::string_view input, std::string& outBuffer)
     }
     // 结束inflate流并释放相关资源
     inflateEnd(&inflateStream);
-    outBuffer.resize(actualOutSize);
+    outBuffer[actualOutSize] = '\0';
     // 将解压后的数据转换为字符串并返回
     return 0;
 }
@@ -212,13 +212,13 @@ static std::string rapidjson_to_string(const rapidjson::Value& val)
     return buffer.GetString();
 }
 
-int message_unpack(const std::string& packedData, std::string& result)
+int message_unpack(const char* packedData, size_t packedData_len, std::string& result)
 {
     const unsigned int PACKAGE_SEPARATOR = 65534;
 
     // 验证包分隔符
     unsigned short package_separator_check;
-    memcpy(&package_separator_check, packedData.c_str(), 2);
+    memcpy(&package_separator_check, packedData, 2);
     if(big_endian()) {
         package_separator_check = ntohs(package_separator_check);
     }
@@ -228,11 +228,11 @@ int message_unpack(const std::string& packedData, std::string& result)
 
     // 读取包长度
     unsigned int packageLength;
-    memcpy(&packageLength, packedData.c_str() + 4, 4);
+    memcpy(&packageLength, packedData + 4, 4);
     if(big_endian()) {
         packageLength = ntohl(packageLength);
     }
-    if (packedData.length()!= packageLength) {
+    if (packedData_len!= packageLength) {
         return -1; // 包长度不匹配，返回空结果向量
     }
 
@@ -240,45 +240,46 @@ int message_unpack(const std::string& packedData, std::string& result)
     size_t offset = 10; // 跳过包分隔符、未使用字段、包长度和额外大小
 
     unsigned short command;
-    memcpy(&command, packedData.c_str() + offset, 2);
+    memcpy(&command, packedData + offset, 2);
     if(big_endian()) {
         command = ntohs(command);
     }
     offset += 2;
 
     unsigned int seq;
-    memcpy(&seq, packedData.c_str() + offset, 4);
+    memcpy(&seq, packedData + offset, 4);
     if(big_endian()) {
         seq = ntohl(seq);
     }
     offset += 4;
 
     unsigned short version;
-    memcpy(&version, packedData.c_str() + offset, 2);
+    memcpy(&version, packedData + offset, 2);
     if(big_endian()) {
         version = ntohs(version);
     }
     offset += 2;
 
     unsigned char protocol;
-    memcpy(&protocol, packedData.c_str() + offset, 1);
+    memcpy(&protocol, packedData + offset, 1);
     offset += 1;
 
     unsigned char compressFormat;
-    memcpy(&compressFormat, packedData.c_str() + offset, 1);
+    memcpy(&compressFormat, packedData + offset, 1);
     offset += 1;
 
     // 读取压缩后的正文
-    std::string compressedBody = packedData.substr(offset);
-    std::string body = "";
+    const char* compressedBody = packedData + offset;
+    char body[4096] = {0};
     // 解压缩正文（调用假设存在的decompress函数）
     if (compressFormat) {
-        if (gzinflate(compressedBody, body) < 0) {
+        if (gzinflate(compressedBody, packedData_len - offset, body) < 0) {
             return -1; // 解压缩失败，返回空结果向量
         }
-    } else {
-        body = compressedBody;
     }
+    // } else {
+    //     memcpy(body, compressedBody, packedData_len - offset);
+    // }
 
     // 结果存储成json
     rapidjson::Document jdata;
@@ -300,7 +301,7 @@ int message_unpack(const std::string& packedData, std::string& result)
                    allocator);
     
     // 处理二进制数据（假设bin2hex返回std::string）
-    std::string hexBody = bin2hex(body, false);
+    std::string hexBody = bin2hex(compressFormat ? body : compressedBody, false);
     jdata.AddMember("body", 
                    rapidjson::Value().SetString(hexBody.c_str(), hexBody.size(), allocator).Move(), 
                    allocator);
