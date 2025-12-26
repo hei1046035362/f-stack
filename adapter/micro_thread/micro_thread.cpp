@@ -32,8 +32,6 @@
 
 using namespace NS_MICRO_THREAD;
 
-static int      s_fd_stat[MAX_FD_COUNT] = {0};
-
 #define  ASSERT(statement)
 //#define  ASSERT(statement)   assert(statement)
 
@@ -213,8 +211,6 @@ MicroThread::MicroThread(ThreadType type)
     _start = NULL;
     _args = NULL;
     _parent = NULL;
-    _fd = -1;
-    _writing = 0;
 }
 
 void MicroThread::CleanState()
@@ -227,16 +223,6 @@ void MicroThread::CleanState()
     _start = NULL;
     _args = NULL;
     _parent = NULL;
-    _fd = -1;
-}
-
-utime64_t MicroThread::HeapValue() {
-    // KqueuerObj* obj = TAILQ_LAST(&(this->_fdset), __KqFdList);
-    if(_fd > 0 && _fd < MAX_FD_COUNT && s_fd_stat[_fd] == FF_FD_CLOSE) {
-        MtFrame* frame = MtFrame::Instance();
-        SetWakeupTime(frame->GetLastClock());
-    }
-    return GetWakeupTime();
 }
 
 void MicroThread::Run()
@@ -889,7 +875,7 @@ void MtFrame::WaitNotify(utime64_t timeout)
 
 void MtFrame::NotifyThread(MicroThread* thread)
 {
-    if(thread == NULL || thread->GetWriting()){
+    if(thread == NULL){
         return;
     }
     MicroThread* cur_thread = GetActiveThread();
@@ -1007,15 +993,6 @@ int MtFrame::recvfrom(int fd, void *buf, int len, int flags, struct sockaddr *fr
         if (!mtframe->KqueueSchedule(NULL, &epfd, timeout))
         {
             MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
-            if (s_fd_stat[fd] == FF_FD_CLOSE) {
-                return -4;
-            }
-            now = mtframe->GetLastClock();
-            if ((int)(now - start) > timeout)
-            {
-                errno = ETIME;
-                return -1;
-            }
             return -2;
         }
 
@@ -1080,16 +1057,6 @@ int MtFrame::sendto(int fd, const void *msg, int len, int flags, const struct so
         epfd.EnableOutput();
         epfd.SetOwnerThread(thread);
         if (!mtframe->KqueueSchedule(NULL, &epfd, timeout)) {
-            MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
-            if (s_fd_stat[fd] == FF_FD_CLOSE) {
-                return -4;
-            }
-            now = mtframe->GetLastClock();
-            if ((int)(now - start) > timeout)
-            {
-                errno = ETIME;
-                return -1;
-            }
             return -3;
         }
     }
@@ -1141,16 +1108,6 @@ int MtFrame::connect(int fd, const struct sockaddr *addr, int addrlen, int timeo
         epfd.EnableOutput();
         epfd.SetOwnerThread(thread);
         if (!mtframe->KqueueSchedule(NULL, &epfd, timeout)) {
-            MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
-            if (s_fd_stat[fd] == FF_FD_CLOSE) {
-                return -4;
-            }
-            now = mtframe->GetLastClock();
-            if ((int)(now - start) > timeout)
-            {
-                errno = ETIME;
-                return -1;
-            }
             return -3;
         }
     }
@@ -1197,20 +1154,9 @@ int MtFrame::accept(int fd, struct sockaddr *addr, socklen_t *addrlen, int timeo
         epfd.EnableInput();
         epfd.SetOwnerThread(thread);
         if (!mtframe->KqueueSchedule(NULL, &epfd, timeout)) {
-            MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
-            if (s_fd_stat[fd] == FF_FD_CLOSE) {
-                return -4;
-            }
-            now = mtframe->GetLastClock();
-            if ((int)(now - start) > timeout)
-            {
-                errno = ETIME;
-                return -1;
-            }
             return -3;
         }
     }
-    s_fd_stat[acceptfd] = FF_FD_OPEN;
     return acceptfd;
 }
 
@@ -1253,16 +1199,6 @@ ssize_t MtFrame::read(int fd, void *buf, size_t nbyte, int timeout)
         epfd.EnableInput();
         epfd.SetOwnerThread(thread);
         if (!mtframe->KqueueSchedule(NULL, &epfd, timeout)) {
-            MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
-            if (s_fd_stat[fd] == FF_FD_CLOSE) {
-                return -4;
-            }
-            now = mtframe->GetLastClock();
-            if ((int)(now - start) > timeout)
-            {
-                errno = ETIME;
-                return -1;
-            }
             return -3;
         }
     }
@@ -1321,16 +1257,6 @@ ssize_t MtFrame::write(int fd, const void *buf, size_t nbyte, int timeout)
         epfd.EnableOutput();
         epfd.SetOwnerThread(thread);
         if (!mtframe->KqueueSchedule(NULL, &epfd, timeout)) {
-            MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
-            if (s_fd_stat[fd] == FF_FD_CLOSE) {
-                return -4;
-            }
-            now = mtframe->GetLastClock();
-            if ((int)(now - start) > timeout)
-            {
-                errno = ETIME;
-                return -1;
-            }
             return -3;
         }
     }
@@ -1372,21 +1298,7 @@ int MtFrame::recv(int fd, void *buf, int len, int flags, int timeout)
         epfd.SetOwnerThread(thread);
         if (!mtframe->KqueueSchedule(NULL, &epfd, timeout))
         {
-            if(errno != ETIME) {
-                MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
-            }
-            if (s_fd_stat[fd] == FF_FD_CLOSE) {
-                return -4;
-            }
-            now = mtframe->GetLastClock();
-            if ((int)(now - start) > timeout)
-            {
-                // errno = ETIME;
-                return -1;
-            }
-            if (errno == ETIME) {
-                return -5;
-            }
+            MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
             return -2;
         }
 
@@ -1444,10 +1356,7 @@ ssize_t MtFrame::send(int fd, const void *buf, size_t nbyte, int flags, int time
             if (errno == EINTR) {
                 continue;
             }
-            // if (errno == EAGAIN) {  // 资源暂时不可用
-            //     sleep(1); // 等待 1ms 重试
-            //     continue;
-            // }
+
             if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) {
                 MTLOG_ERROR("write failed, errno: %d", errno);
                 return -2;
@@ -1465,35 +1374,13 @@ ssize_t MtFrame::send(int fd, const void *buf, size_t nbyte, int flags, int time
         epfd.SetOsfd(fd);
         epfd.EnableOutput();
         epfd.SetOwnerThread(thread);
-        thread->SetWriting(1);
         if (!mtframe->KqueueSchedule(NULL, &epfd, timeout)) {
-            thread->SetWriting(0);
-            if(errno != ETIME) {
-                MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
-            }
-            if (s_fd_stat[fd] == FF_FD_CLOSE) {
-                return -4;
-            }
-            now = mtframe->GetLastClock();
-            if ((int)(now - start) > timeout)
-            {
-                // errno = ETIME;
-                return -1;
-            }
-            if(errno == ETIME) {
-                return -5;
-            }
+            MTLOG_DEBUG("epoll schedule failed, errno: %d", errno);
             return -3;
         }
-        thread->SetWriting(0);
     }
 
     return nbyte;
-}
-
-void MtFrame::close(int fd)
-{
-    s_fd_stat[fd] = FF_FD_CLOSE;
 }
 
 void MtFrame::sleep(int ms)
@@ -1542,15 +1429,6 @@ int MtFrame::WaitEvents(int fd, int events, int timeout)
         if (!mtframe->KqueueSchedule(NULL, &epfd, timeout))
         {
             MTLOG_TRACE("epoll schedule failed, errno: %d", errno);
-            if (s_fd_stat[fd] == FF_FD_CLOSE) {
-                return -4;
-            }
-            now = mtframe->GetLastClock();
-            if ((int)(now - start) > timeout)
-            {
-                errno = ETIME;
-                return -1;
-            }
             return 0;
         }
 
