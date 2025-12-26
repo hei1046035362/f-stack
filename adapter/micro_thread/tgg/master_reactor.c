@@ -29,6 +29,8 @@ static const char* s_dump_file = "/var/corefiles/";//tgg_gw_master_core
 // static unsigned long long s_fd_timeout = 60*1000;
 extern struct rte_mempool* g_mempool_write;
 extern struct rte_mempool* g_mempool_write_data;
+extern struct rte_mempool* g_mempool_clictx_buffer;
+
 extern ushort g_gateway_port;
 extern tgg_stats g_tgg_stats;
 extern int g_fd_limit;
@@ -137,8 +139,9 @@ static void free_client_context(client_context_t *ctx) {
         if (ctx->fd >= 0) {
             ff_close(ctx->fd);
         }
-        free(ctx);
-        ctx = NULL;
+        high_freq_free(g_mempool_clictx_buffer, ctx, sizeof(client_context_t));
+        // free(ctx);
+        // ctx = NULL;
     }
 }
 
@@ -243,8 +246,9 @@ static void do_real_send(int fd, event_type_t events, void *arg)
 }
 
 static client_context_t *create_client_context(int fd, unsigned int ip, unsigned short port, int idx) {
-    client_context_t *ctx = (client_context_t *)malloc(sizeof(client_context_t));
-    if (!ctx) return NULL;
+    client_context_t *ctx = NULL;
+    if(high_freq_malloc(g_mempool_clictx_buffer, (void**)&ctx, sizeof(client_context_t)) < 0)//(client_context_t *)malloc(sizeof(client_context_t));
+        return NULL;
     
     ctx->fd = fd;
     ctx->ip = ip;

@@ -78,7 +78,7 @@ typedef struct client_context_s {
     unsigned short port;
     int idx;
     // ff_uthread_t *uthread;
-} client_context_t;
+} __attribute__((aligned(RTE_CACHE_LINE_SIZE))) client_context_t;
 
 typedef void (*event_callback_t)(int fd, event_type_t events, void *arg);
 
