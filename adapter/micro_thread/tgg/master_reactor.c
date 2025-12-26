@@ -21,7 +21,7 @@
 #include "tgg_comm/tgg_master_timers.h"
 #include "tgg_comm/tgg_ip_filter.h"
 #include "reactor/reactor.h"
-
+#include <gperftools/heap-profiler.h>
 static const char* s_dump_file = "/var/corefiles/";//tgg_gw_master_core
 
 // 1、心跳检测间隔，没收到数据就会结束fd，
@@ -543,6 +543,7 @@ static void tgg_recv_clean_prev()
 
 int main(int argc, char *argv[])
 {
+    HeapProfilerStart("gwrcv_reactor.hprof");
     init_core(s_dump_file);
     if (tgg_init_config(argc, argv) < 0) {
         printf("init config error.\n");
@@ -629,5 +630,6 @@ int main(int argc, char *argv[])
     rte_eal_cleanup();
     LOG_WARNING("gwrcv left fd count:%ld", s_left_fd);
     AsyncLogger::getInstance().shutdown();
+    HeapProfilerStop();
     return 0;
 }

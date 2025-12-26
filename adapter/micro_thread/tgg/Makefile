@@ -18,11 +18,11 @@ BINARY = gwrcv gwcliprc gwbwprc gwredis gwregister
 FF_LIBS+= $(shell $(PKGCONF) --static --libs libdpdk)
 FF_LIBS+= -L${FF_PATH}/lib -Wl,--whole-archive,-lfstack,--no-whole-archive \
 		-L${FF_PATH}/app/libco/lib
-FF_LIBS+= -Wl,--no-whole-archive -lrt -lm -ldl -lcrypto -lpthread -lnuma -lstdc++ -z noexecstack
+FF_LIBS+= -Wl,--no-whole-archive -lrt -lm -ldl -lcrypto -lpthread -lnuma -ltcmalloc -lstdc++ -z noexecstack
 
 # Comment the following line if you are not using the gnu c compiler
 #C_ARGS = -Wall -g -fPIC -D_DEBUG
-C_ARGS = -Wall -g -fPIC -O0 -DMT_REAL_TIME -Wno-register -Wa,--noexecstack
+C_ARGS = -Wall -g -rdynamic -fPIC -O0 -DMT_REAL_TIME -Wno-register -Wa,--noexecstack
 #.SUFFIXES: .o .cpp
 
 ifeq ($(ARCH),32)
