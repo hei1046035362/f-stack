@@ -21,6 +21,7 @@
 #include "tgg_comm/tgg_conf.h"
 #include "comm/log.hpp"
 #include "comm/common.hpp"
+#include "reactor/reactor.h"
 
 const char* g_gateway_ip_str = "192.168.40.129";
 ushort g_gateway_port = 80;
@@ -109,6 +110,7 @@ const char* s_pool_large_data_name = "tgg_pl_large_data";// 客户端上行透�
 const char* s_pool_ws_buffer_name = "tgg_pl_ws_buffer";// 缓存ws大包使用(处理分包粘包)
 const char* s_pool_clifdlist_data_name = "tgg_pl_fdlst_data";// 下行发送fd列表的队列
 const char* s_pool_fd_snddata_name = "tgg_pl_fd_data";// 下行发送fd列表的队列
+const char* s_pool_cli_ctx_name = "tgg_cli_ctx_rdata";// 客户端reactor要使用的必要信息
 
 // 内存池大小 TODO 大小根据队列长度设置
 static uint32_t s_trans_mempool_size;// 尽量设置成2^n 单个队列预留 上行透传内存
@@ -125,6 +127,8 @@ static uint32_t s_large_data_mempool_size;// 尽量设置成2^n  上行发送 �
 static uint32_t s_ws_buffer_mempool_size;// 尽量设置成2^n  ws缓存 数据 内存
 
 static uint32_t s_fd_snddata_mempool_size;// 尽量设置成2^n  每个fd的待发送数据链表节点 内存
+
+static uint32_t s_fd_cli_ctx_mempool_size;// 尽量设置成2^n  每个fd的待发送数据链表节点 内存
 
 // 每个内存池单个内存块儿的大小
 static uint32_t s_mempool_trans_cache = sizeof(tgg_trans_data);// 单个缓存的大小待定
@@ -151,6 +155,8 @@ struct rte_mempool* g_mempool_clifdlist_data = NULL;
 struct rte_mempool* g_mempool_large_data = NULL;
 
 struct rte_mempool* g_mempool_ws_buffer = NULL;
+
+struct rte_mempool* g_mempool_clictx_buffer = NULL;
 
 /// 五个hash表
 // 存储uid -> fd 的hash表 
@@ -428,6 +434,7 @@ void tgg_master_init()
 	g_fd_limit = TggConfigure::getInstance()->get_gwrcv_fd_limit();
 	s_zone_size = g_fd_limit*sizeof(tgg_cli_info);
 	s_zone_bw_size = g_fd_limit*sizeof(tgg_cli_bw_info);
+	s_fd_cli_ctx_mempool_size = g_fd_limit;
 
 	g_bwfdx_limit = TggConfigure::getInstance()->get_gwbwprc_fd_limit();
 	s_bwzone_size = g_bwfdx_limit*sizeof(tgg_bw_info);
@@ -537,6 +544,7 @@ void tgg_master_init()
 	g_mempool_large_data = make_mempool(s_pool_large_data_name, s_large_data_mempool_size, MAX_PACKET_LEN);
 	g_mempool_clifdlist_data = make_mempool(s_pool_clifdlist_data_name, s_clifdlist_mempool_size, sizeof(tgg_fd_id_list));
 	g_mempool_ws_buffer = make_mempool(s_pool_ws_buffer_name, s_ws_buffer_mempool_size, BUFFER_PACKET_LEN);
+	g_mempool_clictx_buffer = make_mempool(s_pool_cli_ctx_name, s_fd_cli_ctx_mempool_size, sizeof(struct client_context_s));
 
 	LOG_INFO("Init dpdk master for tgg done.");
 }
@@ -595,6 +603,9 @@ void tgg_master_uninit()
 	g_mempool_large_data = NULL;
 	rte_mempool_free(g_mempool_ws_buffer);
 	g_mempool_ws_buffer = NULL;
+
+	rte_mempool_free(g_mempool_clictx_buffer);
+	g_mempool_clictx_buffer = NULL;
 
 	rte_ring_free(g_ring_trans);
 	g_ring_trans = NULL;
