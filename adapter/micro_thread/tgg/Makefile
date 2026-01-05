@@ -56,7 +56,7 @@ DARKMAGENTA = \\e[35m
 CYAN = \\e[1m\\e[36m
 DARKCYAN = \\e[36m
 RESET = \\e[m
-CRESET =  ;echo -ne \\e[m; #test -s $@
+CRESET =  ; EXIT_CODE=$$?; echo -ne \\e[m; exit $$EXIT_CODE #test -s $@
 
 %.o: %.cpp
 	@echo -e Compiling $(GREEN)$<$(RESET) ...$(RED)
@@ -126,6 +126,13 @@ install:
 	cp -f gwcliprc $(INSTALL_PATH)/bin/gwcliprc
 	cp -f gwbwprc $(INSTALL_PATH)/bin/gwbwprc
 	cp -f gwregister $(INSTALL_PATH)/bin/gwregister
+	mkdir -p $(INSTALL_PATH)/conf
+	test -f '${TGG_CONF}' || cp -f ${FF_PATH}/adapter/micro_thread/tgg/config/tgg_conf.ini ${TGG_CONF}
+	mkdir -p $(INSTALL_PATH)/conf/ip_filter
+	test -f '${IP_W_FILTER_CONF}' || touch ${IP_W_FILTER_CONF}
+	test -f '${IP_B_FILTER_CONF}' || touch ${IP_B_FILTER_CONF}
+	test -f '${IP_E_FILTER_CONF}' || touch ${IP_E_FILTER_CONF}
+service:
 	# 拷贝服务和脚本
 	cp -f scripts/service/tgg_gateway.service /etc/systemd/system/tgg_gateway.service
 	cp -f scripts/service/gw-force-kill.sh $(INSTALL_PATH)/bin/gw-force-kill.sh
@@ -136,9 +143,3 @@ install:
 	chmod a+x $(INSTALL_PATH)/bin/*
 	systemctl daemon-reload
 	systemctl enable tgg_gateway
-	mkdir -p $(INSTALL_PATH)/conf
-	test -f '${TGG_CONF}' || cp -f ${FF_PATH}/adapter/micro_thread/tgg/config/tgg_conf.ini ${TGG_CONF}
-	mkdir -p $(INSTALL_PATH)/conf/ip_filter
-	test -f '${IP_W_FILTER_CONF}' || touch ${IP_W_FILTER_CONF}
-	test -f '${IP_B_FILTER_CONF}' || touch ${IP_B_FILTER_CONF}
-	test -f '${IP_E_FILTER_CONF}' || touch ${IP_E_FILTER_CONF}
