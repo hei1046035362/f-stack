@@ -353,7 +353,7 @@ static void on_client_connect(void *arg)
     if(!exclude) {
         if(tgg_init_cli(g_core_id, cli_info->cli_fd, ip_str, cli_info->ip, cli_info->port) < 0) {
             LOG_ERROR("init client info failed.");
-            close(cli_info->cli_fd);
+            ff_close(cli_info->cli_fd);
             tgg_close_cli(g_core_id, cli_info->cli_fd);
             delete(cli_info);
             return;
