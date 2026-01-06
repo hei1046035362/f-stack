@@ -37,7 +37,8 @@ public:
         } else {
             bwdata->ext_len = strlen(extend_data);
         }
-        bwdata->pack_len = sizeof(tgg_bw_protocal) + bwdata->ext_len + body_len;
+        size_t ret_len = sizeof(tgg_bw_protocal) + bwdata->ext_len + body_len;
+        bwdata->pack_len = ret_len;
 
         // result.resize(bwdata->pack_len);
         // 拼接ext_data和body
@@ -54,7 +55,7 @@ public:
             bwdata->ext_len = htonl(bwdata->ext_len);
         }
         memcpy(result, bwdata, sizeof(tgg_bw_protocal));
-        return (sizeof(tgg_bw_protocal) + bwdata->ext_len + body_len);
+        return ret_len;
     }
 
     // 从二进制数据转换为数组，对应decode函数

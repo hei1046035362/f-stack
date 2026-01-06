@@ -442,7 +442,7 @@ static int write_data()
             continue;
         }
         //std::string result;
-        char result[4096] = {0};
+        char result[BUFFER_PACKET_LEN] = {0};
         tgg_bw_protocal header = {
             .pack_len = (unsigned int)sizeof(tgg_bw_protocal) + bdata->data_len,
             .cmd = (unsigned char)map_msgtype[bdata->fd_opt],
@@ -462,7 +462,7 @@ static int write_data()
             Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
             tgg_free_session(bdata->coreid, bdata->fd, cid);
         }
-        char sdata[4096] = {0};
+        char sdata[BUFFER_PACKET_LEN] = {0};
         size_t sdata_len = 0;
         // std::string sdata;
         if(bdata->data_len > 0) {
@@ -500,6 +500,10 @@ static int write_data()
         size_t ret_len = BwPackageHandler::encode(result, &header, sdata, sdata_len, ext_data);
 
         // int ret = co_write_complete(fd, result.c_str(), result.length());
+        if(ret_len > BUFFER_PACKET_LEN) {
+            LOG_ERROR("send length[%d] overflowed, bodylen[%d] extlen[%u]", ret_len, sdata_len, ext_data);
+            return -1;
+        }
         int ret = turbo_write(fd, result, ret_len);
         // int ret = splice_write(pipefd, fd, result.c_str(), result.length());
         // int ret = write(fd, result.c_str(), result.length());
@@ -576,7 +580,7 @@ void *read_routine(void *arg)
             pf.events = (POLLIN | POLLERR | POLLHUP);
             co_poll(co_get_epoll_ct(), &pf, 1, 200);
 
-            char buf_read[4096];
+            char buf_read[BUFFER_PACKET_LEN];
             int ret = read(fd, buf_read, sizeof(buf_read));
             
             if (ret > 0) {
