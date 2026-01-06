@@ -301,6 +301,15 @@ static void tgg_recv(int fd, event_type_t events, void *arg)
     // 更新活动时间
     reactor_update_activity(fd);
 
+    if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
+        // 调试打印
+        if(!strncmp(buf, "GET", 3)) {// GET请求消息
+            LOG_DEBUG("fd:%d idx:%d recv data:%s.", fd, idx, (char*)buf);
+        } else {// 其他消息
+            LOG_DEBUG("fd:%d idx:%d revc data:%s.", fd, idx, bin2hex(std::string_view((char*)buf, n)).c_str());
+        }
+    }
+
     if (consume_rdata(fd, buf, n, idx, FD_READ) < 0) {
         LOG_ERROR("consume data failed.");
         goto recv_failed;
