@@ -434,7 +434,7 @@ void tgg_master_init()
 	g_fd_limit = TggConfigure::getInstance()->get_gwrcv_fd_limit();
 	s_zone_size = g_fd_limit*sizeof(tgg_cli_info);
 	s_zone_bw_size = g_fd_limit*sizeof(tgg_cli_bw_info);
-	s_fd_cli_ctx_mempool_size = g_fd_limit;
+	s_fd_cli_ctx_mempool_size = g_fd_limit*lcore_count;
 
 	g_bwfdx_limit = TggConfigure::getInstance()->get_gwbwprc_fd_limit();
 	s_bwzone_size = g_bwfdx_limit*sizeof(tgg_bw_info);
@@ -709,6 +709,7 @@ void tgg_secondary_init()
 	g_mempool_large_data = find_mempool(s_pool_large_data_name);
 	g_mempool_clifdlist_data = find_mempool(s_pool_clifdlist_data_name);
 	g_mempool_ws_buffer = find_mempool(s_pool_ws_buffer_name);
+	g_mempool_clictx_buffer = find_mempool(s_pool_cli_ctx_name);
 	g_gid_hash = get_hash_byname(s_gid_hash_name);
 	g_uid_hash = get_hash_byname(s_uid_hash_name);
 	g_cid_hash = get_hash_byname(s_cid_hash_name);
