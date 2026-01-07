@@ -153,6 +153,7 @@ static void clean_client_data(int cli_fd, int idx)
     release_ws_buffer(g_core_id, cli_fd);
 }
 
+// static uint64_t send_times = 0;
 static void do_real_send(int fd, event_type_t events, void *arg)
 {
     client_context_t *ctx = (client_context_t *)arg;
@@ -200,14 +201,18 @@ static void do_real_send(int fd, event_type_t events, void *arg)
                     if (ret <= 0) {
                         if (ret < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
                             LOG_ERROR("Write error to client %d, closing", fd);
+                            reactor_modify_event(fd, EVENT_READ);
+                            ff_close(fd);
+                        } else {
+                            tgg_set_write_data(g_core_id, fd, (void*)data);
                         }
-                        ff_close(fd);
                         // reactor_remove_event(fd);
                         // clean_client_data(fd, ctx->idx);
                         // free_client_context(ctx);
-                        reactor_modify_event(fd, EVENT_READ);
                         return;
                     }
+                    tgg_set_write_data(g_core_id, fd, NULL);
+                    // send_times++;
                     // 更新活动时间
                     reactor_update_activity(fd);
                     if ( ((tgg_write_data*)(data->data))->fd_opt & FD_CLOSE) {
@@ -227,6 +232,8 @@ static void do_real_send(int fd, event_type_t events, void *arg)
                 ((tgg_write_data*)(data->data))->ref--;
             }
             if(((tgg_write_data*)(data->data))->ref <= 0) {
+                // LOG_DEBUG("sendtime:%lu, ctxfd[%d] fd[%d], ref:%d",
+                //  send_times, ctx->fd, fd, ((tgg_write_data*)(data->data))->ref);
                 clean_write_data(g_core_id, (tgg_write_data*)(data->data));
             }
             tgg_free_cli_snd_data(g_core_id, data);
@@ -387,7 +394,7 @@ static void on_client_connect(void *arg)
     }
     delete cli_info;
 }
-
+// static uint64_t add_send_times = 0;
 static void tgg_do_send(tgg_write_data* wdata)
 {
     tgg_fd_id_list* fd_id_list = wdata->lst_fd;
@@ -406,6 +413,7 @@ static void tgg_do_send(tgg_write_data* wdata)
             // 新的连接旧的数据就不要发送了，直接清理空间
             if (idx != fd_id_list->idx) {// 后台推送给前端时，可能会出现这种情况
                 LOG_ERROR("Idx[%d:%d] Changed, Closing Connection[%d].", idx, fd_id_list->idx, cli_fd);
+                wdata->ref--;
                 goto send_client_end;
             }
 
@@ -419,10 +427,11 @@ static void tgg_do_send(tgg_write_data* wdata)
                 if(try_times < 0) {
                     LOG_ERROR("add cli[fd:%d, idx:%d] snd data failed, exceed try_times", cli_fd, idx);
                     ff_close(cli_fd);
+                    wdata->ref--;
                     goto send_client_end;
                 }
             }
-
+            // add_send_times++;
             reactor_modify_event(cli_fd, EVENT_WRITE);
         } else {
             // 连接标记已设置为关闭，队列中的数据直接丢弃
@@ -434,6 +443,7 @@ send_client_end:
         fd_id_list = fd_id_list->next;
         // clean_fdidnode(tmp);
     }
+    // LOG_DEBUG("addsendtime:%lu", add_send_times);
     // 所有fd都发送完了之后，需要清理并回收内存
     if(wdata->ref <= 0) {
         clean_write_data(g_core_id, wdata);

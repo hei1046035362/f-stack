@@ -127,6 +127,7 @@ typedef struct st_cli_info {
     unsigned short port;
     int bwfdx;        // 绑定的bw
     void* thread;
+    void* wdata;      // 发送给客户端返回eagain时，需要缓存起来
     tgg_send_data* send_datalist;
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_cli_info;
 
