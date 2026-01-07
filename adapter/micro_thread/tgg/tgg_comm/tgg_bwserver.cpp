@@ -455,7 +455,7 @@ static int write_data()
             .gateway_port = TggConfigure::getInstance()->get_gateway_port(),
             .ext_len = 0// TODO 暂时不知道上行数据是否能用上
         };
-        const char* ext_data = tgg_get_cli_reserved(bdata->coreid, bdata->fd);
+        std::string ext_data = tgg_get_cli_reserved(bdata->coreid, bdata->fd);// 这里需要复制出来，否则在使用前会被释放
         if(bdata->fd_opt & FD_CLOSE) {// 要在发送给bw之前先回给客户端，否则客户端收到的消息可能不及时，write会导致协程切换
             // 这里发送给客户端和清理hash表信息的顺序待商榷
             LOG_WARNING("catched an close cmd, coreid[%d] fd[%d] idx[%d] cid:%d.", bdata->coreid, bdata->fd, bdata->idx, cid);
@@ -497,11 +497,11 @@ static int write_data()
             }
         }
         clean_bw_data(prc_id, bdata);// 在调用write之前清理数据，防止协程切换导致的地址变化
-        size_t ret_len = BwPackageHandler::encode(result, &header, sdata, sdata_len, ext_data);
+        size_t ret_len = BwPackageHandler::encode(result, &header, sdata, sdata_len, ext_data.c_str());
 
         // int ret = co_write_complete(fd, result.c_str(), result.length());
         if(ret_len > BUFFER_PACKET_LEN) {
-            LOG_ERROR("send length[%d] overflowed, bodylen[%d] extlen[%u]", ret_len, sdata_len, ext_data);
+            LOG_ERROR("send length[%d] overflowed, bodylen[%d] extlen[%u]", ret_len, sdata_len, ext_data.length());
             return -1;
         }
         LOG_DEBUG("send bw binary:%s, len:%d", bin2hex(std::string_view(result, ret_len)).c_str(), ret_len);
