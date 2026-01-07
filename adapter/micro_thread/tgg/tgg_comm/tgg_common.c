@@ -145,6 +145,7 @@ int tgg_init_cli(int core_id, int fd, char* ip_str, uint32_t ip, ushort port)
 	cli->ip = ip;
 	cli->port = port;
 	cli->send_datalist = NULL;
+	cli->wdata = NULL;
 	return 0;
 }
 
@@ -211,7 +212,8 @@ tgg_send_data* tgg_get_cli_snd_data(int core_id, int fd)
 {
 	return ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist;
 }
-
+// static uint64_t push_times = 0;
+// static uint64_t pop_times = 0;
 int tgg_add_cli_snd_data(int core_id, int fd, tgg_write_data* wdata)
 {
 	tgg_send_data* data = NULL;
@@ -227,15 +229,29 @@ int tgg_add_cli_snd_data(int core_id, int fd, tgg_write_data* wdata)
 	if(!snddata) {
 		((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist = data;
 		data->tail = data;
+		// push_times++;
+		// LOG_INFO("addsnd:%lu", push_times);
 		return 0;
 	}
 	snddata->tail->next = data;
 	snddata->tail = data;
+	// push_times++;
+	// LOG_INFO("addsnd:%lu", push_times);
 	return 0;
 }
 
 void tgg_clean_cli_snd_data(int core_id, int fd)
 {
+	if(((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].wdata) {
+		tgg_send_data* snddata = (tgg_send_data*)(((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].wdata);
+        ((tgg_write_data*)(snddata->data))->ref--;
+        if(((tgg_write_data*)(snddata->data))->ref <= 0) {
+            clean_write_data(core_id, (tgg_write_data*)(snddata->data));            
+        }
+		high_freq_free(g_mempool_fd_snddata[core_id], snddata, sizeof(tgg_send_data));
+		((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].wdata = NULL;
+	}
+
 	tgg_send_data* snddata = ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist;
 	while(snddata) {
 		tgg_send_data* tmp = snddata;
@@ -248,12 +264,22 @@ void tgg_clean_cli_snd_data(int core_id, int fd)
 	}
 	((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist = NULL;
 }
+void tgg_set_write_data(int core_id, int fd, void* data)
+{
+	((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].wdata = data;
+}
 tgg_send_data* tgg_pop_cli_snd_data(int core_id, int fd)
 {
+	if(((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].wdata)
+		return (tgg_send_data*)(((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].wdata);
 	tgg_send_data* snddata = ((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist;
 	if(snddata && snddata->next) {
 		((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist = snddata->next;
 		snddata->next->tail = snddata->tail;
+		snddata->next = NULL;
+		snddata->tail = NULL;
+		// pop_times++;
+		// LOG_INFO("popsnd:%lu", pop_times);
 	} else {
 		((tgg_cli_info*)g_fd_zones[core_id]->addr)[fd].send_datalist = NULL;
 	}

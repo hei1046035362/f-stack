@@ -40,6 +40,7 @@ int tgg_add_cli_snd_data(int core_id, int fd, tgg_write_data* wdata);
 void tgg_clean_cli_snd_data(int core_id, int fd);
 void tgg_set_cli_thread(int core_id, int fd, void* pthread);
 void* tgg_get_cli_thread(int core_id, int fd);
+void tgg_set_write_data(int core_id, int fd, void* data);
 tgg_send_data* tgg_pop_cli_snd_data(int core_id, int fd);
 void tgg_free_cli_snd_data(int core_id, tgg_send_data* wdata);
 // 不能返回引用，内部加锁的

@@ -271,7 +271,7 @@ int CmdSendToGroup::ExecCmd()
             BatchSend2ClientByfds(lstAllFds, body, FD_WRITE, !raw);
             
             // 日志优化：直接记录gid数量而非完整JSON[1](@ref)
-            LOG_INFO("SendToGroup: cmd executed for %d groups", groupArray.Size());
+            LOG_INFO("SendToGroup: cmd executed for %d groups %d fds", groupArray.Size(), lstAllFds.size());
         }
         tgg_reset_expt_cid(prc_id);
     } else {
