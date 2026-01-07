@@ -504,6 +504,7 @@ static int write_data()
             LOG_ERROR("send length[%d] overflowed, bodylen[%d] extlen[%u]", ret_len, sdata_len, ext_data);
             return -1;
         }
+        LOG_DEBUG("send bw binary:%s, len:%d", bin2hex(std::string_view(result, ret_len)).c_str(), ret_len);
         int ret = turbo_write(fd, result, ret_len);
         // int ret = splice_write(pipefd, fd, result.c_str(), result.length());
         // int ret = write(fd, result.c_str(), result.length());
