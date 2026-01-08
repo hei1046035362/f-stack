@@ -502,8 +502,10 @@ void tgg_master_init()
 	g_ring_master = make_ring(s_master_ring_name, s_master_ring_size);
 
 	g_mempool_trans = make_mempool(s_pool_trans_name, s_trans_mempool_size, s_mempool_trans_cache);
-	g_gid_hash = init_hash(s_gid_hash_name, g_fd_limit, TGG_GID_LEN);
-	g_uid_hash = init_hash(s_uid_hash_name, g_fd_limit, TGG_UID_LEN);
+	// 总fd数 * lcore核数 * 每个终端预留100个群  (考虑平均一个cid有上百个群)
+	g_gid_hash = init_hash(s_gid_hash_name, g_fd_limit * lcore_count * 100, TGG_GID_LEN);
+	// 总fd数 * lcore核数 * 每个用户预留5个终端  (要考虑一个uid对应多个cid的情况)
+	g_uid_hash = init_hash(s_uid_hash_name, g_fd_limit * lcore_count * 5, TGG_UID_LEN);
 	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, sizeof(int64_t));
 	g_cidgid_hash = init_hash(s_cidgid_hash_name, g_fd_limit, sizeof(int64_t));
 	for (int i = 0; i < lcore_count; ++i)
