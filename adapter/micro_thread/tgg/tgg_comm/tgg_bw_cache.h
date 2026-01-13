@@ -7,28 +7,6 @@
 #include <set>
 #include<vector>
 
-template<typename type>
-void iter_del_list(type* iddata)
-{
-    if (!iddata) {
-        return;
-    }
-    type* iter = iddata;// 第一个节点不存数据，先删除数据节点
-    while(iter->next) {
-        type* tmp = iter->next;
-        iter->next = iter->next->next;
-        memset(tmp, 0, sizeof(type));
-        dpdk_rte_free(tmp);
-    }
-    // 删除第一个节点
-    memset(iddata, 0, sizeof(type));
-    dpdk_rte_free(iddata);
-}
-
-void iter_del_fdlist(void* iddata);
-
-void iter_del_idlist(void* iddata);
-
 uint32_t tgg_get_seed();
 
 /// 增删查  gid hash<gid, list<fdid> >

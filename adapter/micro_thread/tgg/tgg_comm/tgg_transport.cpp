@@ -38,11 +38,11 @@ void Send2Fd(int core_id, int fd, int idx, std::string_view data, int fd_opt, in
 
 }
 
-void Send2Client(int cid, std::string_view data, int fd_opt, int encode)
+void Send2Client(uint32_t cid, std::string_view data, int fd_opt, int encode)
 {
     int64_t fdidcid = tgg_get_fdbycid(cid);
     if(fdidcid <= 0) {
-        LOG_ERROR("client[%d] not exist.", cid);
+        LOG_ERROR("client[%u] not exist.", cid);
         return;
     }
     int fd = GET_FD_FDCID_MASK(fdidcid);
@@ -51,10 +51,10 @@ void Send2Client(int cid, std::string_view data, int fd_opt, int encode)
     Send2Fd(core_id, fd, idx, data, fd_opt, encode);
 }
 
-void BatchSend2ClientBycids(std::vector<int>& cids, std::string_view data, int fd_opt, int encode)
+void BatchSend2ClientBycids(std::vector<uint32_t>& cids, std::string_view data, int fd_opt, int encode)
 {
     std::vector<int64_t> lstFds;
-    std::vector<int>::iterator itCid = cids.begin();
+    std::vector<uint32_t>::iterator itCid = cids.begin();
     while(itCid != cids.end()) {
         int fdidcid = tgg_get_fdbycid(*itCid);
         if(fdidcid <= 0) {

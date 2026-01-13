@@ -433,11 +433,11 @@ static int write_data()
                 continue;
             }
         }
-        int cid = tgg_get_cli_cid(bdata->coreid, bdata->fd);
+        uint32_t cid = tgg_get_cli_cid(bdata->coreid, bdata->fd);
         if(cid <= 0) {
             // 这里发送给客户端和清理hash表信息的顺序待商榷
             Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_CLOSE, 0);// cid 还没有创建的连接直接关闭连接
-            LOG_ERROR("invalid cid[%d] for coreid:%d fd[%d] failed.", cid, bdata->coreid, bdata->fd);
+            LOG_ERROR("invalid cid[%u] for coreid:%d fd[%d] failed.", cid, bdata->coreid, bdata->fd);
             clean_bw_data(prc_id, bdata);
             continue;
         }
@@ -450,7 +450,7 @@ static int write_data()
             .local_port = g_gw_local_port,//(unsigned short)tgg_get_bwfdx_port(prc_id, fd),
             .client_ip = bdata->peer_ip,// 客户端的ip
             .client_port = bdata->peer_port,
-            .connection_id = (unsigned int)cid,
+            .connection_id = cid,
             .flag = 1,// TODO 需要确定数据来源，怎么填
             .gateway_port = TggConfigure::getInstance()->get_gateway_port(),
             .ext_len = 0// TODO 暂时不知道上行数据是否能用上
@@ -458,7 +458,7 @@ static int write_data()
         std::string ext_data = tgg_get_cli_reserved(bdata->coreid, bdata->fd);// 这里需要复制出来，否则在使用前会被释放
         if(bdata->fd_opt & FD_CLOSE) {// 要在发送给bw之前先回给客户端，否则客户端收到的消息可能不及时，write会导致协程切换
             // 这里发送给客户端和清理hash表信息的顺序待商榷
-            LOG_WARNING("catched an close cmd, coreid[%d] fd[%d] idx[%d] cid:%d.", bdata->coreid, bdata->fd, bdata->idx, cid);
+            LOG_WARNING("catched an close cmd, coreid[%d] fd[%d] idx[%d] cid:%u.", bdata->coreid, bdata->fd, bdata->idx, cid);
             Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
             tgg_free_session(bdata->coreid, bdata->fd, cid);
         }
@@ -526,11 +526,11 @@ void clean_queue_data()
         if(!bdata) {
             continue;
         }
-        int cid = tgg_get_cli_cid(bdata->coreid, bdata->fd);
+        uint32_t cid = tgg_get_cli_cid(bdata->coreid, bdata->fd);
         if(cid > 0) {
             if(bdata->fd_opt & FD_CLOSE) {// 要在发送给bw之前先回给客户端，否则客户端收到的消息可能不及时，write会导致协程切换
                 // 这里发送给客户端和清理hash表信息的顺序待商榷
-                LOG_WARNING("catched an close cmd, coreid[%d] fd[%d] idx[%d] cid:%d.", bdata->coreid, bdata->fd, bdata->idx, cid);
+                LOG_WARNING("catched an close cmd, coreid[%d] fd[%d] idx[%d] cid:%u.", bdata->coreid, bdata->fd, bdata->idx, cid);
                 Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
                 tgg_free_session(bdata->coreid, bdata->fd, cid);
             }

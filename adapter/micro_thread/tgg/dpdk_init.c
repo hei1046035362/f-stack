@@ -22,6 +22,7 @@
 #include "tgg_comm/tgg_conf.h"
 #include "comm/log.hpp"
 #include "comm/common.hpp"
+#include "comm/rbtree.h"
 #include "reactor/reactor.h"
 
 const char* g_gateway_ip_str = "192.168.40.129";
@@ -116,6 +117,7 @@ const char* s_pool_ws_buffer_name = "tgg_pl_ws_buffer";// 缓存ws大包使用(�
 const char* s_pool_clifdlist_data_name = "tgg_pl_fdlst_data";// 下行发送fd列表的队列
 const char* s_pool_fd_snddata_name = "tgg_pl_fd_data";// 下行发送fd列表的队列
 const char* s_pool_cli_ctx_name = "tgg_cli_ctx_rdata";// 客户端reactor要使用的必要信息
+const char* s_pool_gid_rbnode_name = "tgg_gid_rbnode";// 客户端reactor要使用的必要信息
 
 // 内存池大小 TODO 大小根据队列长度设置
 static uint32_t s_trans_mempool_size;// 尽量设置成2^n 单个队列预留 上行透传内存
@@ -162,6 +164,8 @@ struct rte_mempool* g_mempool_large_data = NULL;
 struct rte_mempool* g_mempool_ws_buffer = NULL;
 
 struct rte_mempool* g_mempool_clictx_buffer = NULL;
+
+struct rte_mempool* g_mempool_gid_rbnode = NULL;
 
 /// 五个hash表
 // 存储uid -> fd 的hash表 
@@ -307,9 +311,10 @@ make_mempool(const char *name, size_t units, size_t unit_size)
 		mempool = NULL;
 	}
 	if (mempool == NULL) {
+		uint32_t aligned_size = RTE_ALIGN(unit_size, RTE_CACHE_LINE_SIZE);
 		mempool = rte_mempool_create(mp_name,
 			units,
-			unit_size + RTE_CACHE_LINE_SIZE,
+			aligned_size,
 			RTE_MEMPOOL_CACHE_MAX_SIZE,
 			0, NULL, NULL, NULL, NULL,
 			rte_socket_id(), 0);
@@ -573,7 +578,8 @@ void tgg_master_init()
 	g_mempool_ws_buffer = make_mempool(s_pool_ws_buffer_name, s_ws_buffer_mempool_size, BUFFER_PACKET_LEN);
 	g_mempool_clictx_buffer = make_mempool(s_pool_cli_ctx_name, s_fd_cli_ctx_mempool_size, sizeof(struct client_context_s));
 
-	LOG_INFO("Init dpdk master for tgg done.");
+	// 暂时不使用，因为需要预留的内存太多了，单核预计要3.3G左右，后续看性能需求再考虑
+	g_mempool_gid_rbnode = make_mempool(s_pool_gid_rbnode_name, 1024/*g_fd_limit * lcore_count * 100*/, sizeof(struct st_tgg_rb_node));
 }
 
 void tgg_master_uninit()
@@ -636,6 +642,9 @@ void tgg_master_uninit()
 
 	rte_mempool_free(g_mempool_clictx_buffer);
 	g_mempool_clictx_buffer = NULL;
+
+	rte_mempool_free(g_mempool_gid_rbnode);
+	g_mempool_gid_rbnode = NULL;
 
 	rte_ring_free(g_ring_trans);
 	g_ring_trans = NULL;
@@ -741,6 +750,7 @@ void tgg_secondary_init()
 	g_mempool_clifdlist_data = find_mempool(s_pool_clifdlist_data_name);
 	g_mempool_ws_buffer = find_mempool(s_pool_ws_buffer_name);
 	g_mempool_clictx_buffer = find_mempool(s_pool_cli_ctx_name);
+	g_mempool_gid_rbnode = find_mempool(s_pool_gid_rbnode_name);
 	g_gid_hash = get_hash_byname(s_gid_hash_name);
 	g_uid_hash = get_hash_byname(s_uid_hash_name);
 	g_cid_hash = get_hash_byname(s_cid_hash_name);

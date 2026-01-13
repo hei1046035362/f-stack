@@ -19,10 +19,10 @@ void init_endians();
 bool big_endian();
 
 // 生成fdidcid
-int64_t generate_fdidcid(int core_id, int fd, int cid);
+int64_t generate_fdidcid(int core_id, int fd, uint32_t cid);
 
 // 生成cid
-int generate_cid(int core_id, int idx);
+uint32_t generate_cid(int core_id, int idx);
 
 // 生成bwfdx
 int generate_bwfdx(int prc_id, int fd);
@@ -45,7 +45,7 @@ tgg_send_data* tgg_pop_cli_snd_data(int core_id, int fd);
 void tgg_free_cli_snd_data(int core_id, tgg_send_data* wdata);
 // 不能返回引用，内部加锁的
 std::string tgg_get_cli_uid(int core_id, int fd);
-int tgg_get_cli_cid(int core_id, int fd);
+uint32_t tgg_get_cli_cid(int core_id, int fd);
 const char* tgg_get_cli_reserved(int core_id, int fd);
 int tgg_set_cli_idx(int core_id, int fd, int idx);
 int tgg_set_cli_status(int core_id, int fd, int status);
@@ -54,12 +54,12 @@ int tgg_set_cli_ip(int core_id, int fd, uint32_t ip);
 int tgg_set_cli_port(int core_id, int fd, ushort port);
 int tgg_set_cli_bwfdx(int core_id, int fd, int bwfdx);
 int tgg_set_cli_uid(int core_id, int fd, const char* uid);
-int tgg_set_cli_cid(int core_id, int fd, int cid);
+int tgg_set_cli_cid(int core_id, int fd, uint32_t cid);
 int tgg_set_cli_reserved(int core_id, int fd, const char* reserved);
 void tgg_close_cli(int core_id, int fd);
 int tgg_init_cli(int core_id, int fd, char* ip_str, uint32_t ip, ushort port);
 
-int tgg_init_cli_bw(int core_id, int fd, int cid);
+int tgg_init_cli_bw(int core_id, int fd, uint32_t cid);
 void tgg_close_cli_bw(int core_id, int fd);
 
 
@@ -182,18 +182,18 @@ void tgg_close_bw_session(int prc_id, int fd);
 // 业务侧接口
 
 // cid绑定uid
-int tgg_bind_session(const char* uid, int cid);
+int tgg_bind_session(const char* uid, uint32_t cid);
 // cid和uid解绑
-int tgg_unbind_session(int cid);
+int tgg_unbind_session(uint32_t cid);
 // 连接建立
 int tgg_init_session(int core_id, int fd, int idx);
 
 // 连接断开
-int tgg_free_session(int core_id, int fd, int cid);
+int tgg_free_session(int core_id, int fd, uint32_t cid);
 // 加入组
-int tgg_join_group(const char* gid, int cid);
+int tgg_join_group(const char* gid, uint32_t cid);
 // 退出组
-int tgg_exit_group(const char* gid, int cid);
+int tgg_exit_group(const char* gid, uint32_t cid);
 
 // 获取可用的idx
 int get_valid_idx();
