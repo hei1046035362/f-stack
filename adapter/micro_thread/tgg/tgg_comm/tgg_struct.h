@@ -133,7 +133,7 @@ typedef struct st_cli_info {
 
 // 客户单信息中需要gwbwprc维护和使用的部分
 typedef struct st_cli_bw_info {
-    int cid;    // client id                             process 填充
+    uint32_t cid;    // client id                             process 填充
     char uid[TGG_UID_LEN];    // user id                             process 填充
     char reserved[128];    // reserved    
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_cli_bw_info;
@@ -172,19 +172,25 @@ typedef struct st_read_data {
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_read_data;
 
 // list<fd>  hash<gid, list<fd>> 这些一个gid/uid有多个fd的hash表的value
-typedef struct st_tgg_fd_list {
-    int64_t fdidcid;// 存储在hash表中的是fdidcid，在线程或进程之间传递时是fd
-    struct st_tgg_fd_list* next;
-} tgg_fd_list;
+// typedef struct st_tgg_fd_list {
+//     int64_t fdidcid;// 存储在hash表中的是fdidcid，在线程或进程之间传递时是fd
+//     struct st_tgg_fd_list* next;
+// } tgg_fd_list;
 
 
-typedef struct st_tgg_fdidcid_list {
-    // int64_t fdidcid;// 存储在hash表中的是fdidcid，在线程或进程之间传递时是fd
-    // int idx;
-    rte_rwlock_t lock;// hash 表 value为list时，操作时需要锁
-    struct st_tgg_fd_list* list;
+// typedef struct st_tgg_fdidcid_list {
+//     // int64_t fdidcid;// 存储在hash表中的是fdidcid，在线程或进程之间传递时是fd
+//     // int idx;
+//     rte_rwlock_t lock;// hash 表 value为list时，操作时需要锁
+//     struct st_tgg_fd_list* list;
+// } tgg_fd_hash_value;
+
+
+typedef struct st_tgg_rbtree tgg_rbtree;
+typedef struct st_tgg_fd_hash_value {
+    rte_rwlock_t lock;          // 读写锁，保护红黑树
+    tgg_rbtree *rbtree;         // 红黑树根节点
 } tgg_fd_hash_value;
-
 
 // list<fd,idx>  下行数据同一份数据发送给多个客户端时使用
 typedef struct st_tgg_fd_idx_list {

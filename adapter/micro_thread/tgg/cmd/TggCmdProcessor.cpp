@@ -112,7 +112,7 @@ int CmdTggGateway::PrintGidCids(rapidjson::Document& body)
         return -1;
     }
     std::vector<int64_t> lst_fd;
-    std::vector<int> lstCids;
+    std::vector<uint32_t> lstCids;
     if (tgg_get_fdsbygid(body_data.c_str(), lst_fd) < 0) {
         return -1;
     }
@@ -124,7 +124,7 @@ int CmdTggGateway::PrintGidCids(rapidjson::Document& body)
             LOG_WARNING("Invalid fdidcid[%lld] for gid[%s].", fdidcid, body_data.c_str());
             continue;
         }
-        int cid = GET_CID_FDCID_MASK(fdidcid);
+        uint32_t cid = GET_CID_FDCID_MASK(fdidcid);
         if (cid <= 0) {
             LOG_WARNING("cid for fdidcid[%lld] gid[%s] not exist.", fdidcid, body_data.c_str());
             continue;
@@ -193,7 +193,7 @@ int CmdTggGateway::PrintUidCids(rapidjson::Document& body)
         return -1;
     }
     std::vector<int64_t> lst_fd;
-    std::vector<int> lstCids;
+    std::vector<uint32_t> lstCids;
     if (tgg_get_fdsbyuid(body_data.c_str(), lst_fd) < 0) {
         return -1;
     }
@@ -205,7 +205,7 @@ int CmdTggGateway::PrintUidCids(rapidjson::Document& body)
             LOG_WARNING("Invalid fdidcid[%lld] for uid[%s].", fdidcid, body_data.c_str());
             continue;
         }
-        int cid = GET_CID_FDCID_MASK(fdidcid);
+        uint32_t cid = GET_CID_FDCID_MASK(fdidcid);
         if (cid <= 0) {
             LOG_WARNING("cid for fdidcid[%lld] uid[%s] not exist.", fdidcid, body_data.c_str());
             continue;
@@ -449,7 +449,7 @@ int CmdTggGateway::CheckGidcidAvaliable()
             int coreid = GET_COREID_FDCID_MASK(*it_fdidcid);
             int fd = GET_FD_FDCID_MASK(*it_fdidcid);
             int idx = GET_IDX_FDCID_MASK(*it_fdidcid);
-            int cid = GET_CID_FDCID_MASK(*it_fdidcid);
+            uint32_t cid = GET_CID_FDCID_MASK(*it_fdidcid);
             if(tgg_check_idx_exist(coreid, idx) < 0) {
                 str_result = std::to_string(*it) + ":";
                 str_result += std::to_string(cid) + ":";
@@ -506,7 +506,7 @@ int CmdTggGateway::CheckUidcidAvaliable()
             int coreid = GET_COREID_FDCID_MASK(*it_fdidcid);
             int fd = GET_FD_FDCID_MASK(*it_fdidcid);
             int idx = GET_IDX_FDCID_MASK(*it_fdidcid);
-            int cid = GET_CID_FDCID_MASK(*it_fdidcid);
+            uint32_t cid = GET_CID_FDCID_MASK(*it_fdidcid);
             if(tgg_check_idx_exist(coreid, idx) < 0) {
                 str_result = std::to_string(*it) + ":";
                 str_result += std::to_string(cid) + ":";
@@ -558,7 +558,7 @@ int CmdTggGateway::CheckCidAvaliable()
         int coreid = GET_COREID_FDCID_MASK(*it_fdidcid);
         int fd = GET_FD_FDCID_MASK(*it_fdidcid);
         int idx = GET_IDX_FDCID_MASK(*it_fdidcid);
-        int cid = GET_CID_FDCID_MASK(*it_fdidcid);
+        uint32_t cid = GET_CID_FDCID_MASK(*it_fdidcid);
         if(tgg_check_idx_exist(coreid, idx) < 0) {
             str_result += std::to_string(cid) + ":";
             str_result += std::to_string(*it_fdidcid);

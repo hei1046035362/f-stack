@@ -194,11 +194,11 @@ int CmdGatewayClientConnect::ExecCmd()
 
 int CmdSendToOne::ExecCmd()
 {
-    int cid = jdata["connection_id"].GetInt();
+    uint32_t cid = jdata["connection_id"].GetUint();
     int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     std::string_view body = get_body_string(jdata);
   // TODO 目前只支持ws发送
-    LOG_INFO("SendToOne: cmd executed cid[%d] data:%s.", cid, bin2hex(body).c_str());
+    LOG_INFO("SendToOne: cmd executed cid[%u] data:%s.", cid, bin2hex(body).c_str());
     Send2Client(cid, body, FD_WRITE, !raw);
     return 0;
 }
@@ -286,29 +286,29 @@ int CmdSendToGroup::ExecCmd()
 
 int CmdKick::ExecCmd()
 {
-    int cid = jdata["connection_id"].GetInt();
+    uint32_t cid = jdata["connection_id"].GetUint();
     // std::string body = jdata["body"].get<std::string>();
     int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     // Send2Client(cid, body, FD_WRITE, !raw);
     Send2Client(cid, "kick", FD_WRITE|FD_CLOSE, !raw);
     int64_t fdidcid = tgg_get_fdbycid(cid);
     if(fdidcid <= 0) {
-        LOG_INFO("Kick: cmd executed failed, get fdidcid[%ld] by cid[%d] failed.", fdidcid, cid);
+        LOG_INFO("Kick: cmd executed failed, get fdidcid[%ld] by cid[%u] failed.", fdidcid, cid);
         return -1;
     }
     tgg_free_session(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), cid);
-    LOG_INFO("Kick: cmd executed cid[%d].", cid);
+    LOG_INFO("Kick: cmd executed cid[%u].", cid);
     return 0;
 }
 
 int CmdDestroy::ExecCmd()
 {
-    int cid = jdata["connection_id"].GetInt();
+    uint32_t cid = jdata["connection_id"].GetUint();
     int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     Send2Client(cid, "destroy", FD_WRITE|FD_CLOSE, !raw);// TODO 是否要立即销毁，不发送ws的关闭帧(去掉FD_WRITE就行)了
     int64_t fdidcid = tgg_get_fdbycid(cid);
     tgg_free_session(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), cid);
-    LOG_INFO("Destroy: cmd executed cid[%d].", cid);
+    LOG_INFO("Destroy: cmd executed cid[%u].", cid);
     return 0;
 }
 
@@ -318,7 +318,7 @@ int CmdSendToALL::ExecCmd()
     int raw = true;
     std::string_view body = get_body_string(jdata);
 
-    std::vector<int> lstCids;
+    std::vector<uint32_t> lstCids;
     lstCids.reserve(1000);
     std::string ext_data = jdata["ext_data"].GetString();  // 直接获取字符串值
 
@@ -336,7 +336,7 @@ int CmdSendToALL::ExecCmd()
             // 遍历数组元素
             for (rapidjson::SizeType i = 0; i < connections.Size(); i++) {
                 if (connections[i].IsInt()) {  // 确保元素是整数
-                    lstCids.push_back(connections[i].GetInt());
+                    lstCids.push_back(connections[i].GetUint());
                 }
             }
 
@@ -378,7 +378,7 @@ void CmdSelect::FormatResult(const std::vector<int64_t>& lst_fd, int mask, rapid
         
         int coreid = GET_COREID_FDCID_MASK(*itFd);
         int fd = GET_FD_FDCID_MASK(*itFd);
-        int cid = GET_CID_FDCID_MASK(*itFd);
+        uint32_t cid = GET_CID_FDCID_MASK(*itFd);
         std::string scid = std::to_string(cid);
         
         // 检查并创建 CID 对象（使用 rapidjson API）
@@ -408,7 +408,7 @@ void CmdSelect::FormatResult(const std::vector<int64_t>& lst_fd, int mask, rapid
                     rapidjson::Value groups(rapidjson::kArrayType);
                     cidObj.AddMember("groups", groups, allocator);
                 } else {
-                    LOG_WARNING("cid[%d] groups already exist.", cid);
+                    LOG_WARNING("cid[%u] groups already exist.", cid);
                 }
                 
                 rapidjson::Value& groupsArray = cidObj["groups"];
@@ -430,7 +430,7 @@ void CmdSelect::FormatResult(const std::vector<int64_t>& lst_fd, int mask, rapid
                     allocator
                 );
             } else {
-                LOG_WARNING("cid[%d] uid already exist.", cid);
+                LOG_WARNING("cid[%u] uid already exist.", cid);
             }
         }
         
@@ -520,7 +520,7 @@ int CmdSelect::ExecCmd()
                     lst_fds.reserve(RESERVED_SIZE_FOR_GID_CIDS);
                     if (value.IsArray()) {
                         for (rapidjson::SizeType i = 0; i < value.Size(); i++) {
-                            int cid = value[i].GetInt();
+                            uint32_t cid = value[i].GetUint();
                             int64_t fdidcid = tgg_get_fdbycid(cid);
                             if (fdidcid > 0) {
                                 lst_fds.push_back(fdidcid);
@@ -586,22 +586,22 @@ int CmdGetGroupIdList::ExecCmd()
 int CmdSetSession::ExecCmd()
 {
     std::string session = jdata["ext_data"].GetString();
-    int cid = jdata["connection_id"].GetInt();
+    uint32_t cid = jdata["connection_id"].GetUint();
     if(cid <= 0) {
-        LOG_ERROR("set session failed, invalid cid[%d].", cid);
+        LOG_ERROR("set session failed, invalid cid[%u].", cid);
         return -1;
     }
     int64_t fdidcid = tgg_get_fdbycid(cid);
     if(fdidcid < 0) {
-        LOG_ERROR("get fdidcid by cid[%d] failed.", cid);
+        LOG_ERROR("get fdidcid by cid[%u] failed.", cid);
         return -1;
     }
     // 判断是不是有效的 php序列化后的字符串
     if(session.length() > 2 && session[1] != ':') {
-        LOG_ERROR("get fdidcid by cid[%d] failed.", cid);
+        LOG_ERROR("get fdidcid by cid[%u] failed.", cid);
         return -1;
     }
-    LOG_INFO("SetSession: cmd executed cid[%d] data:%s.", cid, session.c_str());
+    LOG_INFO("SetSession: cmd executed cid[%u] data:%s.", cid, session.c_str());
     return tgg_set_cli_reserved(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), session.c_str());
 }
 
@@ -610,26 +610,26 @@ int CmdGetSessionByCid::ExecCmd()
     rapidjson::Document result;
     result.SetObject(); // 初始化为空对象
     rapidjson::Document::AllocatorType& allocator = result.GetAllocator();
-    int cid = jdata["connection_id"].GetInt();
+    uint32_t cid = jdata["connection_id"].GetUint();
     int64_t fdicid = -1;
     std::string session;
     if(cid <= 0) {
-        LOG_ERROR("set session failed, invalid cid[%d].", cid);
+        LOG_ERROR("set session failed, invalid cid[%u].", cid);
         goto SEND_GET_SESSION;
     }
     fdicid = tgg_get_fdbycid(cid);
     if(fdicid <= 0) {
-        LOG_ERROR("get fdicid by cid[%d] failed.", cid);
+        LOG_ERROR("get fdicid by cid[%u] failed.", cid);
         goto SEND_GET_SESSION;
     }
     session = tgg_get_cli_reserved(GET_COREID_FDCID_MASK(fdicid), GET_FD_FDCID_MASK(fdicid));
     if(session.empty()) {
         result.SetArray(); // 设为空数组
-        LOG_INFO("session is empty of cid[%d].", cid);
+        LOG_INFO("session is empty of cid[%u].", cid);
         goto SEND_GET_SESSION;
     }
     result.SetString(session.c_str(), allocator);
-    LOG_INFO("GetSession: cmd executed cid[%d] data:%s.", cid, session.c_str());
+    LOG_INFO("GetSession: cmd executed cid[%u] data:%s.", cid, session.c_str());
     Send2BW(result);
     return 0;
 
@@ -648,7 +648,7 @@ int CmdGetAllClientSession::ExecCmd()
     tgg_get_allfds(lst_fds);
     for (auto fdidcid : lst_fds) {
         std::string session = tgg_get_cli_reserved(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid));
-        int cid = tgg_get_cli_cid(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid));
+        uint32_t cid = tgg_get_cli_cid(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid));
         std::string scid = std::to_string(cid);
         // 添加节点对象 { "cid": "session_data" }
         result.AddMember(
@@ -735,14 +735,14 @@ static void json_replace_recursive(rapidjson::Value& target,
 int CmdUpdateSession::ExecCmd()
 {
     // TODO 稍微有点复杂，且当前拿不到数据
-    int cid = jdata["connection_id"].GetInt();
+    uint32_t cid = jdata["connection_id"].GetUint();
     if(cid <= 0) {
-        LOG_ERROR("set session failed, invalid cid[%d].",  cid);
+        LOG_ERROR("set session failed, invalid cid[%u].",  cid);
         return -1;
     }
     int64_t fdidcid = tgg_get_fdbycid(cid);
     if(fdidcid < 0) {
-        LOG_ERROR("get fd by cid[%d] failed.", cid);
+        LOG_ERROR("get fd by cid[%u] failed.", cid);
         return -1;
     }
     int coreid = GET_COREID_FDCID_MASK(fdidcid);
@@ -751,7 +751,7 @@ int CmdUpdateSession::ExecCmd()
     std::string session = tgg_get_cli_reserved(coreid, clifd);
     if(session.empty()) {
         if (tgg_set_cli_reserved(coreid, clifd, ext_data.c_str()) < 0) {
-            LOG_ERROR("update session failed cid[%d] session[%s] failed.", cid, session.c_str());
+            LOG_ERROR("update session failed cid[%u] session[%s] failed.", cid, session.c_str());
             return -1;
         }
         return 0;
@@ -767,21 +767,21 @@ int CmdUpdateSession::ExecCmd()
     std::string data = Php_Serialize(result.GetObject());
     tgg_set_cli_reserved(coreid, clifd, data.c_str());
     
-    LOG_INFO("UpdateSession: cmd executed cid[%d] data:%s.", cid, data.c_str());
+    LOG_INFO("UpdateSession: cmd executed cid[%u] data:%s.", cid, data.c_str());
     return 0;
 }
 
 int CmdIsOnline::ExecCmd()
 {
     rapidjson::Document result;
-    int cid = jdata["connection_id"].GetInt();
+    uint32_t cid = jdata["connection_id"].GetUint();
     int clifdx = tgg_get_fdbycid(cid);
     if(clifdx <= 0) {
         result.SetString("0");
     } else {
         result.SetString("1");
     }
-    LOG_INFO("IsOnline: send cid[%d] IsOnline result[%s] to server.", cid, rapidjson_to_string(result).c_str());
+    LOG_INFO("IsOnline: send cid[%u] IsOnline result[%s] to server.", cid, rapidjson_to_string(result).c_str());
     Send2BW(result);
     return 0;
 }
@@ -792,24 +792,24 @@ int CmdBindUid::ExecCmd()
     // return tgg_bind_session(this->fd, s_uid.c_str(), tgg_get_cli_cid(this->fd).c_str());
     // TODO Binduid到底是客户端过来消息绑定，还是服务端过来消息绑定
     std::string suid = jdata["ext_data"].GetString();
-    int cid = jdata["connection_id"].GetInt();
+    uint32_t cid = jdata["connection_id"].GetUint();
     if(suid.empty() || cid < 0) {
-        LOG_ERROR("bind uid failed, uid[%s] and cid[%d] shouldn't be empty.", suid.c_str(), cid);
+        LOG_ERROR("bind uid failed, uid[%s] and cid[%u] shouldn't be empty.", suid.c_str(), cid);
         return -1;
     }
-    LOG_INFO("BindUid: cid[%d] bind to uid[%s].", cid, suid.c_str());
+    LOG_INFO("BindUid: cid[%u] bind to uid[%s].", cid, suid.c_str());
     return tgg_bind_session(suid.c_str(), cid);
 
 }
 
 int CmdUnBindUid::ExecCmd()
 {
-    int cid = jdata["connection_id"].GetInt();
-    if(cid < 0) {
-        LOG_ERROR("unbind failed, invalid cid[%d].", cid);
+    uint32_t cid = jdata["connection_id"].GetUint();
+    if(cid <= 0) {
+        LOG_ERROR("unbind failed, invalid cid[%u].", cid);
         return -1;
     }
-    LOG_INFO("UnBindUid: unbind cid[%d].", cid);
+    LOG_INFO("UnBindUid: unbind cid[%u].", cid);
     return tgg_unbind_session(cid);
     // return tgg_free_session(fdid & 0xff, fdid >> 8);
 }
@@ -869,14 +869,14 @@ int CmdSendToUid::ExecCmd()
 int CmdJoinGroup::ExecCmd()
 {
     std::string group = jdata["ext_data"].GetString();
-    int cid = jdata["connection_id"].GetInt();
+    uint32_t cid = jdata["connection_id"].GetUint();
     if(group.empty() || cid <= 0) {
-        LOG_ERROR("set session failed, ext_data[%s] and cid[%d] shouldn't be empty.", group.c_str(), cid);
+        LOG_ERROR("set session failed, ext_data[%s] and cid[%u] shouldn't be empty.", group.c_str(), cid);
         return -1;
     }
     int fdid = tgg_get_fdbycid(cid);
     if(fdid < 0) {
-        RTE_LOG(INFO, USER1, "[%s][%d] get fdid by cid[%d] failed.", __FILE__, __LINE__, cid);
+        RTE_LOG(INFO, USER1, "[%s][%d] get fdid by cid[%u] failed.", __FILE__, __LINE__, cid);
         return -1;
     }
     std::vector<std::string> vec_group;
@@ -892,7 +892,7 @@ int CmdJoinGroup::ExecCmd()
     for(auto group_unit : vec_group) {
         tgg_join_group(group_unit.c_str(), cid);
     }
-    LOG_INFO("JoinGroup: cmd executed cid[%d] gid[%s].", cid, group.c_str());
+    LOG_INFO("JoinGroup: cmd executed cid[%u] gid[%s].", cid, group.c_str());
     return 0;
 }
 
@@ -900,14 +900,14 @@ int CmdJoinGroup::ExecCmd()
 int CmdLeaveGroup::ExecCmd()
 {
     std::string group = jdata["ext_data"].GetString();
-    int cid = jdata["connection_id"].GetInt();
+    uint32_t cid = jdata["connection_id"].GetUint();
     if(group.empty() || cid <= 0) {
-        LOG_ERROR("set session failed, ext_data[%s] and cid[%d] shouldn't be empty.", group.c_str(), cid);
+        LOG_ERROR("set session failed, ext_data[%s] and cid[%u] shouldn't be empty.", group.c_str(), cid);
         return -1;
     }
     int fdid = tgg_get_fdbycid(cid);
     if(fdid < 0) {
-        LOG_ERROR("get fdid by cid[%d] failed.", cid);
+        LOG_ERROR("get fdid by cid[%u] failed.", cid);
         return -1;
     }
     std::vector<std::string> vec_group;
@@ -923,7 +923,7 @@ int CmdLeaveGroup::ExecCmd()
     for(auto group_unit : vec_group) {
         tgg_exit_group(group_unit.c_str(), cid);
     }
-    LOG_INFO("LeaveGroup: cmd executed cid[%d] gid[%s].", cid, group.c_str());
+    LOG_INFO("LeaveGroup: cmd executed cid[%u] gid[%s].", cid, group.c_str());
     return 0;
 }
 
@@ -972,9 +972,9 @@ int CmdGetClientSessionsByGroup::ExecCmd()
         while (itFd != lst_sfd.end()) {
             int coreid = GET_COREID_FDCID_MASK(*itFd);
             int fd = GET_FD_FDCID_MASK(*itFd);
-            int cid = GET_CID_FDCID_MASK(*itFd);
+            uint32_t cid = GET_CID_FDCID_MASK(*itFd);
             if(cid <= 0) {
-                LOG_WARNING("invalid cid[%d].", cid);
+                LOG_WARNING("invalid cid[%u].", cid);
                 itFd++;
                 continue;
             }
@@ -1034,9 +1034,9 @@ int CmdGetClientIdByUid::ExecCmd()
     if (tgg_get_fdsbyuid(suid.c_str(), lst_sfd) == 0) {
         std::vector<int64_t>::iterator itFd = lst_sfd.begin();
         while (itFd != lst_sfd.end()) {
-            int cid = GET_CID_FDCID_MASK(*itFd);//tgg_get_cli_cid(*itFd & 0xff, *itFd >> 8);
-            if(cid < 0) {
-                LOG_ERROR("invalid cid[%d].", cid);
+            uint32_t cid = GET_CID_FDCID_MASK(*itFd);//tgg_get_cli_cid(*itFd & 0xff, *itFd >> 8);
+            if(cid <= 0) {
+                LOG_ERROR("invalid cid[%u].", cid);
                 itFd++;
                 continue;
             }
@@ -1077,9 +1077,11 @@ int CmdBatchGetClientIdByUid::ExecCmd()
         std::vector<int64_t> lst_sfd;
         if (tgg_get_fdsbyuid(uid, lst_sfd) == 0) {
             for (auto fdid : lst_sfd) {
-                int cid = GET_CID_FDCID_MASK(fdid);
-                if(cid >= 0) {
+                uint32_t cid = GET_CID_FDCID_MASK(fdid);
+                if(cid > 0) {
                     arr.PushBack(cid, allocator);
+                } else {
+                    LOG_ERROR("invalid cid[%u] for fdid[%lld] uid:%s", cid, fdid, uid);
                 }
             }
         }

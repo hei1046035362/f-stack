@@ -68,7 +68,7 @@ bool big_endian()
     return s_big_endian;
 }
 
-int64_t generate_fdidcid(int core_id, int fd, int cid)
+int64_t generate_fdidcid(int core_id, int fd, uint32_t cid)
 {
     int64_t fdidcid = ((fd << 8) | core_id);
     fdidcid <<= 32;
@@ -76,9 +76,9 @@ int64_t generate_fdidcid(int core_id, int fd, int cid)
     return fdidcid;
 }
 
-int generate_cid(int core_id, int idx)
+uint32_t generate_cid(int core_id, int idx)
 {
-    return ((idx << 8) | core_id);
+    return (uint32_t(idx << 8) | core_id);
 }
 
 int generate_bwfdx(int prc_id, int fd)
@@ -153,12 +153,12 @@ void tgg_close_cli_bw(int core_id, int fd)
 {
 	// SpinLock lock(get_cli_lock());
 	tgg_cli_bw_info* cli = &((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd];
-	cli->cid = -1;// 服务端侧已完成关闭
+	cli->cid = 0;// 服务端侧已完成关闭
 	memset(cli->uid, 0, sizeof(cli->uid));
 	memset(cli->reserved, 0, sizeof(cli->reserved));
 }
 
-int tgg_init_cli_bw(int core_id, int fd, int cid)
+int tgg_init_cli_bw(int core_id, int fd, uint32_t cid)
 {
 	// SpinLock lock(get_cli_lock());
 	tgg_cli_bw_info* cli = &((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd];
@@ -309,7 +309,7 @@ std::string tgg_get_cli_uid(int core_id, int fd)
 	return ((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd].uid;	
 }
 
-int tgg_get_cli_cid(int core_id, int fd)
+uint32_t tgg_get_cli_cid(int core_id, int fd)
 {
 	// SpinLock lock(get_cli_lock());
 	return ((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd].cid;	
@@ -369,7 +369,7 @@ int tgg_set_cli_uid(int core_id, int fd, const char* uid)
 	return 0;
 }
 
-int tgg_set_cli_cid(int core_id, int fd, int cid)
+int tgg_set_cli_cid(int core_id, int fd, uint32_t cid)
 {
 	// SpinLock lock(get_cli_lock());
 	((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd].cid = cid;

@@ -29,6 +29,12 @@ int write_list_to_file<int>(const std::string& filename,
                      size_t buffer_kb);
 
 template <>
+int write_list_to_file<uint32_t>(const std::string& filename, 
+                     const std::string& header,
+                     const std::vector<uint32_t>& dataList,
+                     size_t buffer_kb);
+
+template <>
 int write_list_to_file<int64_t>(const std::string& filename, 
                      const std::string& header,
                      const std::vector<int64_t>& dataList,
