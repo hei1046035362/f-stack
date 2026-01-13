@@ -4,7 +4,7 @@
 static server_t *g_server = NULL;
 
 void signal_handler(int sig) {
-    printf("\nReceived signal %d, shutting down...\n", sig);
+    SIG_PRINTF("\nReceived signal %d, shutting down...\n", sig);
     if (g_server) {
         server_stop(g_server);
     }

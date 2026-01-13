@@ -150,7 +150,7 @@ void *register_reconnect_routine( void *arg )
             }
         }
         int try_times = 500;
-        struct pollfd pf = { .fd = -1, .events = 0 };
+        struct pollfd pf = { .fd = g_register_fd, .events = 0 };
         while (try_times-- > 0 && g_run) { 
             co_poll(co_get_epoll_ct(), &pf, 1, 10);
             if(g_reconnect) {
@@ -204,10 +204,12 @@ void *register_read_routine( void *arg )
         }
         if( ret > 0 || ( -1 == ret && EAGAIN == errno ) )
         {
+            struct pollfd pf = { .fd = g_register_fd, .events = POLLIN };
+            co_poll(co_get_epoll_ct(), &pf, 1, 100);
             continue;
         }
         // close(g_register_fd);
-        LOG_INFO("bw[ip:%s,port:%hu] closed.", rdata->ip, rdata->port);
+        LOG_INFO("bw[ip:%s,port:%hu] closed, ret:%d errno:%d.", rdata->ip, rdata->port, ret, errno);
         s_read_yield = 1;
         // co_yield_ct();
     }
@@ -285,7 +287,7 @@ void *register_write_routine( void *arg )
                 if (send_request) send_request = 0;
             }
         } else {
-            struct pollfd pf = { .fd = -1, .events = 0 };
+            struct pollfd pf = { .fd = g_register_fd, .events = 0 };
             co_poll(co_get_epoll_ct(), &pf, 1, 100);
         }
     }

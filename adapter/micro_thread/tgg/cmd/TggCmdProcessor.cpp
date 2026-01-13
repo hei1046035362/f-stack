@@ -69,7 +69,7 @@ int CmdTggGateway::CleanupAllBwHash()
 int CmdTggGateway::PrintAllGids()
 {
     LOG_INFO("ExecCmd PrintAllGids...");
-    std::vector<std::string> lst_gid;
+    std::vector<uint64_t> lst_gid;
     if (tgg_get_allonlinegids(lst_gid) < 0) {
         return -1;
     }
@@ -150,8 +150,8 @@ int CmdTggGateway::PrintGidCids(rapidjson::Document& body)
 int CmdTggGateway::PrintAllUids()
 {
     LOG_INFO("ExecCmd PrintAllUids...");
-    std::vector<std::string> lst_uid;
-    if (tgg_get_allonlinegids(lst_uid) < 0) {
+    std::vector<uint64_t> lst_uid;
+    if (tgg_get_allonlineuids(lst_uid) < 0) {
         return -1;
     }
     _print_path.append("_print_all_uids_");
@@ -251,7 +251,7 @@ int CmdTggGateway::PrintCidCount()
 {
     LOG_INFO("ExecCmd PrintCidCount...");
     std::vector<std::int64_t> lst_cid;
-    int count = tgg_get_uid_count();
+    int count = tgg_get_cid_count();
     if (count < 0) {
         return -1;
     }
@@ -279,7 +279,7 @@ int CmdTggGateway::PrintAllIdxs()
         std::vector<int64_t> lst_idx;
         tgg_get_allidxs(i, lst_idx);
         std::string header = "count: " + std::to_string(lst_idx.size());
-        if (write_list_to_file(_print_path, header, lst_idx) < 0) {
+        if (write_list_to_file(filename, header, lst_idx) < 0) {
             continue;
         }
     }
@@ -316,7 +316,7 @@ int CmdTggGateway::PrintIdxCount()
 int CmdTggGateway::PrintAllWorkerKeys()
 {
     LOG_INFO("ExecCmd PrintAllWorkerKeys...");
-    std::vector<std::string> lst_wkkeys;
+    std::vector<uint64_t> lst_wkkeys;
     if (tgg_get_allbwwkkeys(lst_wkkeys) < 0) {
         return -1;
     }
@@ -431,7 +431,7 @@ int CmdTggGateway::PrintRealWorkerCount()
 int CmdTggGateway::CheckGidcidAvaliable()
 {
     LOG_INFO("ExecCmd CheckGidcidAvaliable...");
-    std::vector<std::string> lst_gid;
+    std::vector<uint64_t> lst_gid;
     std::vector<std::string> lst_result;
     // 获取所有在线的分组
     if (tgg_get_allonlinegids(lst_gid) < 0)
@@ -441,7 +441,7 @@ int CmdTggGateway::CheckGidcidAvaliable()
     auto it = lst_gid.begin();
     while (it != lst_gid.end()) {
         std::vector<int64_t> lst_fd;
-        if (tgg_get_fdsbygid((*it).c_str(), lst_fd) < 0)
+        if (tgg_get_fdsbygid(*it, lst_fd) < 0)
             continue;
         auto it_fdidcid = lst_fd.begin();
         while(it_fdidcid != lst_fd.end()) {
@@ -451,14 +451,14 @@ int CmdTggGateway::CheckGidcidAvaliable()
             int idx = GET_IDX_FDCID_MASK(*it_fdidcid);
             int cid = GET_CID_FDCID_MASK(*it_fdidcid);
             if(tgg_check_idx_exist(coreid, idx) < 0) {
-                str_result = *it + ":";
+                str_result = std::to_string(*it) + ":";
                 str_result += std::to_string(cid) + ":";
                 str_result += std::to_string(*it_fdidcid);
                 str_result += "_idx";
             }
             if (tgg_get_cli_idx(coreid, fd) < 0) {
                 if(str_result.empty()) {
-                    str_result = *it + ":";
+                    str_result = std::to_string(*it) + ":";
                     str_result += std::to_string(cid) + ":";
                     str_result += std::to_string(*it_fdidcid);
                     str_result += "_fd";
@@ -488,7 +488,7 @@ int CmdTggGateway::CheckGidcidAvaliable()
 int CmdTggGateway::CheckUidcidAvaliable()
 {
     LOG_INFO("ExecCmd CheckUidcidAvaliable...");
-    std::vector<std::string> lst_uid;
+    std::vector<uint64_t> lst_uid;
     std::vector<std::string> lst_result;
     // 获取所有在线的分组
     if (tgg_get_allonlineuids(lst_uid) < 0)
@@ -498,7 +498,7 @@ int CmdTggGateway::CheckUidcidAvaliable()
     auto it = lst_uid.begin();
     while (it != lst_uid.end()) {
         std::vector<int64_t> lst_fd;
-        if (tgg_get_fdsbygid((*it).c_str(), lst_fd) < 0)
+        if (tgg_get_fdsbyuid(*it, lst_fd) < 0)
             continue;
         auto it_fdidcid = lst_fd.begin();
         while(it_fdidcid != lst_fd.end()) {
@@ -508,14 +508,14 @@ int CmdTggGateway::CheckUidcidAvaliable()
             int idx = GET_IDX_FDCID_MASK(*it_fdidcid);
             int cid = GET_CID_FDCID_MASK(*it_fdidcid);
             if(tgg_check_idx_exist(coreid, idx) < 0) {
-                str_result = *it + ":";
+                str_result = std::to_string(*it) + ":";
                 str_result += std::to_string(cid) + ":";
                 str_result += std::to_string(*it_fdidcid);
                 str_result += "_idx";
             }
             if (tgg_get_cli_idx(coreid, fd) < 0) {
                 if(str_result.empty()) {
-                    str_result = *it + ":";
+                    str_result = std::to_string(*it) + ":";
                     str_result += std::to_string(cid) + ":";
                     str_result += std::to_string(*it_fdidcid);
                     str_result += "_fd";
@@ -544,6 +544,7 @@ int CmdTggGateway::CheckUidcidAvaliable()
 
 int CmdTggGateway::CheckCidAvaliable()
 {
+    // 检测所有的fdidcid是否都有效，文件中会输出无效的idx，如果都有效就输出0
     LOG_INFO("ExecCmd CheckCidAvaliable...");
     std::vector<std::string> lst_result;
     std::vector<int64_t> lst_fd;

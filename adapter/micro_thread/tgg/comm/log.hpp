@@ -83,3 +83,17 @@ private:
 
 #define LOG_FATAL(format, ...) \
     AsyncLogger::getInstance().log(LogLevel::FATAL, __FILE__, __LINE__, format, ##__VA_ARGS__)
+
+
+// 在不可重入函数中打印信息
+#include <unistd.h>
+#include <signal.h>
+
+void __sig_snprintf(char *buf, size_t size, const char *fmt, ...);
+
+#define SIG_PRINTF(fmt, ...) \
+    do { \
+        static char __sig_buf__[256]; \
+        __sig_snprintf(__sig_buf__, sizeof(__sig_buf__), fmt, ##__VA_ARGS__); \
+    } while(0)
+

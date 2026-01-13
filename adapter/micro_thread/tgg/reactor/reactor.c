@@ -89,7 +89,7 @@ int reactor_create(int max_events, int timeout) {
         }
     // 初始化时间轮
     if (timer_wheel_init(&g_reactor.timer_wheel) < 0) {
-        LOG_ERROR("初始化时间轮失败");
+        LOG_ERROR("init timer wheel failed.");
         goto create_reactor_failed;
     }
 

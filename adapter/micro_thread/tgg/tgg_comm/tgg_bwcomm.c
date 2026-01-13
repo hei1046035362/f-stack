@@ -399,6 +399,15 @@ int write_list_to_file<int64_t>(const std::string& filename,
     return write_list_to_file_inline(filename, header, dataList, buffer_kb);
 }
 
+template <>
+int write_list_to_file<uint64_t>(const std::string& filename, 
+                     const std::string& header,
+                     const std::vector<uint64_t>& dataList,
+                     size_t buffer_kb)
+{
+    return write_list_to_file_inline(filename, header, dataList, buffer_kb);
+}
+
 template<>
 int write_list_to_file<std::string>(const std::string& filename, 
                      const std::string& header,

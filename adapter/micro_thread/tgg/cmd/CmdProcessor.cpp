@@ -556,10 +556,12 @@ int CmdSelect::ExecCmd()
 
 int CmdGetGroupIdList::ExecCmd()
 {
+    // gid hash表不再存原始值，转而存了gid生成的hash值
+    // 原因：1、接口没有使用，2、提升性能(key 的类型由字符串改为int,24字节减少为8字节)
     std::vector<std::string> lst_gid;
-    if (tgg_get_allonlinegids(lst_gid) < 0) {
-        LOG_WARNING("get all online gids failed.");
-    }
+    // if (tgg_get_allonlinegids(lst_gid) < 0) {
+    //     LOG_WARNING("get all online gids failed.");
+    // }
 
     // 创建 rapidjson 文档（数组类型）
     rapidjson::Document result(rapidjson::kArrayType);
@@ -1260,9 +1262,9 @@ int exec_cmd_processor(int prc_id, int fd, void* data)
             pro = new CmdSelect(prc_id, fd, data, jdata);
             break;
         // 获取在线群组列表
-        case CMD_GET_GROUP_ID_LIST:
-            pro = new CmdGetGroupIdList(prc_id, fd, data, jdata);// 暂时不需要
-            break;
+        // case CMD_GET_GROUP_ID_LIST:
+        //     pro = new CmdGetGroupIdList(prc_id, fd, data, jdata);// 暂时不需要
+        //     break;
         // 重新赋值 session
         case CMD_SET_SESSION:
             pro = new CmdSetSession(prc_id, fd, data, jdata);

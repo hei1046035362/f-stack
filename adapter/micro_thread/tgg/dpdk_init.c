@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/random.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/fcntl.h>
@@ -71,6 +72,10 @@ const char* gw_monitor_zone_name = "tgg_gw_monitor_zone";
 /// 进程锁
 struct rte_memzone* g_lock_zone = NULL;
 const char* s_lock_zone_name = "tgg_lock_zone";
+
+// 随机种子 所有进程共用一个，每次重启自动重新获取
+struct rte_memzone* g_random_zone = NULL;
+const char* s_random_zone_name = "tgg_random_zone";
 
 /// 五组队列
 // 队列名
@@ -214,6 +219,20 @@ static void init_locks()
 		rte_rwlock_init(get_gw_monitor_lock());
 		rte_atomic32_init(get_idx_lock());
 	}
+}
+
+uint32_t generate_secure_seed_getrandom(void) {
+    uint32_t seed;
+    
+    // 一次性尝试读取所需字节数
+    ssize_t bytes_read = getrandom(&seed, sizeof(seed), 0);
+    if (bytes_read != sizeof(seed)) {
+        // 处理失败情况（理论上在非阻塞模式下可能发生）
+		rte_exit(EXIT_FAILURE,
+			"[%s][%d] getrandom failed, error:%s.\n", __FILE__, __LINE__, strerror(errno));
+    }
+
+    return seed;
 }
 
 static struct rte_memzone *
@@ -363,7 +382,7 @@ struct rte_hash* init_hash(const char* hash_name, uint32_t ent_cnt, uint32_t key
 
 	struct rte_hash_parameters hash_params = {
 		.name = hash_name,
-		.entries = ent_cnt*4,
+		.entries = ent_cnt,
 		.key_len = RTE_ALIGN(key_len, 8),
 		.hash_func = rte_hash_crc,
 		.hash_func_init_val = 0,
@@ -440,6 +459,12 @@ void tgg_master_init()
 	s_bwzone_size = g_bwfdx_limit*sizeof(tgg_bw_info);
 	// 100W个FD  32M的空间
 	g_lock_zone = make_memzone(s_lock_zone_name, sizeof(tgg_lock));
+
+	// 获取MurmurHash3 随机种子
+	g_random_zone = make_memzone(s_random_zone_name, sizeof(uint32_t));
+	*((uint32_t*)(g_random_zone->addr)) = generate_secure_seed_getrandom();
+	LOG_INFO("generate random seed:%u", *((uint32_t*)(g_random_zone->addr)));
+
 	init_locks();
 	for (int i = 0; i < lcore_count; i++) {
 		// if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
@@ -503,11 +528,11 @@ void tgg_master_init()
 
 	g_mempool_trans = make_mempool(s_pool_trans_name, s_trans_mempool_size, s_mempool_trans_cache);
 	// 总fd数 * lcore核数 * 每个终端预留100个群  (考虑平均一个cid有上百个群)
-	g_gid_hash = init_hash(s_gid_hash_name, g_fd_limit * lcore_count * 100, TGG_GID_LEN);
+	g_gid_hash = init_hash(s_gid_hash_name, g_fd_limit * lcore_count * 100, sizeof(uint64_t));
 	// 总fd数 * lcore核数 * 每个用户预留5个终端  (要考虑一个uid对应多个cid的情况)
-	g_uid_hash = init_hash(s_uid_hash_name, g_fd_limit * lcore_count * 5, TGG_UID_LEN);
-	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit, sizeof(int64_t));
-	g_cidgid_hash = init_hash(s_cidgid_hash_name, g_fd_limit, sizeof(int64_t));
+	g_uid_hash = init_hash(s_uid_hash_name, g_fd_limit * lcore_count * 5, sizeof(uint64_t));
+	g_cid_hash = init_hash(s_cid_hash_name, g_fd_limit * lcore_count, sizeof(int64_t));
+	g_cidgid_hash = init_hash(s_cidgid_hash_name, g_fd_limit * lcore_count, sizeof(int64_t));
 	for (int i = 0; i < lcore_count; ++i)
 	{// idx hash是每个lcore进程独享的，进程之间不共享
 		// if(!((1 << i) & TggConfigure::getInstance()->get_lcore_mask())) {
@@ -519,8 +544,8 @@ void tgg_master_init()
 		// g_idx_rcu[i] = rte_rcu_qsbr_create(rte_socket_id());
 		// rte_hash_rcu_qsbr_add(g_idx_hash[i], g_idx_rcu);
 	}
-	g_bwfdx_hash = init_hash(s_bwfdx_hash_name, g_fd_limit, sizeof(int64_t));
-	g_bwwkkey_hash = init_hash(s_bwwkkey_hash_name, g_fd_limit, TGG_BWWKKEY_LEN);
+	g_bwfdx_hash = init_hash(s_bwfdx_hash_name, TggConfigure::getInstance()->get_gwbwprc_fd_limit(), sizeof(int64_t));
+	g_bwwkkey_hash = init_hash(s_bwwkkey_hash_name, TggConfigure::getInstance()->get_gwbwprc_fd_limit(), sizeof(int64_t));
 	g_bwprc_zone = make_memzone(bwprc_zone_name, TggConfigure::getInstance()->get_bwsvr_count()*sizeof(pid_data));
 	g_gw_monitor_zone = make_memzone(gw_monitor_zone_name, (lcore_count+2)*sizeof(pid_data));
 
@@ -587,6 +612,9 @@ void tgg_master_uninit()
 	}
 	rte_memzone_free(g_lock_zone);
 	g_lock_zone = NULL;
+
+	rte_memzone_free(g_random_zone);
+	g_random_zone = NULL;
 
 	rte_mempool_free(g_mempool_trans);
 	g_mempool_trans = NULL;
@@ -701,6 +729,7 @@ void tgg_secondary_init()
 	// 100W个FD  32M的空间
 	init_multi_for_secondary();
 	g_lock_zone = find_memzone(s_lock_zone_name);
+	g_random_zone = find_memzone(s_random_zone_name);
 	g_ring_trans = find_ring(s_trans_ring_name);
 	g_ring_bwfdx = find_ring(s_bwfdx_ring_name);
 	g_ring_master = find_ring(s_master_ring_name);

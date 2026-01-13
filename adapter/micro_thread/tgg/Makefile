@@ -7,6 +7,8 @@ ifneq ($(shell pkg-config --exists libdpdk && echo 0),0)
 $(error "no installation of DPDK found, maybe you shuld export environment variable `PKG_CONFIG_PATH`")
 endif
 
+SUBDIRS := $(wildcard tools/.)
+
 PKGCONF ?= pkg-config
 INSTALL_PATH = /usr/local/tgg_gateway
 TGG_CONF = $(INSTALL_PATH)/conf/tgg_conf.ini
@@ -72,6 +74,12 @@ CRESET =  ; EXIT_CODE=$$?; echo -ne \\e[m; exit $$EXIT_CODE #test -s $@
 
 clean:
 	@rm -f $(BINARY) *.a *.o gwrcv gwprc  tgg_comm/*.o cmd/*.o comm/*.o reactor/*.o
+	@for dir in $(SUBDIRS); do \
+		if [ -f $$dir/Makefile ]; then \
+			echo "Cleaning in $$dir"; \
+			$(MAKE) -C $$dir clean || exit 1; \
+		fi \
+	done
 
 
 # MASTER_OBJ = dpdk_init.o master.o tgg_comm/tgg_common.o tgg_comm/tgg_bwcomm.o tgg_comm/tgg_bw_cache.o comm/log.o\
@@ -79,30 +87,33 @@ clean:
 # 			tgg_comm/tgg_lock.o comm/RWIni.o tgg_comm/tgg_conf.o comm/common.o tgg_comm/tgg_data_opt.o \
 # 			tgg_comm/tgg_master_timers.o tgg_comm/tgg_ip_filter.o comm/picohttpparser.o
 
-MASTER_OBJ = dpdk_init.o master_reactor.o reactor/reactor.o reactor/timeout_wheel.o tgg_comm/tgg_common.o tgg_comm/tgg_bwcomm.o tgg_comm/tgg_bw_cache.o comm/log.o\
+MASTER_OBJ = dpdk_init.o master_reactor.o reactor/reactor.o reactor/timeout_wheel.o \
+			tgg_comm/tgg_common.o tgg_comm/tgg_bwcomm.o tgg_comm/tgg_bw_cache.o comm/log.o\
 			comm/Websocket.o comm/Encrypt.o tgg_comm/WsConsumer.o tgg_comm/tgg_transport.o\
 			tgg_comm/tgg_lock.o comm/RWIni.o tgg_comm/tgg_conf.o comm/common.o tgg_comm/tgg_data_opt.o \
-			tgg_comm/tgg_master_timers.o tgg_comm/tgg_ip_filter.o comm/picohttpparser.o
+			tgg_comm/tgg_master_timers.o tgg_comm/tgg_ip_filter.o comm/picohttpparser.o comm/MurmurHash3.o
 
 
 CLIPRC_OBJ = cliprc.o dpdk_init.o tgg_comm/tgg_bw_cache.o comm/log.o\
 				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
 				tgg_comm/tgg_lock.o comm/Websocket.o comm/Encrypt.o \
 				tgg_comm/WsConsumer.o tgg_comm/tgg_conf.o comm/common.o \
-				comm/RWIni.o tgg_comm/tgg_cliprc.o tgg_comm/tgg_transport.o comm/picohttpparser.o
+				comm/RWIni.o tgg_comm/tgg_cliprc.o tgg_comm/tgg_transport.o \
+				comm/picohttpparser.o comm/MurmurHash3.o
 
 
 BWSERVER_OBJ = bwprc.o dpdk_init.o cmd/CmdProcessor.o tgg_comm/tgg_bw_cache.o comm/log.o\
 				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
 				tgg_comm/tgg_lock.o comm/Encrypt.o cmd/TggCmdProcessor.o \
 				comm/Serialize.o tgg_comm/tgg_conf.o tgg_comm/tgg_bwserver.o \
-				comm/RWIni.o tgg_comm/tgg_transport.o comm/common.o comm/Websocket.o comm/picohttpparser.o
+				comm/RWIni.o tgg_comm/tgg_transport.o comm/common.o comm/Websocket.o \
+				comm/picohttpparser.o comm/MurmurHash3.o
 
 REGISTER_OBJ = register.o dpdk_init.o tgg_comm/tgg_bw_cache.o comm/log.o\
 				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
 				tgg_comm/tgg_lock.o \
 				tgg_comm/tgg_conf.o tgg_comm/tgg_register.o \
-				comm/RWIni.o comm/common.o comm/picohttpparser.o
+				comm/RWIni.o comm/common.o comm/picohttpparser.o comm/MurmurHash3.o
 
 # 日志是否写入文件，如果要输出到控制台，屏蔽下面这一行
 C_ARGS += -DLOG_TO_FILE
@@ -127,7 +138,15 @@ gwregister: $(REGISTER_OBJ)
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
 	@$(CC) -O -gdwarf-2 -o $@ $^  -ldl -lz -lcolib -lssl $(FF_LIBS) $(CRESET)
 
-all: gwrcv gwcliprc gwbwprc gwregister
+all: gwrcv gwcliprc gwbwprc gwregister build-subdirs
+
+build-subdirs:
+	@for dir in $(SUBDIRS); do \
+		if [ -f $$dir/Makefile ]; then \
+			echo "Building in $$dir"; \
+			$(MAKE) -C $$dir all || exit 1; \
+		fi \
+	done
 
 install:
 	mkdir -p $(INSTALL_PATH)/bin

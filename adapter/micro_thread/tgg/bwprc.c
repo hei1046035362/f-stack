@@ -25,7 +25,7 @@ static void prc_dpdk_eal_init(int argc, char **argv);
 
 void signal_handler(int signum)
 {
-    printf("gwbwprc coreid[%d] catched signal:%d\n", g_prc_id, signum);
+    SIG_PRINTF("gwbwprc coreid[%d] catched signal:%d\n", g_prc_id, signum);
 	if(signum == SIGINT || signum == SIGTERM) {
 		if(g_run) {
 			g_run = 0;
