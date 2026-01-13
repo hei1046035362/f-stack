@@ -49,7 +49,7 @@ typedef struct st_conn_info {
 
 void signal_handler(int signum)
 {
-    printf("gwrcv coreid[%d] catched signal:%d\n", g_core_id, signum);
+    SIG_PRINTF("gwrcv coreid[%d] catched signal:%d\n", g_core_id, signum);
     if(signum == SIGINT || signum == SIGTERM) {
         if(g_run_status) {
             g_run_status = 0;
@@ -68,9 +68,9 @@ void sigchld_handler(int sig) {
             int len = snprintf(buf, sizeof(buf), "%d_%d\n", pid, WTERMSIG(status));
             write(sig_pipe[1], buf, len);
             if (WIFEXITED(status)) {
-                printf("gwrcv child %d exit normal, exit code: %d\n", pid, WEXITSTATUS(status));
+                SIG_PRINTF("gwrcv child %d exit normal, exit code: %d\n", pid, WEXITSTATUS(status));
             } else if (WIFSIGNALED(status)) {
-                printf("gwrcv child %d exit by signal: %d\n", pid, WTERMSIG(status));
+                SIG_PRINTF("gwrcv child %d exit by signal: %d\n", pid, WTERMSIG(status));
             }
         }
     }

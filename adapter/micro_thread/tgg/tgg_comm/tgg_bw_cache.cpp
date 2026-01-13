@@ -8,6 +8,7 @@
 #include "comm/TggLock.hpp"
 #include "comm/log.hpp"
 #include "comm/common.hpp"
+#include "comm/MurmurHash3.h"
 
 extern const struct rte_hash *g_gid_hash;
 extern const struct rte_hash *g_uid_hash;
@@ -18,6 +19,8 @@ extern const struct rte_hash *g_bwfdx_hash;
 extern const struct rte_hash *g_bwwkkey_hash;
 extern struct rte_hash *g_expt_cid_hash[];// sendgroup时，要排除的cid列表，标准库的set和unordered_set效率太低
 
+extern struct rte_memzone* g_random_zone;
+
 extern struct rte_rcu_qsbr *g_gid_rcu;
 extern struct rte_rcu_qsbr *g_uid_rcu;
 extern struct rte_rcu_qsbr *g_cid_rcu;
@@ -25,6 +28,10 @@ extern struct rte_rcu_qsbr *g_cidgid_rcu;
 extern struct rte_rcu_qsbr *g_bwfdx_rcu;
 extern struct rte_rcu_qsbr *g_bwwkkey_rcu;
 
+uint32_t tgg_get_seed()
+{
+    return *((uint32_t*)(g_random_zone->addr));
+}
 
 typedef void (*tgg_add_data)(void*);
 
@@ -41,21 +48,21 @@ void iter_del_idlist(void* iddata)
 }
 
 // 针对key-list的hash
-static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int key_len, int64_t fdidcid)
+static int tgg_hash_add_keywithfdlst(const rte_hash* hash, uint64_t key, int64_t fdidcid)
 {
     tgg_fd_hash_value *node_list;
 
     // 查找或创建哈希表项
-    if (rte_hash_lookup_with_hash_data(hash, key, rte_hash_crc(key, key_len, 0), (void**)&node_list) < 0) {
+    if (rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(uint64_t), 0), (void**)&node_list) < 0) {
         node_list = (tgg_fd_hash_value *)dpdk_rte_malloc(sizeof(tgg_fd_hash_value));
         if (!node_list) {
-            LOG_ERROR("add hash[%s] key[%s] failed, malloc node_list failed.", hash->name, key);
+            LOG_ERROR("add hash[%s] key[%llu] failed, malloc node_list failed.", hash->name, key);
             return -1;
         }
         node_list->list = NULL;
         rte_rwlock_init(&node_list->lock);
-        if (rte_hash_add_key_with_hash_data(hash, key, rte_hash_crc(key, key_len, 0), node_list) < 0) {
-            LOG_ERROR("add hash[%s] key[%s] failed.", hash->name, key);
+        if (rte_hash_add_key_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(uint64_t), 0), node_list) < 0) {
+            LOG_ERROR("add hash[%s] key[%llu] failed.", hash->name, key);
             dpdk_rte_free(node_list);
             return -1;
         }
@@ -67,7 +74,7 @@ static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int 
     while (current) {
         if (current->fdidcid == fdidcid) {
             rte_rwlock_read_unlock(&node_list->lock);
-            LOG_WARNING("Duplicate hash[%s] key[%s] found.", hash->name, key);
+            LOG_WARNING("Duplicate hash[%s] key[%llu] found.", hash->name, key);
             return 0; // 重复的 fdidcid
         }
         current = current->next;
@@ -92,25 +99,25 @@ static int tgg_hash_add_keywithfdlst(const rte_hash* hash, const char* key, int 
 }
 
 // 获取hash value/list
-static void* tgg_hash_get_value(const rte_hash* hash, const char* key, int key_len)
+static void* tgg_hash_get_value(const rte_hash* hash, uint64_t key)
 {
     void* pdata = NULL;
-    int ret = rte_hash_lookup_with_hash_data(hash, key, rte_hash_crc(key, key_len, 0), &pdata);
+    int ret = rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(uint64_t), 0), &pdata);
     if (ret < 0) {
-        LOG_DEBUG("Get key[%s] data failed:%d", key, ret);
+        LOG_DEBUG("Get key[%llu] data failed:%d", key, ret);
         return NULL;
     }
     return pdata;
 }
 
 // 删除整个key
-static int tgg_hash_del_key(const rte_hash* hash, rte_rcu_qsbr *rcu, const char* key, int key_len, tgg_free_id_data fp)
+static int tgg_hash_del_key(const rte_hash* hash, rte_rcu_qsbr *rcu, uint64_t key, tgg_free_id_data fp)
 {
     tgg_fd_hash_value *node_list;
 
     // 查找哈希表项
-    if (rte_hash_lookup_with_hash_data(hash, key, rte_hash_crc(key, key_len, 0), (void**)&node_list) < 0) {
-        LOG_WARNING("delete hash[%s] key[%s] not found.", hash->name, key);
+    if (rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(uint64_t), 0), (void**)&node_list) < 0) {
+        LOG_WARNING("delete hash[%s] key[%llu] not found.", hash->name, key);
         return -1; // 键不存在
     }
 
@@ -119,7 +126,7 @@ static int tgg_hash_del_key(const rte_hash* hash, rte_rcu_qsbr *rcu, const char*
     tgg_fd_list *current = node_list->list;
     tgg_fd_list *tmp;
     while (current) {
-        LOG_DEBUG("deleted hash[%s] key[%s] node[%ld].", hash->name, key, current->fdidcid);
+        LOG_DEBUG("deleted hash[%s] key[%llu] node[%ld].", hash->name, key, current->fdidcid);
         tmp = current;
         current = current->next;
         dpdk_rte_free(tmp); // 归还节点到内存池
@@ -128,7 +135,7 @@ static int tgg_hash_del_key(const rte_hash* hash, rte_rcu_qsbr *rcu, const char*
     rte_rwlock_write_unlock(&node_list->lock);
 
     // 删除哈希表项
-    int ret = rte_hash_del_key_with_hash(hash, key, rte_hash_crc(key, key_len, 0));
+    int ret = rte_hash_del_key_with_hash(hash, &key, rte_hash_crc(&key, sizeof(uint64_t), 0));
     if (ret >= 0) {
         // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
         if (rte_hash_free_key_with_position(hash, ret) < 0) {
@@ -147,13 +154,13 @@ static int tgg_hash_del_key(const rte_hash* hash, rte_rcu_qsbr *rcu, const char*
 }
 
 // 删除hash value为list中的单个元素,list节点中的值为fd和idx两个元素
-static int tgg_hash_del_fdlst4key(const rte_hash* hash, rte_rcu_qsbr *rcu, const char* key, int key_len, int64_t fdidcid)
+static int tgg_hash_del_fdlst4key(const rte_hash* hash, rte_rcu_qsbr *rcu, uint64_t key, int64_t fdidcid)
 {
     tgg_fd_hash_value *node_list;
 
     // 查找哈希表项
-    if (rte_hash_lookup_with_hash_data(hash, key, rte_hash_crc(key, key_len, 0), (void**)&node_list) < 0) {
-        LOG_WARNING("delete hash[%s] node[%ld] failed, key[%s] not found.", hash->name, fdidcid, key);
+    if (rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(uint64_t), 0), (void**)&node_list) < 0) {
+        LOG_WARNING("delete hash[%s] node[%ld] failed, key[%llu] not found.", hash->name, fdidcid, key);
         return -1; // 键不存在
     }
 
@@ -172,7 +179,7 @@ static int tgg_hash_del_fdlst4key(const rte_hash* hash, rte_rcu_qsbr *rcu, const
                 node_list->list = current->next;
             }
             dpdk_rte_free(current); // 归还节点到内存池
-            LOG_DEBUG("deleted hash[%s] key[%s] node[%ld].", hash->name, key, fdidcid);
+            LOG_DEBUG("deleted hash[%s] key[%llu] node[%ld].", hash->name, key, fdidcid);
             found = 1;
             break;
         }
@@ -184,34 +191,34 @@ static int tgg_hash_del_fdlst4key(const rte_hash* hash, rte_rcu_qsbr *rcu, const
     if (found && node_list->list == NULL) {
         // 最后一个节点，释放 value 并删除 key
         rte_rwlock_write_unlock(&node_list->lock);
-        int ret = rte_hash_del_key_with_hash(hash, key, rte_hash_crc(key, key_len, 0));
+        int ret = rte_hash_del_key_with_hash(hash, &key, rte_hash_crc(&key, sizeof(uint64_t), 0));
         if (ret >= 0) {
             // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
             if (rte_hash_free_key_with_position(hash, ret) < 0) {
-                LOG_ERROR("Del hash[%s] key[%s] pos failed:%d", hash->name, key, ret);
+                LOG_ERROR("Del hash[%s] key[%llu] pos failed:%d", hash->name, key, ret);
                 return -EINVAL;
             }
             // rte_rcu_qsbr_synchronize(rcu, RTE_QSBR_THRID_INVALID);// 等待所有读者退出
-            LOG_DEBUG("delete hash[%s] key[%s].", hash->name, key);
+            LOG_DEBUG("delete hash[%s] key[%llu].", hash->name, key);
             // 释放value的空间
             rte_free(node_list);
             return 0;
         } else {
-            LOG_ERROR("Del hash[%s] key[%s] data failed:%d", hash->name, key, ret);
+            LOG_ERROR("Del hash[%s] key[%llu] data failed:%d", hash->name, key, ret);
             return -EINVAL;
         }
     }
 
     if(!found) {
-        LOG_ERROR("hash[%s] key[%s] node[%ld] not found.", hash->name, key, fdidcid);
+        LOG_ERROR("hash[%s] key[%llu] node[%lld] not found.", hash->name, key, fdidcid);
     }
     rte_rwlock_write_unlock(&node_list->lock);
     return found ? 0 : -1; // 返回是否找到并删除
 }
 
-static int tgg_hash_get_allkeys(const rte_hash* hash, std::vector<std::string>& lst_items)
+static int tgg_hash_get_allkeys(const rte_hash* hash, std::vector<uint64_t>& lst_items)
 {
-    char* key = NULL;
+    uint64_t* key = NULL;
     int* value = NULL;
     uint32_t next = 0;
     int ret = 0;
@@ -225,7 +232,7 @@ static int tgg_hash_get_allkeys(const rte_hash* hash, std::vector<std::string>& 
             LOG_ERROR("catch an error");
             return -1;
         }
-        lst_items.push_back(key);
+        lst_items.push_back(*key);
     }
     return 0;
 }
@@ -239,7 +246,7 @@ static void* tgg_hash_get_intkey_value(const rte_hash* hash, int64_t key)
     void* pdata = NULL;
     int ret = rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(int64_t), 0), &pdata);
     if (ret < 0) {
-        LOG_DEBUG("Get key[%d] data failed:%d", key, ret);
+        LOG_DEBUG("Get key[%lld] data failed:%d", key, ret);
         return NULL;
     }
     return pdata;
@@ -250,7 +257,7 @@ static int tgg_hash_add_intkeywithfdlst(const rte_hash* hash, int64_t key, const
     tgg_fd_hash_svalue *node_list;
     int data_len = strlen(data);
     if(data_len > TGG_GID_LEN || data_len <= 0) {
-        LOG_ERROR("add hash[%s] key[%ld] node[%s] failed, invalid node length[%d].", hash->name, key, data, data_len);
+        LOG_ERROR("add hash[%s] key[%lld] node[%s] failed, invalid node length[%d].", hash->name, key, data, data_len);
         return -1;
     }
 
@@ -258,13 +265,13 @@ static int tgg_hash_add_intkeywithfdlst(const rte_hash* hash, int64_t key, const
     if (rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(int64_t), 0), (void**)&node_list) < 0) {
         node_list = (tgg_fd_hash_svalue*)dpdk_rte_malloc(sizeof(tgg_fd_hash_svalue));
         if (!node_list) {
-            LOG_ERROR("add hash[%s] key[%ld] node[%s] failed, malloc node_list failed.", hash->name, key, data);
+            LOG_ERROR("add hash[%s] key[%lld] node[%s] failed, malloc node_list failed.", hash->name, key, data);
             return -1;
         }
         node_list->list = NULL;
         rte_rwlock_init(&node_list->lock);
         if (rte_hash_add_key_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(int64_t), 0), node_list) < 0) {
-            LOG_ERROR("add hash[%s] key[%ld] node[%s] failed.", hash->name, key, data);
+            LOG_ERROR("add hash[%s] key[%lld] node[%s] failed.", hash->name, key, data);
             dpdk_rte_free(node_list);
             return -1;
         }
@@ -276,7 +283,7 @@ static int tgg_hash_add_intkeywithfdlst(const rte_hash* hash, int64_t key, const
     while (current) {
         if (!strncmp(current->data, data, data_len)) {
             rte_rwlock_read_unlock(&node_list->lock);
-            LOG_WARNING("Duplicate hash[%s] key[%ld] data[%s] found.", hash->name, key, data);
+            LOG_WARNING("Duplicate hash[%s] key[%lld] data[%s] found.", hash->name, key, data);
             return 0; // 重复的 节点
         }
         current = current->next;
@@ -286,7 +293,7 @@ static int tgg_hash_add_intkeywithfdlst(const rte_hash* hash, int64_t key, const
     // 分配新节点
     tgg_list_id *new_node = (tgg_list_id*)dpdk_rte_malloc(sizeof(tgg_list_id));
     if (!new_node) {
-        LOG_ERROR("malloc node for hash[%s] key[%ld] node[%s] failed.", hash->name, key, data);
+        LOG_ERROR("malloc node for hash[%s] key[%lld] node[%s] failed.", hash->name, key, data);
         return -1;
     }
     memcpy(new_node->data, data, data_len);
@@ -297,7 +304,7 @@ static int tgg_hash_add_intkeywithfdlst(const rte_hash* hash, int64_t key, const
     new_node->next = node_list->list;
     node_list->list = new_node;
     rte_rwlock_write_unlock(&node_list->lock);
-    LOG_DEBUG("added hash[%s] key[%ld] node[%s].", hash->name, key, data);
+    LOG_DEBUG("added hash[%s] key[%lld] node[%s].", hash->name, key, data);
     return 0;
 }
 
@@ -308,15 +315,15 @@ static int tgg_hash_del_intkey_value(const rte_hash* hash, int64_t key, void* va
     if (ret >= 0) {
         // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
         if (rte_hash_free_key_with_position(hash, ret) < 0) {
-            LOG_ERROR("Del hash[%s] key[%ld] pos failed:%d", hash->name, key, ret);
+            LOG_ERROR("Del hash[%s] key[%lld] pos failed:%d", hash->name, key, ret);
             return -EINVAL;
         }
         // rte_rcu_qsbr_synchronize(rcu, RTE_QSBR_THRID_INVALID);// 等待所有读者退出
-        LOG_DEBUG("delete hash[%s] key[%ld].", hash->name, key);
+        LOG_DEBUG("delete hash[%s] key[%lld].", hash->name, key);
         // 释放value的空间
         dpdk_rte_free(value);
     } else {
-        LOG_ERROR("Del hash[%s] key[%ld] data failed:%d", hash->name, key, ret);
+        LOG_ERROR("Del hash[%s] key[%lld] data failed:%d", hash->name, key, ret);
         return -EINVAL;
     }
     return 0;
@@ -329,7 +336,7 @@ static int tgg_hash_del_intkey(const rte_hash* hash, rte_rcu_qsbr *rcu, int64_t 
 
     // 查找哈希表项
     if (rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(int64_t), 0), (void**)&node_list) < 0) {
-        LOG_DEBUG("delete hash[%s] key[%ld] not found.", hash->name, key);
+        LOG_DEBUG("delete hash[%s] key[%lld] not found.", hash->name, key);
         return -1; // 键不存在
     }
 
@@ -338,7 +345,7 @@ static int tgg_hash_del_intkey(const rte_hash* hash, rte_rcu_qsbr *rcu, int64_t 
     tgg_list_id *current = node_list->list;
     tgg_list_id *tmp;
     while (current) {
-        LOG_DEBUG("deleted hash[%s] key[%ld] node[%s].", hash->name, key, current->data);
+        LOG_DEBUG("deleted hash[%s] key[%lld] node[%s].", hash->name, key, current->data);
         tmp = current;
         current = current->next;
         dpdk_rte_free(tmp); // 归还节点到内存池
@@ -372,13 +379,13 @@ static int tgg_hash_del_idlst4intkey(const rte_hash* hash, rte_rcu_qsbr *rcu, in
     tgg_fd_hash_svalue *node_list;
     int id_len = strlen(id);
     if(id_len > TGG_GID_LEN || id_len <= 0) {
-        LOG_ERROR("del hash[%s] key[%ld] node[%s] failed, invalid node length[%d].", hash->name, key, id, id_len);
+        LOG_ERROR("del hash[%s] key[%lld] node[%s] failed, invalid node length[%d].", hash->name, key, id, id_len);
         return -1;
     }
 
     // 查找哈希表项
     if (rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(int64_t), 0), (void**)&node_list) < 0) {
-        LOG_ERROR("del hash[%s] key[%ld] node[%s] failed:%d, key not found.", hash->name, key, id);
+        LOG_ERROR("del hash[%s] key[%lld] node[%s] failed:%d, key not found.", hash->name, key, id);
         return -1; // 键不存在
     }
 
@@ -396,7 +403,7 @@ static int tgg_hash_del_idlst4intkey(const rte_hash* hash, rte_rcu_qsbr *rcu, in
             } else {
                 node_list->list = current->next;
             }
-            LOG_DEBUG("delete hash[%s] key[%d] node[%s].", hash->name, key, id);
+            LOG_DEBUG("delete hash[%s] key[%lld] node[%s].", hash->name, key, id);
             dpdk_rte_free(current); // 归还节点到内存池
             found = 1;
             break;
@@ -413,23 +420,23 @@ static int tgg_hash_del_idlst4intkey(const rte_hash* hash, rte_rcu_qsbr *rcu, in
         if (ret >= 0) {
             // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
             if (rte_hash_free_key_with_position(hash, ret) < 0) {
-                LOG_ERROR("Del hash[%s] key[%d] pos failed:%d", hash->name, key, ret);
+                LOG_ERROR("Del hash[%s] key[%lld] pos failed:%d", hash->name, key, ret);
                 return -EINVAL;
             }
             // rte_rcu_qsbr_synchronize(rcu, RTE_QSBR_THRID_INVALID);// 等待所有读者退出
-            LOG_DEBUG("delete hash[%s] key[%d].", hash->name, key);
+            LOG_DEBUG("delete hash[%s] key[%lld].", hash->name, key);
             // 释放value的空间
             rte_free(node_list);
             return 0;
         } else {
-            LOG_ERROR("Del hash[%s] key[%d] data failed:%d", hash->name, key, ret);
+            LOG_ERROR("Del hash[%s] key[%lld] data failed:%d", hash->name, key, ret);
             return -EINVAL;
         }
     }
 
     rte_rwlock_write_unlock(&node_list->lock);
     if(!found) {
-        LOG_ERROR("hash[%s] key[%d] node[%s] not found.", hash->name, key, id);
+        LOG_ERROR("hash[%s] key[%lld] node[%s] not found.", hash->name, key, id);
     }
     return found ? 0 : -1; // 返回是否找到并删除
 }
@@ -460,26 +467,20 @@ static int tgg_hash_get_all_intkeys(const rte_hash* hash, std::vector<int64_t>& 
     return 0;
 }
 
-#define APROPRIAT_HASH_KEY(key, len)\
-    char _key[len] = {0};\
-    memcpy(_key, key, strlen(key))
-
 /// 增删查  gid
 int tgg_add_gid(const char* gid, int64_t fdidcid)
 {
-    LOG_DEBUG("add gid[%s] fdidcid[%lld].", gid, fdidcid);
-    APROPRIAT_HASH_KEY(gid, TGG_GID_LEN);
-    // WriteLock lock(get_gidfd_lock());
-    return tgg_hash_add_keywithfdlst(g_gid_hash, _key, TGG_GID_LEN, fdidcid);
+    uint64_t _gid = murmurhash3_64(gid, strlen(gid), tgg_get_seed());
+    LOG_DEBUG("add gid[%s] hash[%llu] fdidcid[%lld].", gid, _gid, fdidcid);
+    return tgg_hash_add_keywithfdlst(g_gid_hash, _gid, fdidcid);
 }
 
-int tgg_get_fdsbygid(const char* gid, std::vector<int64_t>& lst_fd)
+int tgg_get_fdsbygid(uint64_t gid, std::vector<int64_t>& lst_fd)
 {
     lst_fd.reserve(RESERVED_SIZE_FOR_GID_CIDS);
-    APROPRIAT_HASH_KEY(gid, TGG_GID_LEN);
-    tgg_gid_data* value = (tgg_gid_data*)tgg_hash_get_value(g_gid_hash, _key, TGG_GID_LEN);
+    tgg_gid_data* value = (tgg_gid_data*)tgg_hash_get_value(g_gid_hash, gid);
     if(!value) {
-        LOG_DEBUG("get fdlist failed by gid[%s], value is empty.", gid);
+        LOG_DEBUG("get fdlist failed by gid[%llu], value is empty.", gid);
         return -1;
     }
     ReadLock lock(&value->lock);
@@ -491,14 +492,23 @@ int tgg_get_fdsbygid(const char* gid, std::vector<int64_t>& lst_fd)
     return 0;
 }
 
-int tgg_del_gid(const char* gid)
+int tgg_get_fdsbygid(const char* gid, std::vector<int64_t>& lst_fd)
 {
-    LOG_DEBUG("iter del fdidcid for gid[%s].", gid);
-    APROPRIAT_HASH_KEY(gid, TGG_GID_LEN);
-    // WriteLock lock(get_gidfd_lock());
-    return tgg_hash_del_key(g_gid_hash, g_gid_rcu, _key, TGG_GID_LEN, iter_del_fdlist);
+    uint64_t _gid = murmurhash3_64(gid, strlen(gid), tgg_get_seed());
+    return tgg_get_fdsbygid(_gid, lst_fd);
 }
 
+static int __tgg_del_gid(uint64_t gid)
+{
+    return tgg_hash_del_key(g_gid_hash, g_gid_rcu, gid, iter_del_fdlist);
+}
+
+int tgg_del_gid(const char* gid)
+{
+    uint64_t _gid = murmurhash3_64(gid, strlen(gid), tgg_get_seed());
+    LOG_DEBUG("del gid[%s] hash[%llu].", gid, _gid);
+    return __tgg_del_gid(_gid);
+}
 void tgg_clean_gid()
 {
     LOG_DEBUG("clean gids.");
@@ -506,39 +516,35 @@ void tgg_clean_gid()
         LOG_DEBUG("gid hash is empty.");
         return;
     }
-    std::list<const char*> keys_to_delete; // 预存待删键
+    std::list<uint64_t> keys_to_delete; // 预存待删键
 
     // 阶段1：遍历并标记待删键
     uint32_t iter = 0;
-    const char *key;
+    uint64_t *key;
     int *value;
     while (rte_hash_iterate(g_gid_hash, (const void**)&key, (void**)&value, &iter) >= 0) {
-        if (strlen(key) > 0) {
-            LOG_DEBUG("add delete gid:%s.", key);
-            keys_to_delete.push_back(key);
-        } else {
-            LOG_WARNING("Ignore invalid gid:%s", key);
-        }
+        LOG_DEBUG("add delete gid:%llu.", key);
+        keys_to_delete.push_back(*key);
     }
 
     // 阶段2：批量删除并同步RCU
     for (auto del_key : keys_to_delete) {
-        if(tgg_del_gid(del_key) < 0) {
-            LOG_WARNING("delete gid:%s failed.", key);
+        if(__tgg_del_gid(del_key) < 0) {
+            LOG_WARNING("delete gid:%llu failed.", key);
         } else {
-            LOG_DEBUG("deleted gid:%s.", key);
+            LOG_DEBUG("deleted gid:%llu.", key);
         }
     }
 }
 
 int tgg_del_fd4gid(const char* gid, int64_t fdidcid)
 {
-    LOG_DEBUG("del fdidcid[%lld] for gid[%s].", fdidcid, gid);
-    APROPRIAT_HASH_KEY(gid, TGG_GID_LEN);
-    return tgg_hash_del_fdlst4key(g_gid_hash, g_gid_rcu, _key, TGG_GID_LEN, fdidcid);
+    uint64_t _gid = murmurhash3_64(gid, strlen(gid), tgg_get_seed());
+    LOG_DEBUG("del fdidcid[%lld] for gid[%s] hash[%llu].", fdidcid, gid, _gid);
+    return tgg_hash_del_fdlst4key(g_gid_hash, g_gid_rcu, _gid, fdidcid);
 }
 
-int tgg_get_allonlinegids(std::vector<std::string>& lst_gid)
+int tgg_get_allonlinegids(std::vector<uint64_t>& lst_gid)
 {
     return tgg_hash_get_allkeys(g_gid_hash, lst_gid);
 }
@@ -551,16 +557,21 @@ int tgg_get_gid_count()
 /// 增删查  uid 用户id 
 int tgg_add_uid(const char* uid, int64_t fdidcid)
 {
-    LOG_DEBUG("add uid[%s] fdidcid[%lld].", uid, fdidcid);
-    APROPRIAT_HASH_KEY(uid, TGG_UID_LEN);
-    return tgg_hash_add_keywithfdlst(g_uid_hash, _key, TGG_UID_LEN, fdidcid);
+    uint64_t _uid = murmurhash3_64(uid, strlen(uid), tgg_get_seed());
+    LOG_DEBUG("add uid[%s] hash[%llu] fdidcid[%lld].", uid, _uid, fdidcid);
+    return tgg_hash_add_keywithfdlst(g_uid_hash, _uid, fdidcid);
+}
+
+static int __tgg_del_uid(uint64_t uid)
+{
+    return tgg_hash_del_key(g_uid_hash, g_uid_rcu, uid, iter_del_fdlist);
 }
 
 int tgg_del_uid(const char* uid)
 {
-    LOG_DEBUG("iter del fdidcid for uid[%s].", uid);
-    APROPRIAT_HASH_KEY(uid, TGG_UID_LEN);
-    return tgg_hash_del_key(g_uid_hash, g_uid_rcu, _key, TGG_UID_LEN, iter_del_fdlist);
+    uint64_t _uid = murmurhash3_64(uid, strlen(uid), tgg_get_seed());
+    LOG_DEBUG("del uid[%s] hash[%llu].", uid, _uid);
+    return __tgg_del_uid(_uid);
 }
 
 void tgg_clean_uid()
@@ -570,46 +581,39 @@ void tgg_clean_uid()
         LOG_DEBUG("uid hash is empty.");
         return;
     }
-    std::list<const char*> keys_to_delete; // 预存待删键
+    std::list<uint64_t> keys_to_delete; // 预存待删键
 
     // 阶段1：遍历并标记待删键
     uint32_t iter = 0;
-    const char *key;
+    uint64_t *key;
     int *value;
     while (rte_hash_iterate(g_uid_hash, (const void**)&key, (void**)&value, &iter) >= 0) {
-        if (strlen(key) > 0) {
-            LOG_DEBUG("add delete uid:%s.", key);
-            keys_to_delete.push_back(key);
-        } else {
-            LOG_WARNING("Ignore invalid uid:%s", key);
-        }
+        LOG_DEBUG("add delete uid:%llu.", *key);
+        keys_to_delete.push_back(*key);
     }
 
     // 阶段2：批量删除并同步RCU
     for (auto del_key : keys_to_delete) {
-        if(tgg_del_uid(del_key) < 0) {
-            LOG_WARNING("delete uid:%s failed.", key);
+        if(__tgg_del_uid(del_key) < 0) {
+            LOG_WARNING("delete uid:%llu failed.", *key);
         } else {
-            LOG_DEBUG("deleted uid:%s.", key);
+            LOG_DEBUG("deleted uid:%llu.", *key);
         }
     }
 }
 
 int tgg_del_fd4uid(const char* uid, int64_t fdidcid)
 {
-    LOG_DEBUG("del fdidcid[%lld] for uid[%s].", fdidcid, uid);
-    APROPRIAT_HASH_KEY(uid, TGG_UID_LEN);
-    // WriteLock lock(get_uidfd_lock());
-    return tgg_hash_del_fdlst4key(g_uid_hash, g_uid_rcu, _key, TGG_UID_LEN, fdidcid);
+    uint64_t _uid = murmurhash3_64(uid, strlen(uid), tgg_get_seed());
+    LOG_DEBUG("del fdidcid[%lld] for uid[%s] hash[%llu].", fdidcid, uid, _uid);
+    return tgg_hash_del_fdlst4key(g_uid_hash, g_uid_rcu, _uid, fdidcid);
 }
 
-int tgg_get_fdsbyuid(const char* uid, std::vector<int64_t>& lst_fd)
+int tgg_get_fdsbyuid(uint64_t uid, std::vector<int64_t>& lst_fd)
 {
-    APROPRIAT_HASH_KEY(uid, TGG_UID_LEN);
-    // ReadLock lock(get_uidfd_lock());
-    tgg_uid_data* value = (tgg_uid_data*)tgg_hash_get_value(g_uid_hash, _key, TGG_UID_LEN);
+    tgg_uid_data* value = (tgg_uid_data*)tgg_hash_get_value(g_uid_hash, uid);
     if(!value) {
-        LOG_DEBUG("get fdidcid by uid[%s] failed.", uid);
+        LOG_DEBUG("get fdidcid by uid[%llu] failed.", uid);
         return -1;
     }
     lst_fd.reserve(RESERVED_SIZE_FOR_UID_CIDS);
@@ -622,7 +626,13 @@ int tgg_get_fdsbyuid(const char* uid, std::vector<int64_t>& lst_fd)
     return 0;
 }
 
-int tgg_get_allonlineuids(std::vector<std::string>& lst_uid)
+int tgg_get_fdsbyuid(const char* uid, std::vector<int64_t>& lst_fd)
+{
+    uint64_t _uid = murmurhash3_64(uid, strlen(uid), tgg_get_seed());
+    return tgg_get_fdsbyuid(_uid, lst_fd);
+}
+
+int tgg_get_allonlineuids(std::vector<uint64_t>& lst_uid)
 {
     return tgg_hash_get_allkeys(g_uid_hash, lst_uid);
 }
@@ -639,7 +649,7 @@ int tgg_add_cid(int64_t cid, int64_t fdidcid)
     LOG_DEBUG("add cid[%d] fdidcid[%lld].", cid, fdidcid);
     int64_t* value = (int64_t*)dpdk_rte_malloc(sizeof(int64_t));
     if(!value) {
-        LOG_ERROR("[%s][%d]add key[%d] failed.", cid);
+        LOG_ERROR("add key[%lld] failed.", cid);
         return -1;
     }
     *value = fdidcid;
@@ -649,11 +659,11 @@ int tgg_add_cid(int64_t cid, int64_t fdidcid)
 
 int tgg_del_cid(int64_t cid)
 {
-    LOG_DEBUG("del fdidcid for cid[%d].", cid);
+    LOG_DEBUG("del fdidcid for cid[%lld].", cid);
     int64_t *value;
     // 查找哈希表项
     if (rte_hash_lookup_with_hash_data(g_cid_hash, &cid, rte_hash_crc(&cid, sizeof(int64_t), 0), (void**)&value) < 0) {
-        LOG_ERROR("del hash[%s] key[%ld] failed, key not found.", g_cid_hash->name, cid);
+        LOG_ERROR("del hash[%s] key[%lld] failed, key not found.", g_cid_hash->name, cid);
         return -1; // 键不存在
     }
     return tgg_hash_del_intkey_value(g_cid_hash, cid, value);
@@ -673,22 +683,22 @@ void tgg_clean_cid()
 
     // 阶段1：遍历并标记待删键
     uint32_t iter = 0;
-    int *key, *value;
+    int64_t *key, *value;
     while (rte_hash_iterate(g_cid_hash, (const void**)&key, (void**)&value, &iter) >= 0) {
         if (*key > 0) {
-            LOG_DEBUG("add delete cid:%d", *key);
+            LOG_DEBUG("add delete cid:%lld", *key);
             keys_to_delete.push_back(*key);
         } else {
-            LOG_WARNING("Ignore invalid cid:%d", *key);
+            LOG_WARNING("Ignore invalid cid:%lld", *key);
         }
     }
 
     // 阶段2：批量删除并同步RCU
     for (auto del_key : keys_to_delete) {
         if (tgg_del_cid(del_key) < 0 ) {
-            LOG_WARNING("delete cid:%d failed.", del_key);
+            LOG_WARNING("delete cid:%lld failed.", del_key);
         } else {
-            LOG_DEBUG("deleted cid:%d.", del_key);
+            LOG_DEBUG("deleted cid:%lld.", del_key);
         }
     }
 }
@@ -697,7 +707,7 @@ int64_t tgg_get_fdbycid(int64_t cid)
 {
     int64_t* value = (int64_t*)tgg_hash_get_intkey_value(g_cid_hash, cid);
     if(!value) {
-        LOG_DEBUG("get fd by cid:%ld failed, value is NULL.", cid);
+        LOG_DEBUG("get fd by cid:%lld failed, value is NULL.", cid);
         return -1;
     }
     return *value;
@@ -743,19 +753,15 @@ int tgg_get_cid_count()
 
 int tgg_add_cidgid(int64_t cid, const char* gid)
 {
-    LOG_DEBUG("add gid[%s] for cid[%d].", gid, cid);
-    APROPRIAT_HASH_KEY(gid, TGG_UID_LEN);
-    return tgg_hash_add_intkeywithfdlst(g_cidgid_hash, cid, _key);
-
+    LOG_DEBUG("add gid[%s] for cid[%lld].", gid, cid);
+    return tgg_hash_add_intkeywithfdlst(g_cidgid_hash, cid, gid);
 }
 
 int tgg_get_gidsbycid(int64_t cid, std::vector<std::string>& lst_gid)
 {
-    // APROPRIAT_HASH_KEY(uid, TGG_UID_LEN);
-    // ReadLock lock(get_cidgid_lock());
     tgg_fd_hash_svalue* value = (tgg_gid_list*)tgg_hash_get_intkey_value(g_cidgid_hash, cid);
     if(!value) {
-        LOG_DEBUG("cid [%d] not exist in gid hash.", cid);
+        LOG_DEBUG("cid [%lld] not exist in gid hash.", cid);
         return -1;
     }
     lst_gid.reserve(RESERVED_SIZE_FOR_GID_CIDS);
@@ -771,10 +777,10 @@ int tgg_get_gidsbycid(int64_t cid, std::vector<std::string>& lst_gid)
 // 删掉hash<cid,list<gid>>中的一整个cid
 int tgg_del_cid_cidgid(int64_t cid)
 {
-    LOG_DEBUG("del all gids for cid[%d].", cid);
+    LOG_DEBUG("del all gids for cid[%lld].", cid);
     // WriteLock lock(get_cidgid_lock());
     if(cid <= 0) {
-        LOG_ERROR("del all gids for cid[%d] failed.", cid);        
+        LOG_ERROR("del all gids for cid[%lld] failed.", cid);        
         return -1;
     }
     return tgg_hash_del_intkey(g_cidgid_hash, g_cidgid_rcu, cid, iter_del_idlist);
@@ -787,35 +793,35 @@ void tgg_clean_cidgid()
         LOG_DEBUG("cidgid hash is empty.");
         return;
     }
-    std::vector<int> keys_to_delete; // 预存待删键
+    std::vector<uint64_t> keys_to_delete; // 预存待删键
     keys_to_delete.reserve(count);
     // 阶段1：遍历并标记待删键
     uint32_t iter = 0;
-    int *key, *value;
+    int64_t *key, *value;
     while (rte_hash_iterate(g_cidgid_hash, (const void**)&key, (void**)&value, &iter) >= 0) {
         if (*key > 0) {
-            LOG_DEBUG("add delete cid:%d in cidgid.", *key);
+            LOG_DEBUG("add delete cid:%lld in cidgid.", *key);
             keys_to_delete.push_back(*key);
         } else {
-            LOG_WARNING("Ignore invalid cid:%d in cidgid.", *key);
+            LOG_WARNING("Ignore invalid cid:%lld in cidgid.", *key);
         }
     }
 
     // 阶段2：批量删除并同步RCU
     for (auto del_key : keys_to_delete) {
         if (tgg_del_cid_cidgid(del_key) < 0 ) {
-            LOG_WARNING("delete cid:%d in cidgid failed.", del_key);
+            LOG_WARNING("delete cid:%lld in cidgid failed.", del_key);
         } else {
-            LOG_DEBUG("deleted cid:%d in cidgid.", del_key);
+            LOG_DEBUG("deleted cid:%lld in cidgid.", del_key);
         }
     }
 }
 int tgg_del_gid_cidgid(int64_t cid, const char* gid)
 {
-    LOG_DEBUG("del gid[%s] for cid[%d].", gid, cid);
+    LOG_DEBUG("del gid[%s] for cid[%lld].", gid, cid);
     // WriteLock lock(get_cidgid_lock());
     if(cid <= 0) {
-        LOG_ERROR("del gid[%s] for cid[%d] failed.", gid, cid);        
+        LOG_ERROR("del gid[%s] for cid[%lld] failed.", gid, cid);        
         return -1;
     }
     return tgg_hash_del_idlst4intkey(g_cidgid_hash, g_cidgid_rcu, cid, gid);
@@ -847,7 +853,7 @@ void tgg_del_gid_cidgid(const char* gid)
         int cid = GET_CID_FDCID_MASK(*it);
         if(cid <= 0) {
             // TODO 调试+兜底:防止连接已关闭但是gid hash中的fd还在，出现这个日志，说明释放逻辑依然存在问题
-            LOG_ERROR("Del gid[%s] for cidgid failed: cid%d is not avaliable.", gid, cid);            
+            LOG_ERROR("Del gid[%s] for cidgid failed: cid%lld is not avaliable.", gid, cid);            
             tgg_del_fd4gid(gid, *it);
             continue;
         }
@@ -856,41 +862,41 @@ void tgg_del_gid_cidgid(const char* gid)
     }
 }
 
-void tgg_iterprint_gidsbyuid(const char* uid)
-{
-    std::vector<std::string> lst_fd;
-    lst_fd.reserve(RESERVED_SIZE_FOR_GID_CIDS);
-    char* key = NULL;
-    tgg_gid_list* value = NULL;
-    uint32_t next = 0;
-    int ret = 0;
-    while (1) {
-        ret = rte_hash_iterate(g_cidgid_hash, (const void**)&key, (void**)&value, &next);
-        if (-ENOENT == ret) {
-            printf("iter to the end.\n");
-            break;
-        }
-        else if (ret < 0) {
-            printf("catch an error\n");
-            break;
-        }
-        ReadLock lock(&(value->lock));
-        if(!value) {
-            printf("key[%s]'s value is empty\n", key);
-            break;
-        }
-        if(uid && !strncmp(key, uid, strlen(key))) {
-            printf("find key:%s\n", uid);
-        }
-        printf("uid:%s\n", key);
-        tgg_list_id* tmp = value->list;
-        while (tmp) {
-            lst_fd.push_back(std::string(tmp->data));
-            printf("gid:%s\n", tmp->data);
-            tmp = tmp->next;
-        }
-    }
-}
+// void tgg_iterprint_gidsbyuid(const char* uid)
+// {
+//     std::vector<std::string> lst_fd;
+//     lst_fd.reserve(RESERVED_SIZE_FOR_GID_CIDS);
+//     char* key = NULL;
+//     tgg_gid_list* value = NULL;
+//     uint32_t next = 0;
+//     int ret = 0;
+//     while (1) {
+//         ret = rte_hash_iterate(g_cidgid_hash, (const void**)&key, (void**)&value, &next);
+//         if (-ENOENT == ret) {
+//             printf("iter to the end.\n");
+//             break;
+//         }
+//         else if (ret < 0) {
+//             printf("catch an error\n");
+//             break;
+//         }
+//         ReadLock lock(&(value->lock));
+//         if(!value) {
+//             printf("key[%s]'s value is empty\n", key);
+//             break;
+//         }
+//         if(uid && !strncmp(key, uid, strlen(key))) {
+//             printf("find key:%s\n", uid);
+//         }
+//         printf("uid:%s\n", key);
+//         tgg_list_id* tmp = value->list;
+//         while (tmp) {
+//             lst_fd.push_back(std::string(tmp->data));
+//             printf("gid:%s\n", tmp->data);
+//             tmp = tmp->next;
+//         }
+//     }
+// }
 
 int tgg_add_idx(int coreid, int64_t idx)
 {
@@ -956,7 +962,7 @@ void tgg_iter_del_idx(int coreid)
 int tgg_add_bwfdx(int64_t bwfdx)
 {
     if(bwfdx <= 0) {
-        LOG_ERROR("invlude bwfdx[%d].", bwfdx);
+        LOG_ERROR("invlude bwfdx[%lld].", bwfdx);
         return -1;
     }
     // WriteLock lock(get_bwfdxhsh_lock());
@@ -968,13 +974,13 @@ int tgg_del_bwfdx(int64_t bwfdx)
     // WriteLock lock(get_bwfdxhsh_lock());
     int ret = rte_hash_del_key_with_hash(g_bwfdx_hash, &bwfdx, rte_hash_crc(&bwfdx, sizeof(int64_t), 0));
     if (ret < 0) {
-        LOG_ERROR("Del bwfdx[%d] data failed:%d.", bwfdx, ret);
+        LOG_ERROR("Del bwfdx[%lld] data failed:%d.", bwfdx, ret);
         return -EINVAL;
     }
     if(rte_hash_free_key_with_position(g_bwfdx_hash, ret) < 0) {
-        LOG_ERROR("free key[%ld] pos[%d] failed.", bwfdx, ret);
+        LOG_ERROR("free key[%lld] pos[%d] failed.", bwfdx, ret);
     }
-    LOG_INFO("Del bwfdx[%d].", bwfdx);
+    LOG_INFO("Del bwfdx[%lld].", bwfdx);
     // rte_rcu_qsbr_synchronize(g_bwfdx_rcu, RTE_QSBR_THRID_INVALID);
     return ret;
 }
@@ -1048,37 +1054,37 @@ void tgg_iter_del_bwfdx(int prc_id)
         int pos = rte_hash_del_key_with_hash(g_bwfdx_hash, &del_key, rte_hash_crc(&del_key, sizeof(int64_t), 0));
         if (pos >= 0) {
             if(rte_hash_free_key_with_position(g_bwfdx_hash, pos) < 0 ) { // 标记释放位置
-                LOG_ERROR("remove key[%d] pos:%d failed.", del_key, pos);
+                LOG_ERROR("remove bwfdx[%lld] pos:%d failed.", del_key, pos);
             }
-            LOG_INFO("delete bwfdx[%d] for prc_id[%d].", del_key, prc_id);
+            LOG_INFO("delete bwfdx[%lld] for prc_id[%d].", del_key, prc_id);
         } else {
-            LOG_ERROR("delete key[%d] error:%d.", del_key, pos);
+            LOG_ERROR("delete bwfdx[%lld] error:%d.", del_key, pos);
         }
     }
 }
 
 int tgg_add_bwwkkey(const char* bwwkkey)
 {
-    LOG_DEBUG("add bw worker key[%s].", bwwkkey);
-    APROPRIAT_HASH_KEY(bwwkkey, TGG_BWWKKEY_LEN);
-    return rte_hash_add_key_with_hash(g_bwwkkey_hash, _key, rte_hash_crc(_key, TGG_BWWKKEY_LEN, 0));
+    uint64_t _bwwkkey = murmurhash3_64(bwwkkey, strlen(bwwkkey), tgg_get_seed());
+    LOG_DEBUG("add bw worker key[%s] hash[%llu].", bwwkkey, _bwwkkey);
+    return rte_hash_add_key_with_hash(g_bwwkkey_hash, &_bwwkkey, rte_hash_crc(&_bwwkkey, sizeof(uint64_t), 0));
 }
 
 int tgg_del_bwwkkey(const char* bwwkkey)
 {
-    LOG_DEBUG("del bw worker key[%s].", bwwkkey);
-    APROPRIAT_HASH_KEY(bwwkkey, TGG_BWWKKEY_LEN);
-    int ret = rte_hash_del_key_with_hash(g_bwwkkey_hash, _key, rte_hash_crc(_key, TGG_BWWKKEY_LEN, 0));
+    uint64_t _bwwkkey = murmurhash3_64(bwwkkey, strlen(bwwkkey), tgg_get_seed());
+    LOG_DEBUG("del bw worker key[%s] hash[%llu].", bwwkkey, _bwwkkey);
+    int ret = rte_hash_del_key_with_hash(g_bwwkkey_hash, &_bwwkkey, rte_hash_crc(&_bwwkkey, sizeof(uint64_t), 0));
     if (ret >= 0) {
         // 在并发情况下删除key之后，位置还在，需要删除位置信息，详情参考函数说明
         if (rte_hash_free_key_with_position(g_bwwkkey_hash, ret) < 0) {
-            RTE_LOG(ERR, USER1, "[%s][%d]Del bwwkkey[%s] pos failed:%d.\n", __FILE__, __LINE__, bwwkkey, ret);
+            LOG_DEBUG("del bwwkkey[%s] hash[%llu] pos failed:%d.", bwwkkey, _bwwkkey, ret);
             return -EINVAL;
         }
         // rte_rcu_qsbr_synchronize(g_bwwkkey_rcu, RTE_QSBR_THRID_INVALID);
-        LOG_INFO("delete bwwkkey[%s].", bwwkkey);
+        LOG_INFO("delete bwwkkey[%s], hash[%llu].", bwwkkey, _bwwkkey);
     } else {
-        LOG_ERROR("Del bwwkkey[%s] data failed:%d.", bwwkkey, ret);
+        LOG_ERROR("Del bwwkkey[%s] hash[%llu] data failed:%d.", bwwkkey, _bwwkkey, ret);
         return -EINVAL;
     }
     return 0;
@@ -1086,11 +1092,11 @@ int tgg_del_bwwkkey(const char* bwwkkey)
 
 int tgg_check_bwwkkey_exist(const char* bwwkkey)
 {
-    APROPRIAT_HASH_KEY(bwwkkey, TGG_BWWKKEY_LEN);
-    return rte_hash_lookup_with_hash(g_bwwkkey_hash, _key, rte_hash_crc(_key, TGG_BWWKKEY_LEN, 0));
+    uint64_t _bwwkkey = murmurhash3_64(bwwkkey, strlen(bwwkkey), tgg_get_seed());
+    return rte_hash_lookup_with_hash(g_bwwkkey_hash, &_bwwkkey, rte_hash_crc(&_bwwkkey, sizeof(uint64_t), 0));
 }
 
-int tgg_get_allbwwkkeys(std::vector<std::string>& lst_wkkeys)
+int tgg_get_allbwwkkeys(std::vector<uint64_t>& lst_wkkeys)
 {
     return tgg_hash_get_allkeys(g_bwwkkey_hash, lst_wkkeys);
 }

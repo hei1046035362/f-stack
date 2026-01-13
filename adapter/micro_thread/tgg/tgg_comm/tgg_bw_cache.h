@@ -29,14 +29,17 @@ void iter_del_fdlist(void* iddata);
 
 void iter_del_idlist(void* iddata);
 
+uint32_t tgg_get_seed();
+
 /// 增删查  gid hash<gid, list<fdid> >
 int tgg_add_gid(const char* gid, int64_t fdidcid);
 int tgg_del_gid(const char* gid);
 int tgg_del_fd4gid(const char* gid, int64_t fdidcid);
 // 返回格式  list<string(fdid:uid)>
 int tgg_get_fdsbygid(const char* gid, std::vector<int64_t>& lst_fd);
+int tgg_get_fdsbygid(uint64_t gid, std::vector<int64_t>& lst_fd);
 // 获取所有在线的分组
-int tgg_get_allonlinegids(std::vector<std::string>& lst_gid);
+int tgg_get_allonlinegids(std::vector<uint64_t>& lst_gid);
 int tgg_get_gid_count();
 void tgg_clean_gid();
 
@@ -46,8 +49,9 @@ int tgg_del_uid(const char* uid);
 int tgg_del_fd4uid(const char* uid, int64_t fdidcid);
 void tgg_clean_uid();
 // 返回格式  list<string(fdid:uid)>
+int tgg_get_fdsbyuid(uint64_t uid, std::vector<int64_t>& lst_fd);
 int tgg_get_fdsbyuid(const char* uid, std::vector<int64_t>& lst_fd);
-int tgg_get_allonlineuids(std::vector<std::string>& lst_uid);
+int tgg_get_allonlineuids(std::vector<uint64_t>& lst_uid);
 int tgg_get_uid_count();
 
 /// 增删查  cid hash<cid, fdid>
@@ -72,7 +76,7 @@ void tgg_del_gid_cidgid(const char* gid);
 
 // 返回格式  list<string(uid)>
 int tgg_get_gidsbyuid(const char* uid, std::set<std::string>& lst_gid);
-void tgg_iterprint_gidsbyuid(const char* uid = NULL);
+// void tgg_iterprint_gidsbyuid(const char* uid = NULL);
 
 
 /// 增删查  idx hash<idx, NULL>  查询全局有效clientid使用的idx
@@ -98,7 +102,7 @@ int tgg_get_load_balance(std::vector<int64_t>& vec_bwfdx, unsigned int ipport);
 int tgg_check_bwwkkey_exist(const char* bwwkkey);
 int tgg_del_bwwkkey(const char* bwwkkey);
 int tgg_add_bwwkkey(const char* bwwkkey);
-int tgg_get_allbwwkkeys(std::vector<std::string>& lst_wkkeys);
+int tgg_get_allbwwkkeys(std::vector<uint64_t>& lst_wkkeys);
 int tgg_get_bwwoker_count();
 
 // 排除cid列表 sendgroup时，会有一个排除的cid列表，标准库的set和unordered_set效率太低

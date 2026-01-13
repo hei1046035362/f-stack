@@ -158,3 +158,93 @@ std::string AsyncLogger::genLogFilename()
     oss << ".log";
     return oss.str();
 }
+
+
+void __sig_snprintf(char *buf, size_t size, const char *fmt, ...)
+{
+    if (!buf || !fmt || size == 0) return;
+    
+    char *p = buf;
+    const char *s = fmt;
+    size_t remaining = size - 1;
+    
+    va_list args;
+    // 注意：在信号处理函数中使用va_list可能不是完全安全的，
+    // 但在大多数实现中，这应该是安全的
+    va_start(args, fmt);
+    
+    while (*s && remaining > 0) {
+        if (*s != '%') {
+            *p++ = *s++;
+            remaining--;
+            continue;
+        }
+        
+        s++;
+        
+        // 处理格式说明符
+        switch (*s) {
+            case 'd': {
+                int num = va_arg(args, int);
+                char num_buf[12];
+                int i = 0;
+                
+                if (num < 0) {
+                    if (remaining > 0) {
+                        *p++ = '-';
+                        remaining--;
+                    }
+                    num = -num;
+                }
+                
+                // 转换数字
+                do {
+                    num_buf[i++] = (char)((num % 10) + '0');
+                    num /= 10;
+                } while (num > 0 && i < 11);
+                
+                // 输出数字
+                while (i > 0 && remaining > 0) {
+                    *p++ = num_buf[--i];
+                    remaining--;
+                }
+                s++;
+                break;
+            }
+            
+            case 's': {
+                const char *str = va_arg(args, const char*);
+                if (!str) str = "(null)";
+                
+                while (*str && remaining > 0) {
+                    *p++ = *str++;
+                    remaining--;
+                }
+                s++;
+                break;
+            }
+            
+            // 其他格式可以在这里添加
+            
+            default:
+                // 不是格式说明符，原样输出
+                if (remaining > 0) {
+                    *p++ = '%';
+                    remaining--;
+                }
+                if (remaining > 0 && *s) {
+                    *p++ = *s;
+                    remaining--;
+                }
+                if (*s) s++;
+                break;
+        }
+    }
+    
+    va_end(args);
+    
+    // 输出到终端
+    if (p > buf) {
+        write(STDOUT_FILENO, buf, p - buf);
+    }
+}

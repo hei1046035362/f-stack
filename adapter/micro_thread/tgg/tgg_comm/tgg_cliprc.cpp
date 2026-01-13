@@ -107,7 +107,7 @@ void print_current_worker_count(std::vector<int64_t>& vec_bwfdx)
 
     std::string print_path;
     print_path.reserve(256);
-    print_path.append(TggConfigure::getInstance()->get_log_path());
+    print_path.append(TggConfigure::getInstance()->get_health_check_path());
     print_path.append("/");
     print_path.append("_print_real_worker_count");
 

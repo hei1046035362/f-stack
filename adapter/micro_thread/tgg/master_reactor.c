@@ -52,7 +52,7 @@ typedef struct st_conn_info {
 
 void signal_handler(int signum)
 {
-    printf("gwrcv coreid[%d] catched signal:%d\n", g_core_id, signum);
+    SIG_PRINTF("gwrcv coreid[%d] catched signal:%d\n", g_core_id, signum);
     if(signum == SIGINT || signum == SIGTERM) {
         if(g_run_status) {
             g_run_status = 0;
@@ -71,9 +71,9 @@ void sigchld_handler(int sig) {
             int len = snprintf(buf, sizeof(buf), "%d_%d\n", pid, WTERMSIG(status));
             write(sig_pipe[1], buf, len);
             if (WIFEXITED(status)) {
-                printf("gwrcv child %d exit normal, exit code: %d\n", pid, WEXITSTATUS(status));
+                SIG_PRINTF("gwrcv child %d exit normal, exit code: %d\n", pid, WEXITSTATUS(status));
             } else if (WIFSIGNALED(status)) {
-                printf("gwrcv child %d exit by signal: %d\n", pid, WTERMSIG(status));
+                SIG_PRINTF("gwrcv child %d exit by signal: %d\n", pid, WTERMSIG(status));
             }
         }
     }
@@ -151,6 +151,7 @@ static void clean_client_data(int cli_fd, int idx)
     tgg_del_idx(g_core_id, idx);
     tgg_close_cli(g_core_id, cli_fd);
     release_ws_buffer(g_core_id, cli_fd);
+    s_left_fd--;
 }
 
 // static uint64_t send_times = 0;
@@ -372,6 +373,7 @@ static void on_client_connect(void *arg)
             ff_close(cli_info->cli_fd);
             tgg_close_cli(g_core_id, cli_info->cli_fd);
             delete(cli_info);
+            s_left_fd--;
             return;
         }
         idx = tgg_get_cli_idx(g_core_id, cli_info->cli_fd);
@@ -383,6 +385,7 @@ static void on_client_connect(void *arg)
         ff_close(cli_info->cli_fd);
         tgg_close_cli(g_core_id, cli_info->cli_fd);
         delete cli_info;
+        s_left_fd--;
         return;
     }
 
@@ -391,6 +394,7 @@ static void on_client_connect(void *arg)
         LOG_ERROR("add read event for client[%d] failed.", cli_info->cli_fd);
         ff_close(cli_info->cli_fd);
         tgg_close_cli(g_core_id, cli_info->cli_fd);
+        s_left_fd--;
     }
     delete cli_info;
 }

@@ -31,7 +31,7 @@ static int sig_pipe[2];
 
 void signal_handler(int signum)
 {
-    printf("gwregister catched signal:%d\n", signum);
+    SIG_PRINTF("gwregister catched signal:%d\n", signum);
 	if(signum == SIGINT || signum == SIGTERM) {
 		if(g_run) {
 			g_run = 0;
@@ -49,9 +49,9 @@ void sigchld_handler(int sig) {
             int len = snprintf(buf, sizeof(buf), "%d\n", pid);
             write(sig_pipe[1], buf, len);
             if (WIFEXITED(status)) {
-                printf("register child %d exit normal, exit code: %d\n", pid, WEXITSTATUS(status));
+                SIG_PRINTF("register child %d exit normal, exit code: %d\n", pid, WEXITSTATUS(status));
             } else if (WIFSIGNALED(status)) {
-                printf("register child %d exit by signal: %d\n", pid, WTERMSIG(status));
+                SIG_PRINTF("register child %d exit by signal: %d\n", pid, WTERMSIG(status));
             }
         }
     }
