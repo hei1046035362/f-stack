@@ -9,7 +9,10 @@
 
 std::string_view get_body_string(const rapidjson::Value& jdata);
 
-#include <list>
+// #include <list>
+#include <map>
+#include <set>
+typedef tgg_vhash_list tgg_vhash_list;
 class CmdBaseProcessor {
 public:
 
@@ -19,11 +22,23 @@ public:
 	virtual ~CmdBaseProcessor() {};
 	int NeedClose() {return this->need_close;}
 protected:
+	static const std::set<uint32_t>& GetEmptySet() {
+        static const std::set<uint32_t> empty;  // 单例空集合
+        return empty;
+    }
 	// 发送给服务端，这时候this->fd 就是服务端的fd
 	void Send2BW(const rapidjson::Value& data, bool serialize = true);
 
+	// -1 退出， 0 其他进程处理，1本进程处理
+	int AddGid4Prcid(const char* gid, std::map<int, tgg_vhash_list*>& mapGid);
+
+	int PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>& mapGid,
+	 uint32_t cid = 0, const std::string& data = "", const std::set<uint32_t>& setExcept = CmdBaseProcessor::GetEmptySet());
+
+	int WaitSharecmdRslt(std::vector<int64_t>& lst_fds);
+
 protected:
-	int prc_id;// bwprc的进程编号，不是gwprc的
+	int prc_id;// bwprc的进程编号
     int fd;// bwprc的fd
     void* data;
     int need_close;

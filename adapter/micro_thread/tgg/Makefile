@@ -107,7 +107,7 @@ BWSERVER_OBJ = bwprc.o dpdk_init.o cmd/CmdProcessor.o tgg_comm/tgg_bw_cache.o co
 				tgg_comm/tgg_lock.o comm/Encrypt.o cmd/TggCmdProcessor.o \
 				comm/Serialize.o tgg_comm/tgg_conf.o tgg_comm/tgg_bwserver.o \
 				comm/RWIni.o tgg_comm/tgg_transport.o comm/common.o comm/Websocket.o \
-				comm/picohttpparser.o comm/MurmurHash3.o
+				comm/picohttpparser.o comm/MurmurHash3.o cmd/ShareCmdProcessor.o
 
 REGISTER_OBJ = register.o dpdk_init.o tgg_comm/tgg_bw_cache.o comm/rbtree.o comm/log.o\
 				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
