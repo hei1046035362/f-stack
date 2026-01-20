@@ -11,11 +11,19 @@ uint32_t tgg_get_seed();
 
 /// 增删查  gid hash<gid, list<fdid> >
 int tgg_add_gid(const char* gid, int64_t fdidcid);
+int tgg_add_gid(uint64_t gid, int64_t fdidcid);
+
 int tgg_del_gid(const char* gid);
+int tgg_del_gid(uint64_t gid);
+
 int tgg_del_fd4gid(const char* gid, int64_t fdidcid);
+int tgg_del_fd4gid(uint64_t gid, int64_t fdidcid);
 // 返回格式  list<string(fdid:uid)>
 int tgg_get_fdsbygid(const char* gid, std::vector<int64_t>& lst_fd);
 int tgg_get_fdsbygid(uint64_t gid, std::vector<int64_t>& lst_fd);
+typedef struct st_tgg_fd_list tgg_fd_list;
+int tgg_get_fdsbygid(uint64_t gid, tgg_fd_list* lst_fd);
+int tgg_get_cidcount_bygid(uint64_t gid);
 // 获取所有在线的分组
 int tgg_get_allonlinegids(std::vector<uint64_t>& lst_gid);
 int tgg_get_gid_count();

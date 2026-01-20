@@ -7,10 +7,6 @@
 
 int get_connection_info(int fd, char* ip_str, unsigned int* ip, unsigned short* port);
 
-tgg_bw_info* lookup_bwinfo(int fd);
-
-tgg_bw_info* get_valid_bwinfo_by_fd(int fd);
-
 int message_pack(uint16_t command, uint32_t seq, uint8_t protocol,
             uint8_t compressFormat, std::string_view body, std::string& result);
 

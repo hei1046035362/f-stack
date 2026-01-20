@@ -21,6 +21,7 @@
 #include "tgg_bwserver.h"
 #include "tgg_struct.h"
 #include "cmd/CmdProcessor.h"
+#include "cmd/ShareCmdProcessor.h"
 #include "tgg_common.h"
 #include "tgg_conf.h"
 #include "tgg_bw_cache.h"
@@ -682,7 +683,7 @@ void *write_routine( void *arg )
     map_msgtype[FD_WRITE] = GatewayProtocal::CMD_ON_MESSAGE;
     map_msgtype[FD_CLOSE] = GatewayProtocal::CMD_ON_CLOSE;
     while(g_run) {
-        if(write_data() < 0) {
+        if(write_data() < 0 && exec_sharequeue_cmd_processor(g_prc_id) < 0) {
             poll(NULL, 0, 5);// sleep 10ms
         }
     }

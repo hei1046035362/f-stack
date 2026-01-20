@@ -84,6 +84,8 @@ const char* s_trans_ring_name = "tgg_trans_ring";
 const char* s_bwfdx_ring_name = "tgg_bwfdx_ring";
 const char* write_ring_name_prev = "tgg_write_ring";
 const char* bwrcv_ring_name_prev = "tgg_bwrcv_ring";
+const char* s_bwshare_ring_name = "tgg_bwshare_ring";
+
 const char* s_master_ring_name = "tgg_master_ring";
 // 队列长度
 static uint32_t s_bwfdx_ring_size = 1024;  // bwfdx添加删除队列(gwbwprc->gwcliprc)，这个数据本身就不大，且处理很快
@@ -97,6 +99,7 @@ struct rte_ring* g_ring_writes[MAX_LCORE_COUNT] = {NULL};// 客户端下行
 struct rte_ring* g_ring_trans = NULL;// 上行透传
 struct rte_ring* g_ring_bwfdx = NULL;// bwprc 接收到新的/删除旧的 fd时 要通知透传线程
 struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT] = {NULL};// BW下行
+struct rte_ring* g_ring_bwshare[MAX_LCORE_COUNT] = {NULL};// BW下行
 
 struct rte_ring* g_ring_master = NULL;// bwprc接收重新加载ip过滤列表的命令 要通知master去执行
 
@@ -106,6 +109,7 @@ struct rte_ring* g_ring_master = NULL;// bwprc接收重新加载ip过滤列表�
 const char* s_pool_trans_name = "tgg_pool_trans_name";// 客户端上行透传 				 单队列
 const char* s_pool_write_name = "tgg_pool_write_name";// 客户端下行     				 多队列
 const char* s_pool_bwrcv_name = "tgg_pool_bwrcv_name";// 客户端上行透传 和 bw上行共用  多队列
+const char* s_pool_bwshare_name = "tgg_pool_bwshare_name";// 客户端上行透传 和 bw上行共用  多队列
 
 // 网络数据实际使用缓存
 const char* s_pool_read_data_name = "tgg_pl_rdata";// 客户端上行 和 上行prc共用
@@ -150,7 +154,7 @@ struct rte_mempool* g_mempool_trans = NULL;
 struct rte_mempool* g_mempool_write[MAX_LCORE_COUNT] = {NULL};
 struct rte_mempool* g_mempool_bwrcv[MAX_LCORE_COUNT] = {NULL};
 struct rte_mempool* g_mempool_fd_snddata[MAX_LCORE_COUNT] = {NULL};
-
+struct rte_mempool* g_mempool_bwshare[MAX_LCORE_COUNT] = {NULL};
 // 分配队列中的数据结构的data字段
 struct rte_mempool* g_mempool_trans_data = NULL;
 struct rte_mempool* g_mempool_write_data = NULL;
@@ -338,6 +342,9 @@ find_ring(const char *name)
 
 	snprintf(ring_name, RTE_RING_NAMESIZE, "%s_%u", name, socket_id);
 	ring = rte_ring_lookup(ring_name);
+	if(!ring) {
+		LOG_ERROR("ring[%s] not found.", ring_name);
+	}
 	return ring;
 }
 
@@ -504,6 +511,9 @@ void tgg_master_init()
 		sprintf(fd_snddata_pool_name, "%s_%d", s_pool_fd_snddata_name, i);
 		g_mempool_fd_snddata[i] = make_mempool(fd_snddata_pool_name, s_fd_snddata_mempool_size, s_mempool_fdsnd_cache);
 	}
+	if(MAX_LCORE_COUNT < TggConfigure::getInstance()->get_bwsvr_count() ) {
+		rte_exit(EXIT_FAILURE, "bwserver count[%d] exceed max reserve count[%d]\n", TggConfigure::getInstance()->get_bwsvr_count(), MAX_LCORE_COUNT);
+	}
 	for (uint32_t i = 0; i < TggConfigure::getInstance()->get_bwsvr_count() ; i++) {
 		// bwfd zone
 		char zone_name[RTE_MEMZONE_NAMESIZE] = {0};
@@ -521,6 +531,14 @@ void tgg_master_init()
 		char bwrcv_pool_name[RTE_MEMPOOL_NAMESIZE] = {0};
 		sprintf(bwrcv_pool_name, "%s_%d", s_pool_bwrcv_name, i);
 		g_mempool_bwrcv[i] = make_mempool(bwrcv_pool_name, s_bwrcv_mempool_size, s_mempool_bwrcv_cache);
+
+		char bwshare_ring_name[RTE_RING_NAMESIZE] = {0};
+		sprintf(bwshare_ring_name, "%s_%d", s_bwshare_ring_name, i);
+		g_ring_bwshare[i] = make_ring(bwshare_ring_name, 1024);
+
+		char bwshare_pool_name[RTE_MEMPOOL_NAMESIZE] = {0};
+		sprintf(bwshare_pool_name, "%s_%d", s_pool_bwshare_name, i);
+		g_mempool_bwshare[i] = make_mempool(bwshare_pool_name, 1024, sizeof(bw_share_qdata));
 
 		char expt_cid_hash_name[128] = {0};
 		sprintf(expt_cid_hash_name, "%s_%d", s_expt_cid_hash_name, i);
@@ -612,6 +630,11 @@ void tgg_master_uninit()
 		g_ring_bwrcvs[i] = NULL;
 		rte_mempool_free(g_mempool_bwrcv[i]);
 		g_mempool_bwrcv[i] = NULL;
+
+		rte_ring_free(g_ring_bwshare[i]);
+		g_ring_bwshare[i] = NULL;
+		rte_mempool_free(g_mempool_bwshare[i]);
+		g_mempool_bwshare[i] = NULL;
 
 		rte_hash_free(g_expt_cid_hash[i]);
 		g_expt_cid_hash[i] = NULL;
@@ -729,6 +752,14 @@ void init_multi_for_secondary()
 		char bwrcv_pool_name[RTE_MEMPOOL_NAMESIZE] = {0};
 		sprintf(bwrcv_pool_name, "%s_%d", s_pool_bwrcv_name, i);
 		g_mempool_bwrcv[i] = find_mempool(bwrcv_pool_name);
+
+		char bwshare_ring_name[RTE_RING_NAMESIZE] = {0};
+		sprintf(bwshare_ring_name, "%s_%d", s_bwshare_ring_name, i);
+		g_ring_bwshare[i] = find_ring(bwshare_ring_name);
+
+		char bwshare_pool_name[RTE_MEMPOOL_NAMESIZE] = {0};
+		sprintf(bwshare_pool_name, "%s_%d", s_pool_bwshare_name, i);
+		g_mempool_bwshare[i] = find_mempool(bwshare_pool_name);
 	}
 }
 

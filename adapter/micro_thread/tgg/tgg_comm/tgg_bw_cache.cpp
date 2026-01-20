@@ -451,6 +451,11 @@ static int tgg_hash_get_all_intkeys(const rte_hash* hash, std::vector<int64_t>& 
     return 0;
 }
 
+int tgg_add_gid(uint64_t gid, int64_t fdidcid)
+{
+    LOG_DEBUG("add gid[%llu] fdidcid[%lld].", gid, fdidcid);
+    return tgg_hash_add_keywithfdrbtree(g_gid_hash, gid, fdidcid);
+}
 /// 增删查  gid
 int tgg_add_gid(const char* gid, int64_t fdidcid)
 {
@@ -477,15 +482,53 @@ int tgg_get_fdsbygid(uint64_t gid, std::vector<int64_t>& lst_fd)
     return 0;
 }
 
+int tgg_get_fdsbygid(uint64_t gid, tgg_fd_list* lst_fd)
+{
+    tgg_gid_data* value = (tgg_gid_data*)tgg_hash_get_value(g_gid_hash, gid);
+    if(!value) {
+        LOG_DEBUG("get fdlist failed by gid[%llu], value is empty.", gid);
+        return -1;
+    }
+    ReadLock lock(&value->lock);
+    int ret = tgg_rbtree_getall_value(value->rbtree, value->rbtree->root, lst_fd);
+    if(ret < 0) {
+        LOG_ERROR("get all value from rbtree failed, clean result list...");
+        iter_del_list<tgg_fd_list>(lst_fd);
+    }
+    return ret;
+}
+
 int tgg_get_fdsbygid(const char* gid, std::vector<int64_t>& lst_fd)
 {
     uint64_t _gid = murmurhash3_64(gid, strlen(gid), tgg_get_seed());
     return tgg_get_fdsbygid(_gid, lst_fd);
 }
 
+int tgg_get_cidcount_bygid(uint64_t gid)
+{
+    tgg_gid_data* value = (tgg_gid_data*)tgg_hash_get_value(g_gid_hash, gid);
+    if(!value) {
+        LOG_DEBUG("get gid hash value failed by gid[%llu], value is empty.", gid);
+        return -1;
+    }
+    ReadLock lock(&value->lock);
+    int ret = tgg_rbtree_size(value->rbtree);
+    if(ret < 0) {
+        LOG_ERROR("get value count from rbtree failed.");
+    }
+    return ret;
+}
+
+
 static int __tgg_del_gid(uint64_t gid)
 {
     return tgg_hash_del_key(g_gid_hash, g_gid_rcu, gid);
+}
+
+int tgg_del_gid(uint64_t gid)
+{
+    LOG_DEBUG("del gid[%s].", gid);
+    return __tgg_del_gid(gid);
 }
 
 int tgg_del_gid(const char* gid)
@@ -520,6 +563,12 @@ void tgg_clean_gid()
             LOG_DEBUG("deleted gid:%llu.", key);
         }
     }
+}
+
+int tgg_del_fd4gid(uint64_t gid, int64_t fdidcid)
+{
+    LOG_DEBUG("del fdidcid[%lld] for gid[%llu].", fdidcid, gid);
+    return tgg_hash_del_fdrbtree4key(g_gid_hash, g_gid_rcu, gid, fdidcid);
 }
 
 int tgg_del_fd4gid(const char* gid, int64_t fdidcid)

@@ -131,30 +131,12 @@ typedef struct st_cli_info {
     tgg_send_data* send_datalist;
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_cli_info;
 
-// 客户单信息中需要gwbwprc维护和使用的部分
+// 客户端信息中需要gwbwprc维护和使用的部分
 typedef struct st_cli_bw_info {
     uint32_t cid;    // client id                             process 填充
     char uid[TGG_UID_LEN];    // user id                             process 填充
     char reserved[128];    // reserved    
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_cli_bw_info;
-
-// BW连接信息
-typedef struct st_bw_info {
-    int status;        // 连接状态
-    int cmd;            // 记录连接类型  bw/gatewayclient
-    int idx;        // 暂时不用  和fd共同标识唯一一个连接(fd是可重用的)  bw通信不记录状态，只记录在不在线就行，丢了就丢了
-    int load;        // 暂时不用 BW的负载情况，用于计算负载均衡 
-    int authorized; // 连接确认
-    int lastupdattime;  // 暂时不用
-    unsigned short port;// 远端端口
-    int ip;// 远端ip
-    char ip_str[INET_ADDRSTRLEN];  // 暂时不用
-    char workerkey[WOKER_KEY_LEN]; // TODO wokerkey  后续考虑用指针替换，因为长度不确定
-    char secretkey[SECRET_KEY_LEN];// TODO 从php的代码中看，他应该是和整个网关绑定的，不是和连接绑定的，测试环境抓包看到目前是空字符串
-} tgg_bw_info;
-
-// TODO list 存储BW的fd
-
 
 // master收到数据后传给process处理，入队列时填充
 // 对内和对外共用的收包数据结构体
@@ -172,18 +154,18 @@ typedef struct st_read_data {
 } __attribute__((aligned(RTE_CACHE_LINE_SIZE))) tgg_read_data;
 
 // list<fd>  hash<gid, list<fd>> 这些一个gid/uid有多个fd的hash表的value
-// typedef struct st_tgg_fd_list {
-//     int64_t fdidcid;// 存储在hash表中的是fdidcid，在线程或进程之间传递时是fd
-//     struct st_tgg_fd_list* next;
-// } tgg_fd_list;
+typedef struct st_tgg_fd_list {
+    int64_t fdidcid;// 存储在hash表中的是fdidcid，在线程或进程之间传递时是fd
+    struct st_tgg_fd_list* next;
+} tgg_fd_list;
 
 
-// typedef struct st_tgg_fdidcid_list {
-//     // int64_t fdidcid;// 存储在hash表中的是fdidcid，在线程或进程之间传递时是fd
-//     // int idx;
-//     rte_rwlock_t lock;// hash 表 value为list时，操作时需要锁
-//     struct st_tgg_fd_list* list;
-// } tgg_fd_hash_value;
+typedef struct st_tgg_fdidcid_list {
+    // int64_t fdidcid;// 存储在hash表中的是fdidcid，在线程或进程之间传递时是fd
+    // int idx;
+    rte_rwlock_t lock;// hash 表 value为list时，操作时需要锁
+    struct st_tgg_fd_list* list;
+} tgg_fd_hash_list;
 
 
 typedef struct st_tgg_rbtree tgg_rbtree;
@@ -259,22 +241,17 @@ typedef struct st_stats {
     int send;            //  发送数
 } tgg_stats;
 
-
-// 进程监控 gwbwprc的进程
-// 进程信息
-typedef struct st_pid_data {
-    pid_t pid;        // 进程id                                    父进程写入
-    uint64_t heart_beat;    // 心跳   防止进程无响应，队列无人消费            父进程写入，子进程通过信号通知并重置计数
-    int idx;        // 索引   进程索引，标记进程能使用的队列        子进程写入和使用
-} pid_data;
-
-
 // gid hash data
 typedef tgg_fd_hash_value tgg_gid_data;
 
 // uid hash data
 typedef tgg_fd_hash_value tgg_uid_data;
 
+
+typedef struct st_tgg_cid_list {
+    uint32_t cid;
+    struct st_tgg_cid_list* next;
+} tgg_list_cid;
 
 typedef struct st_list_iddata {
     char data[TGG_GID_LEN];
@@ -288,11 +265,58 @@ typedef struct st_cidgid_value {
 
 typedef tgg_fd_hash_svalue tgg_gid_list;
 
-// cid hash value
-typedef struct st_tgg_cid_data {
-    int fd;
-} tgg_cid_data;
+typedef struct st_tgg_vhash_list {
+    uint64_t vhash;// 存储在hash表中的是fdidcid，在线程或进程之间传递时是fd
+    struct st_tgg_vhash_list* next;
+} tgg_vhash_list;
 
+typedef struct st_select_rslt {
+    int taskcount;   // 操作完成数 收到select命令的人设置，谁完成了，谁--，为0时返回给BW
+    int time;
+    tgg_fd_list* fdid_list; // fdidcid 列表
+    int halt;
+} select_rslt;
+
+typedef struct st_bw_share_queue_data {// 目前只用于group，uid的量相对较小
+    int prc_id;
+    int fd;
+    uint32_t cmd;
+    int time;               // 任务时间，如果和正在执行的任务的时间不同，则不需要再实行了
+    tgg_vhash_list* gids;  // 查询时的条件，Joingroup时的groups等
+    tgg_vhash_list* uids;  // 查询时的条件，binduid时的uid等
+    tgg_list_cid* except_cid;
+    char* snddata;         // 要发送的数据，sendgroup,senduid等
+    uint32_t snddata_len;
+    uint32_t cid;               // joingroup,binduid等命令时作为输入
+} bw_share_qdata;
+
+// BW连接信息
+typedef struct st_bw_info {
+    int status;        // 连接状态
+    int cmd;            // 记录连接类型  bw/gatewayclient
+    int idx;        // 暂时不用  和fd共同标识唯一一个连接(fd是可重用的)  bw通信不记录状态，只记录在不在线就行，丢了就丢了
+    int load;        // 暂时不用 BW的负载情况，用于计算负载均衡 
+    int authorized; // 连接确认
+    int lastupdattime;  // 暂时不用
+    unsigned short port;// 远端端口
+    int ip;// 远端ip
+    char ip_str[INET_ADDRSTRLEN];  // 暂时不用
+    char workerkey[WOKER_KEY_LEN]; // TODO wokerkey  后续考虑用指针替换，因为长度不确定
+    char secretkey[SECRET_KEY_LEN];// TODO 从php的代码中看，他应该是和整个网关绑定的，不是和连接绑定的，测试环境抓包看到目前是空字符串
+    select_rslt rslt;               // select 命令的执行结果
+    rte_rwlock_t rslt_lock;         // select命令结果的操作锁
+} tgg_bw_info;
+
+// TODO list 存储BW的fd
+
+
+// 进程监控 gwbwprc的进程
+// 进程信息
+typedef struct st_pid_data {
+    pid_t pid;        // 进程id                                    父进程写入
+    uint64_t heart_beat;    // 心跳   防止进程无响应，队列无人消费            父进程写入，子进程通过信号通知并重置计数
+    int idx;        // 索引   进程索引，标记进程能使用的队列        子进程写入和使用
+} pid_data;
 
 
 // bw和gw通信协议头，固定长度部分 28字节

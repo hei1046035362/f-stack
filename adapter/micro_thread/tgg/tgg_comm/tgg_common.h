@@ -14,6 +14,19 @@
 #define RESERVED_SIZE_FOR_GID_CIDS 5000  // 获取每个gid有多少个uid/cid时预留的vector的大小，防止频繁动态扩容
 #define RESERVED_SIZE_FOR_UID_CIDS 100  // 获取每个uid有多少个cid时预留的vector的大小，防止频繁动态扩容
 
+template<typename type>
+void iter_del_list(type* iddata)
+{
+    type* iter = iddata;
+    type* tmp = iter;
+    while(iter) {
+        iter = iter->next;
+        memset(tmp, 0, sizeof(type));
+        dpdk_rte_free(tmp);
+        tmp = iter;
+    }
+}
+
 void init_endians();
 
 bool big_endian();
@@ -82,6 +95,13 @@ int tgg_set_bwfdx_port(int prc_id, int fd, ushort port);
 int tgg_set_bwfdx_seckey(int prc_id, int fd, const char* seckey);
 int tgg_set_bwfdx_workerkey(int prc_id, int fd, const char* workerkey);
 
+int tgg_get_bwfdx_fdid_result(int prc_id, int fd, std::vector<int64_t>& lst_fdid);
+int tgg_add_bwfdx_gid_result(int prc_id, int fd, int time, tgg_fd_list* data);
+int tgg_add_bwfdx_sharecmd(int prc_id, int fd, int taskcount, int time);
+void tgg_clean_bwfdx_sharecmd(int prc_id, int fd);
+void tgg_clean_bw_share_qdata(int prc_id, bw_share_qdata* data);
+int tgg_get_bwfx_sharecmd_halt(int prc_id, int fd);
+void tgg_set_bwfx_sharecmd_halt(int prc_id, int fd, int halt);
 int tgg_get_bwfdx_load(int64_t fdid);
 int tgg_add_bwfdx_load(int fdid);
 
@@ -162,6 +182,8 @@ tgg_bw_data* get_bwdata_from_transdata(int prc_id, tgg_trans_data* tdata);
 int tgg_enqueue_bwsnd(int queue_id, tgg_bw_data* data);
 int tgg_dequeue_bwsnd(int queue_id, tgg_bw_data** data);
 
+int tgg_enqueue_bwshare(int queue_id, bw_share_qdata* data);
+int tgg_dequeue_bwshare(int queue_id, bw_share_qdata** data);
 
 void init_core(const char* dumpfile);
 

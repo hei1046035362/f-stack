@@ -32,12 +32,14 @@ extern struct rte_ring* g_ring_writes[MAX_LCORE_COUNT];
 extern struct rte_ring* g_ring_trans;
 extern struct rte_ring* g_ring_bwfdx;
 extern struct rte_ring* g_ring_bwrcvs[MAX_LCORE_COUNT];
+extern struct rte_ring* g_ring_bwshare[MAX_LCORE_COUNT];
 
 extern struct rte_ring* g_ring_master;
 
 extern struct rte_mempool* g_mempool_trans;
 extern struct rte_mempool* g_mempool_write[MAX_LCORE_COUNT];
 extern struct rte_mempool* g_mempool_bwrcv[MAX_LCORE_COUNT];
+extern struct rte_mempool* g_mempool_bwshare[MAX_LCORE_COUNT];
 extern struct rte_mempool* g_mempool_trans_data;
 extern struct rte_mempool* g_mempool_write_data;
 extern struct rte_mempool* g_mempool_bwrcv_data;
@@ -490,6 +492,98 @@ int tgg_set_bwfdx_workerkey(int prc_id, int fd, const char* workerkey)
 	memset(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].workerkey, 0, sizeof(tgg_bw_info::workerkey));
 	strncpy(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].workerkey, workerkey, strlen(workerkey));
 	return 0;
+}
+
+int tgg_get_bwfdx_fdid_result(int prc_id, int fd, std::vector<int64_t>& lst_gid)
+{
+	ReadLock lock(&(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt_lock));
+	if(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.taskcount > 0) {
+		return -1;
+	}
+	tgg_fd_list* tmp = ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.fdid_list;
+	if(!tmp) {
+		return 0;
+	}
+	lst_gid.push_back(tmp->fdidcid);
+	while(tmp->next) {
+	    tmp = tmp->next;
+		lst_gid.push_back(tmp->fdidcid);
+	}
+	return 0;
+}
+
+
+int tgg_add_bwfdx_gid_result(int prc_id, int fd, int time, tgg_fd_list* data)
+{
+	WriteLock lock(&(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt_lock));
+	// 过期任务 不添加，同时清理data
+	if(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.taskcount <= 0 ||
+	 (time > 0 && time != ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.time)) {
+	 	LOG_ERROR("invalid task prc[%d] fd[%d], cur_time[%d] task_time[%d] taskcount[%d]", 
+	 		prc_id, fd, time,
+	 	 	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.time,
+	 	 	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.taskcount);
+
+		iter_del_list<tgg_fd_list>(data);
+		return -1;
+	}
+	if(data) {
+		// 把任务结果追加到末尾
+		tgg_fd_list* tmp = data;
+		while(tmp->next) {
+		    tmp = tmp->next;
+		}
+		tmp->next = ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.fdid_list;
+		((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.fdid_list = data;
+	}
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.taskcount--;// 执行任务的进程数减一
+	return 0;
+}
+
+int tgg_add_bwfdx_sharecmd(int prc_id, int fd, int taskcount, int time)
+{
+	if(taskcount <= 0 || time <= 0){
+		LOG_ERROR("add sharecmd failed, prcid[%d] fd[%d] taskcount[%d] time[%d]", 
+			prc_id, fd, taskcount, time);
+		return 0;
+	}
+
+	WriteLock lock(&(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt_lock));
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.taskcount = taskcount;
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.time = time;
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.fdid_list = NULL;
+	return 0;
+}
+
+void tgg_clean_bwfdx_sharecmd(int prc_id, int fd)
+{
+	WriteLock lock(&(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt_lock));
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.taskcount = 0;
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.time = 0;
+	iter_del_list<tgg_fd_list>(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.fdid_list);
+}
+int tgg_get_bwfx_sharecmd_halt(int prc_id, int fd) {
+	WriteLock lock(&(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt_lock));
+	return ((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.halt;
+}
+void tgg_set_bwfx_sharecmd_halt(int prc_id, int fd, int halt)
+{
+	WriteLock lock(&(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt_lock));
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.halt = halt;
+}
+void tgg_clean_bw_share_qdata(int prc_id, bw_share_qdata* data)
+{
+	if(!data) {
+		return;
+	}
+    iter_del_list<tgg_vhash_list>(data->gids);
+    iter_del_list<tgg_vhash_list>(data->uids);
+    if(data->snddata_len > 0) {
+        dpdk_rte_free(data->snddata);
+        data->snddata_len = 0;
+    }
+    iter_del_list<tgg_list_cid>(data->except_cid);
+    high_freq_free(g_mempool_bwshare[prc_id], data, sizeof(bw_share_qdata));
 }
 
 int tgg_get_bw_prcstatus(int prc_id)
@@ -964,6 +1058,26 @@ int tgg_dequeue_bwsnd(int queue_id, tgg_bw_data** data)
 		return -ENOENT;
 	}
 	return rte_ring_dequeue(g_ring_bwrcvs[queue_id], (void**)data);
+}
+
+int tgg_enqueue_bwshare(int queue_id, bw_share_qdata* data)
+{
+	if(data->fd <= 0) {
+		LOG_ERROR("invalid data fd:%d.", data->fd);
+	}
+	int ret = rte_ring_enqueue(g_ring_bwshare[queue_id], data);
+	if(ret < 0) {
+		LOG_ERROR("enqueue bwsnd ring failed, count:%d", rte_ring_count(g_ring_bwshare[queue_id]));
+	}
+	return ret;
+}
+
+int tgg_dequeue_bwshare(int queue_id, bw_share_qdata** data)
+{
+	if (rte_ring_empty(g_ring_bwshare[queue_id])) {
+		return -ENOENT;
+	}
+	return rte_ring_dequeue(g_ring_bwshare[queue_id], (void**)data);
 }
 
 int tgg_enqueue_trans(tgg_trans_data* data)

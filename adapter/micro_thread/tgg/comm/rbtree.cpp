@@ -2,8 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-
-struct rte_mempool* g_mempool_gid_rbnode = NULL;
+#include "tgg_comm/tgg_common.h"
+#include "log.hpp"
+// extern struct rte_mempool* g_mempool_gid_rbnode = NULL;
 
 // 创建红黑树
 tgg_rbtree* tgg_rbtree_create(void) {
@@ -396,6 +397,22 @@ void tgg_rbtree_getall_value(tgg_rbtree *tree, tgg_rb_node *node, std::vector<in
     vec.push_back(node->fdidcid);
     tgg_rbtree_getall_value(tree, node->right, vec);
 }
+
+int tgg_rbtree_getall_value(tgg_rbtree *tree, tgg_rb_node *node, tgg_fd_list* lst)
+{
+    if (node == tree->nil) return 0;
+    tgg_rbtree_getall_value(tree, node->left, lst);
+    tgg_fd_list* data = (tgg_fd_list*)dpdk_rte_malloc(sizeof(tgg_fd_list));
+    if (!data) {
+        LOG_ERROR("malloc for get rbtree value failed.");
+        return -1;
+    }
+    data->next = lst;
+    lst = data;
+    tgg_rbtree_getall_value(tree, node->right, lst);
+    return 0;
+}
+
 
 // 获取节点数量
 static int rb_size(tgg_rb_node *node, tgg_rb_node *nil) {
