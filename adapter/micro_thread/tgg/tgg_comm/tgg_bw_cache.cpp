@@ -18,7 +18,6 @@ extern const struct rte_hash *g_cidgid_hash;
 extern const struct rte_hash *g_idx_hash[];
 extern const struct rte_hash *g_bwfdx_hash;
 extern const struct rte_hash *g_bwwkkey_hash;
-extern struct rte_hash *g_expt_cid_hash[];// sendgroup时，要排除的cid列表，标准库的set和unordered_set效率太低
 
 extern struct rte_memzone* g_random_zone;
 
@@ -38,12 +37,9 @@ uint32_t tgg_get_seed()
 
 // 销毁hash value
 static void tgg_fd_hash_value_destroy(tgg_rbtree *value) {
-    // if (!value) return;
-    
     if (value) {
         tgg_rbtree_destroy(value);
     }
-    // dpdk_rte_free(value);
 }
 
 // 针对key-rbtree的hash
@@ -66,9 +62,7 @@ static int tgg_hash_add_keywithfdrbtree(const rte_hash* hash, uint64_t key, int6
     }
 
     // 检查是否已存在 fdidcid
-    // rte_rwlock_read_lock(&rbtree->lock);
     tgg_rb_node *existing_node = tgg_rbtree_find(rbtree, fdidcid);
-    // rte_rwlock_read_unlock(&rbtree->lock);
     
     if (existing_node) {
         LOG_WARNING("Duplicate hash[%s] key[%llu] found.", hash->name, key);
@@ -76,9 +70,7 @@ static int tgg_hash_add_keywithfdrbtree(const rte_hash* hash, uint64_t key, int6
     }
 
     // 获取写锁，添加节点到红黑树
-    // rte_rwlock_write_lock(&rbtree->lock);
     bool inserted = tgg_rbtree_insert(rbtree, fdidcid);
-    // rte_rwlock_write_unlock(&rbtree->lock);
     
     if (!inserted) {
         LOG_ERROR("Failed to insert fdidcid[%ld] into rbtree for key[%llu]", fdidcid, key);
@@ -109,15 +101,10 @@ static int tgg_hash_del_key(const rte_hash* hash, rte_rcu_qsbr *rcu, uint64_t ke
         LOG_WARNING("delete hash[%s] key[%llu] not found.", hash->name, key);
         return -1; // 键不存在
     }
-
-    // 获取写锁
-    // rte_rwlock_write_lock(&rbtree->lock);
     
     // 销毁红黑树
     tgg_rbtree_destroy(rbtree);
     rbtree = NULL;
-    
-    // rte_rwlock_write_unlock(&rbtree->lock);
 
     // 删除哈希表项
     int ret = rte_hash_del_key_with_hash(hash, &key, rte_hash_crc(&key, sizeof(uint64_t), 0));
@@ -147,16 +134,12 @@ static int tgg_hash_del_fdrbtree4key(const rte_hash* hash, rte_rcu_qsbr *rcu, ui
         LOG_WARNING("delete hash[%s] node[%ld] failed, key[%llu] not found.", hash->name, fdidcid, key);
         return -1; // 键不存在
     }
-
-    // 获取写锁
-    // rte_rwlock_write_lock(&rbtree->lock);
     
     // 从红黑树中删除节点
     bool deleted = tgg_rbtree_delete(rbtree, fdidcid);
     
     if (!deleted) {
         LOG_ERROR("hash[%s] key[%llu] node[%lld] not found in rbtree.", hash->name, key, fdidcid);
-        // rte_rwlock_write_unlock(&rbtree->lock);
         return -1;
     }
     
@@ -165,8 +148,6 @@ static int tgg_hash_del_fdrbtree4key(const rte_hash* hash, rte_rcu_qsbr *rcu, ui
     // 检查红黑树是否为空
     bool is_empty = (tgg_rbtree_find(rbtree, 0) == NULL && 
                      tgg_rbtree_size(rbtree) == 0);
-    
-    // rte_rwlock_write_unlock(&rbtree->lock);
     
     // 如果红黑树为空，删除整个key
     if (is_empty) {
@@ -1280,27 +1261,6 @@ int tgg_get_bwwoker_count()
     return rte_hash_count(g_bwwkkey_hash);
 }
 
-int tgg_add_expt_cid(int prc_id, int64_t cid)
-{
-    return rte_hash_add_key_with_hash(g_expt_cid_hash[prc_id], &cid, rte_hash_crc(&cid, sizeof(int64_t), 0));
-}
-
-int tgg_check_expt_cid_exist(int prc_id, int64_t cid)
-{
-    if(rte_hash_count(g_expt_cid_hash[prc_id]) <= 0) {
-        return -1;
-    }
-    return rte_hash_lookup_with_hash(g_expt_cid_hash[prc_id], &cid, rte_hash_crc(&cid, sizeof(int64_t), 0));
-}
-
-void tgg_reset_expt_cid(int prc_id)
-{
-    if(rte_hash_count(g_expt_cid_hash[prc_id]) <= 0) {
-        return;
-    }
-    rte_hash_reset(g_expt_cid_hash[prc_id]);
-}
-
 void print_hash_statistics()
 {
     if(rte_eal_process_type() != RTE_PROC_PRIMARY) {
@@ -1311,8 +1271,6 @@ void print_hash_statistics()
     {
         if(g_idx_hash[i])
             LOG_WARNING("%s cur count:%ld", g_idx_hash[i]->name, rte_hash_count(g_idx_hash[i]));
-        if(g_expt_cid_hash[i])
-            LOG_WARNING("%s cur count:%ld", g_expt_cid_hash[i]->name, rte_hash_count(g_expt_cid_hash[i]));
     }
     LOG_WARNING("%s cur count:%ld", g_gid_hash->name, rte_hash_count(g_gid_hash));
     LOG_WARNING("%s cur count:%ld", g_uid_hash->name, rte_hash_count(g_uid_hash));

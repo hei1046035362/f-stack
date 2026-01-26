@@ -60,7 +60,6 @@ int ShareCmdLeaveGroup::ExecCmd()
     tgg_vhash_list* gids = this->data->gids;
     int64_t fdidcid = *((int64_t*)this->data->snddata);
     while(gids) {
-        // int64_t fdidcid = tgg_get_fdbycid(this->data->cid);
         if(fdidcid <= 0 || tgg_del_fd4gid(gids->vhash, fdidcid) < 0) {
             LOG_ERROR("del cid[%u] fdidcid[%lld] for gid[%llu] failed.", this->data->cid, gids->vhash, fdidcid);
         }
@@ -72,16 +71,11 @@ int ShareCmdLeaveGroup::ExecCmd()
 int ShareCmdUnGroup::ExecCmd()
 {
     LOG_INFO("ShareCmdUnGroup: prc[%d] cmd start.", this->prc_id);
-    // tgg_vhash_list* gids = this->data->gids;
     std::string gid((char*)this->data->snddata, this->data->snddata_len);
     if(!gid.empty()) {
         LOG_INFO("ShareCmdUnGroup: try to ungroup gid[%s].", gid.c_str());
         tgg_del_gid_cidgid(gid.c_str());// 这里顺序不能动，得先删除hash<cid,gid>中的部分，才能删除hash<gid,list<fdid>>
         tgg_del_gid(gid.c_str());
-        // if(tgg_del_gid(gids->vhash) < 0) {
-        //     LOG_ERROR("delete gid[%llu] failed.", gids->vhash);
-        // }
-        // gids = gids->next;
     }
     return 0;
 }
@@ -118,7 +112,6 @@ int ShareCmdSendToGroup::ExecCmd()
                 lstAllFds.push_back(node->fdidcid);
             }
             tmp = tmp->next;
-            // dpdk_rte_free(__FILE__, __LINE__, node);
             node = tmp;
         }
         iter_del_list<tgg_fd_list>(lstFds);
@@ -143,7 +136,6 @@ int ShareCmdGetClientSessionsByGroup::ExecCmd()
             LOG_ERROR("ShareCmdGetClientSessionsByGroup: get fds by gid[%llu] failed.", gid->vhash);
             return -1;
         }
-        // iter_del_list<tgg_fd_list>(lst_fd);
     }
     return tgg_add_bwfdx_gid_result(this->data->prc_id, this->data->fd, this->data->time, lst_fd);
 }
