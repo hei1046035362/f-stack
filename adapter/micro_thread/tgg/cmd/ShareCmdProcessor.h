@@ -72,4 +72,12 @@ public:
     int ExecCmd();
 };
 
+class ShareCmdPrintMemStats : public ShareCmdBaseProcessor
+{
+public:
+    ShareCmdPrintMemStats(int prc_id, bw_share_qdata* data):ShareCmdBaseProcessor(prc_id, data) {}
+    ~ShareCmdPrintMemStats() {}
+    int ExecCmd();
+};
+
 int exec_sharequeue_cmd_processor(int prc_id);

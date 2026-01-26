@@ -14,6 +14,7 @@ void *accept_routine( void * );
 // void *readwrite_routine( void *arg );
 void *read_routine( void *arg );
 void *write_routine( void *arg );
+void *sharecmd_routine( void *arg );
 // void *real_write_routine( void *arg );
 
 // 作为服务器的fd

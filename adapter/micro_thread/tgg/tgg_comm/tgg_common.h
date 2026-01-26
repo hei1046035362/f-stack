@@ -22,7 +22,7 @@ void iter_del_list(type* iddata)
     while(iter) {
         iter = iter->next;
         memset(tmp, 0, sizeof(type));
-        dpdk_rte_free(tmp);
+        dpdk_rte_free(__FILE__, __LINE__, tmp);
         tmp = iter;
     }
 }
@@ -187,8 +187,8 @@ int tgg_dequeue_bwshare(int queue_id, bw_share_qdata** data);
 
 void init_core(const char* dumpfile);
 
-void* dpdk_rte_malloc(int size);
-void dpdk_rte_free(void* pdata);
+void* dpdk_rte_malloc(const char* file, int line, int size);
+void dpdk_rte_free(const char* file, int line, void* pdata);
 
 
 int high_freq_malloc(struct rte_mempool* pool, void** data, int size);
@@ -213,9 +213,9 @@ int tgg_init_session(int core_id, int fd, int idx);
 // 连接断开
 int tgg_free_session(int core_id, int fd, uint32_t cid);
 // 加入组
-int tgg_join_group(const char* gid, uint32_t cid);
+int tgg_join_group(const char* gid, uint32_t cid, bool add_gid);
 // 退出组
-int tgg_exit_group(const char* gid, uint32_t cid);
+int tgg_exit_group(const char* gid, uint32_t cid, bool del_gid);
 
 // 获取可用的idx
 int get_valid_idx();

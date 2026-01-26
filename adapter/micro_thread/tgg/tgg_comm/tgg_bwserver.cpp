@@ -461,7 +461,7 @@ static int write_data()
             // 这里发送给客户端和清理hash表信息的顺序待商榷
             LOG_WARNING("catched an close cmd, coreid[%d] fd[%d] idx[%d] cid:%u.", bdata->coreid, bdata->fd, bdata->idx, cid);
             Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
-            tgg_free_session(bdata->coreid, bdata->fd, cid);
+            exec_free_session(bdata->coreid, bdata->fd, cid);
         }
         char sdata[BUFFER_PACKET_LEN] = {0};
         size_t sdata_len = 0;
@@ -472,13 +472,13 @@ static int write_data()
                 if(!parse_http_request((char*)bdata->data, bdata->data_len, &req, 1)) {
                     LOG_ERROR("parse http request failed:%s, idx:%d.", (char*)bdata->data, bdata->idx);
                     Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
-                    tgg_free_session(bdata->coreid, bdata->fd, cid);
+                    exec_free_session(bdata->coreid, bdata->fd, cid);
                     continue;
                 }
                 if (build_server_data(req, bdata->peer_ip, bdata->peer_port, sdata) < 0) {
                     LOG_ERROR("build_server_data failed, idx:%d", bdata->idx);
                     Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
-                    tgg_free_session(bdata->coreid, bdata->fd, cid);
+                    exec_free_session(bdata->coreid, bdata->fd, cid);
                     continue;
                 }
                 sdata_len = strlen(sdata);// build_server_data 格式化后的数据为json字符串，可以用strlen
@@ -533,7 +533,7 @@ void clean_queue_data()
                 // 这里发送给客户端和清理hash表信息的顺序待商榷
                 LOG_WARNING("catched an close cmd, coreid[%d] fd[%d] idx[%d] cid:%u.", bdata->coreid, bdata->fd, bdata->idx, cid);
                 Send2Fd(bdata->coreid, bdata->fd, bdata->idx, "", FD_CLOSE, 0);// 这里不需要再写数据了，收到对端关闭才走到这里来的 FD_WRITE|
-                tgg_free_session(bdata->coreid, bdata->fd, cid);
+                exec_free_session(bdata->coreid, bdata->fd, cid);
             }
         }
         clean_bw_data(g_prc_id, bdata);
@@ -683,8 +683,20 @@ void *write_routine( void *arg )
     map_msgtype[FD_WRITE] = GatewayProtocal::CMD_ON_MESSAGE;
     map_msgtype[FD_CLOSE] = GatewayProtocal::CMD_ON_CLOSE;
     while(g_run) {
-        if(write_data() < 0 && exec_sharequeue_cmd_processor(g_prc_id) < 0) {
-            poll(NULL, 0, 5);// sleep 10ms
+        if(write_data() < 0) {
+            poll(NULL, 0, 2);// sleep 10ms
+        }
+    }
+    return 0;
+}
+
+void *sharecmd_routine( void *arg )
+{
+    co_enable_hook_sys();
+    LOG_INFO("sharecmd_routine start.");
+    while(g_run) {
+        if(exec_sharequeue_cmd_processor(g_prc_id) < 0) {
+            poll(NULL, 0, 2);// sleep 10ms
         }
     }
     return 0;

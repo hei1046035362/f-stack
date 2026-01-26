@@ -47,6 +47,7 @@ extern struct rte_mempool* g_mempool_large_data;
 extern struct rte_mempool* g_mempool_clifdlist_data;
 extern struct rte_mempool* g_mempool_ws_buffer;
 extern struct rte_mempool* g_mempool_fd_snddata[MAX_LCORE_COUNT];
+extern struct rte_mempool* g_mempool_clictx_buffer;
 
 tgg_stats g_tgg_stats = {0};
 static bool s_big_endian = false;
@@ -545,22 +546,25 @@ int tgg_add_bwfdx_sharecmd(int prc_id, int fd, int taskcount, int time)
 	if(taskcount <= 0 || time <= 0){
 		LOG_ERROR("add sharecmd failed, prcid[%d] fd[%d] taskcount[%d] time[%d]", 
 			prc_id, fd, taskcount, time);
-		return 0;
+		return -1;
 	}
 
 	WriteLock lock(&(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt_lock));
 	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.taskcount = taskcount;
 	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.time = time;
 	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.fdid_list = NULL;
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.halt = 0;
 	return 0;
 }
 
 void tgg_clean_bwfdx_sharecmd(int prc_id, int fd)
 {
 	WriteLock lock(&(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt_lock));
-	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.taskcount = 0;
-	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.time = 0;
-	iter_del_list<tgg_fd_list>(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.fdid_list);
+	if(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.time > 0) {
+		((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.taskcount = 0;
+		((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.time = 0;
+		iter_del_list<tgg_fd_list>(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt.fdid_list);
+	}
 }
 int tgg_get_bwfx_sharecmd_halt(int prc_id, int fd) {
 	WriteLock lock(&(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].rslt_lock));
@@ -579,7 +583,7 @@ void tgg_clean_bw_share_qdata(int prc_id, bw_share_qdata* data)
     iter_del_list<tgg_vhash_list>(data->gids);
     iter_del_list<tgg_vhash_list>(data->uids);
     if(data->snddata_len > 0) {
-        dpdk_rte_free(data->snddata);
+        dpdk_rte_free(__FILE__, __LINE__, data->snddata);
         data->snddata_len = 0;
     }
     iter_del_list<tgg_list_cid>(data->except_cid);
@@ -615,7 +619,7 @@ void tgg_new_bw_session(int prc_id, int fd, int cmd,
 	if(cmd == GatewayProtocal::CMD_WORKER_CONNECT) {
 		std::string workerkey = tgg_get_bwfdx_workerkey(prc_id, fd);
 		tgg_add_bwwkkey(workerkey.c_str());
-		tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(sizeof(tgg_bwfdx_data));
+		tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_bwfdx_data));
 		if(!bwfdxdata) {
 			LOG_ERROR("malloc bwfdxdata failed.");
 			return;
@@ -624,7 +628,7 @@ void tgg_new_bw_session(int prc_id, int fd, int cmd,
 		bwfdxdata->cmd = BWFDX_CMD_ADD;
 		if(tgg_enqueue_bwfdx(bwfdxdata)) {
 			LOG_ERROR("Enqueue bwfdxdata failed.");
-			dpdk_rte_free(bwfdxdata);
+			dpdk_rte_free(__FILE__, __LINE__, bwfdxdata);
 		}
 	}
 }
@@ -636,7 +640,7 @@ void tgg_close_bw_session(int prc_id, int fd)
 	int cmd = tgg_get_bwfdx_cmd(prc_id, fd);
 	if(cmd == GatewayProtocal::CMD_WORKER_CONNECT) {
 		// 通知透传线程不要再使用这个fd了
-		tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(sizeof(tgg_bwfdx_data));
+		tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_bwfdx_data));
 		if(!bwfdxdata) {
 			LOG_ERROR("malloc bwfdxdata failed, cannot malloc data.");
 			return;
@@ -644,7 +648,7 @@ void tgg_close_bw_session(int prc_id, int fd)
 		bwfdxdata->bwfdx = generate_bwfdx(prc_id, fd);
 		bwfdxdata->cmd = BWFDX_CMD_DELETE;
 		if(tgg_enqueue_bwfdx(bwfdxdata) < 0) {
-            dpdk_rte_free(bwfdxdata);
+            dpdk_rte_free(__FILE__, __LINE__, bwfdxdata);
 			LOG_ERROR("Enqueue bwfdxdata failed.");
 		}
 
@@ -1315,25 +1319,39 @@ void init_core(const char* core_path)
 #endif
 }
 static int s_malloc_count;
-void* dpdk_rte_malloc(int size)
+#ifdef DEBUG_MEMPOOL_STATS
+std::map<std::string, int> s_mapMalloc;
+std::map<std::string, int> s_mapFree;
+#endif
+void* dpdk_rte_malloc(const char* file, int line, int size)
 {
 	void* pdata = rte_malloc("tgg_malloc", size, 0);
 	if (!pdata)	{
-		LOG_ERROR("malloc data failed.\n");
+		LOG_ERROR("malloc data sizeo[%d] failed.", size);
 		return NULL;
 	}
 	// TODO 这里需要把pdata管理起来，因dpdk的secondary进程出core而未释放时会导致大页内存泄漏
 	// 		可以用链表管理起来，然后注册rte_service给master进程去管理，也可以放到定时任务管理
+#ifdef DEBUG_MEMPOOL_STATS
+	char key[256] = {0};
+	snprintf(key, 255, "[%s:%d]", file, line);
+	s_mapMalloc[key]++;
+#endif
 	s_malloc_count++;
 	return pdata;
 }
 
 static int s_free_count;
 
-void dpdk_rte_free(void* pdata)
+void dpdk_rte_free(const char* file, int line, void* pdata)
 {
 	rte_free(pdata);
 	s_free_count++;
+#ifdef DEBUG_MEMPOOL_STATS
+	char key[256] = {0};
+	snprintf(key, 255, "[%s:%d]", file, line);
+	s_mapFree[key]++;
+#endif
 	// TODO 这里需要把pdata管理起来，因dpdk的secondary进程出core而未释放时会导致大页内存泄漏
 	// 		可以用链表管理起来，然后注册rte_service给master进程去管理，也可以放到定时任务管理
 }
@@ -1400,7 +1418,14 @@ void print_mem_statistics()
 	for(auto iter : s_hi_freq_free) {
 		LOG_WARNING("pool[%s] hi_free times: %d", (reinterpret_cast<struct rte_mempool*>(iter.first))->name, iter.second);	
 	}
+	for(auto iter : s_mapMalloc) {
+		LOG_WARNING("%s malloc times: %d", iter.first.c_str(), iter.second);	
+	}
+	for(auto iter : s_mapFree) {
+		LOG_WARNING("%s free times: %d", iter.first.c_str(), iter.second);	
+	}
 #endif
+
 	LOG_WARNING("ws buffer left count:%ld", s_buffer_count);
     if(rte_eal_process_type() != RTE_PROC_PRIMARY) {
     	return;
@@ -1413,6 +1438,8 @@ void print_mem_statistics()
 			LOG_WARNING("%s cur count:%ld", g_ring_writes[i]->name, rte_ring_count(g_ring_writes[i]));
 		if(g_ring_bwrcvs[i])
 			LOG_WARNING("%s cur count:%ld", g_ring_bwrcvs[i]->name, rte_ring_count(g_ring_bwrcvs[i]));
+		if(g_ring_bwshare[i])
+			LOG_WARNING("%s cur count:%ld", g_ring_bwshare[i]->name, rte_ring_count(g_ring_bwshare[i]));
 	}
 	LOG_WARNING("%s cur count:%ld", g_ring_trans->name, rte_ring_count(g_ring_trans));
 	LOG_WARNING("%s cur count:%ld", g_ring_bwfdx->name, rte_ring_count(g_ring_bwfdx));
@@ -1427,6 +1454,8 @@ void print_mem_statistics()
 			LOG_WARNING("%s available count:%ld used count:%u", g_mempool_bwrcv[i]->name, rte_mempool_avail_count(g_mempool_bwrcv[i]), rte_mempool_in_use_count(g_mempool_bwrcv[i]));
 		if(g_mempool_fd_snddata[i])
 			LOG_WARNING("%s available count:%ld used count:%u", g_mempool_fd_snddata[i]->name, rte_mempool_avail_count(g_mempool_fd_snddata[i]), rte_mempool_in_use_count(g_mempool_fd_snddata[i]));
+		if(g_mempool_bwshare[i])
+			LOG_WARNING("%s available count:%ld used count:%u", g_mempool_bwshare[i]->name, rte_mempool_avail_count(g_mempool_bwshare[i]), rte_mempool_in_use_count(g_mempool_bwshare[i]));
 	}
 	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_trans->name, rte_mempool_avail_count(g_mempool_trans), rte_mempool_in_use_count(g_mempool_trans));
 	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_trans_data->name, rte_mempool_avail_count(g_mempool_trans_data), rte_mempool_in_use_count(g_mempool_trans_data));
@@ -1435,6 +1464,7 @@ void print_mem_statistics()
 	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_large_data->name, rte_mempool_avail_count(g_mempool_large_data), rte_mempool_in_use_count(g_mempool_large_data));
 	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_clifdlist_data->name, rte_mempool_avail_count(g_mempool_clifdlist_data), rte_mempool_in_use_count(g_mempool_clifdlist_data));
 	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_ws_buffer->name, rte_mempool_avail_count(g_mempool_ws_buffer), rte_mempool_in_use_count(g_mempool_ws_buffer));
+	LOG_WARNING("%s available count:%ld used count:%u", g_mempool_clictx_buffer->name, rte_mempool_avail_count(g_mempool_clictx_buffer), rte_mempool_in_use_count(g_mempool_clictx_buffer));
 
 	// const char* dump_mem = "/var/log/tgg_gateway/mem_stat.log"
 	// FILE* file = open(dump_mem, "w+");

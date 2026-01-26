@@ -8,19 +8,22 @@
 
 int ShareCmdSelect::ExecCmd()
 {
-    LOG_INFO("ShareCmdSelect: cmd start.");
+    LOG_DEBUG("ShareCmdSelect: prc[%d] cmd start.", this->prc_id);
     tgg_vhash_list* gids = this->data->gids;
     tgg_fd_list* lst_fd = NULL;
     while(gids) {
         tgg_fd_list* lst_cur = NULL;
-        if(tgg_get_fdsbygid(gids->vhash, lst_cur) < 0) {
+        if(tgg_get_fdsbygid(gids->vhash, &lst_cur) < 0) {
             LOG_ERROR("ShareCmdSelect:get fds by gid failed.");
             // 获取失败，强制终止任务
             tgg_set_bwfx_sharecmd_halt(this->data->prc_id, this->data->fd, 1);
             iter_del_list<tgg_fd_list>(lst_fd);
             return -1;
         }
-        if(!lst_cur) continue;
+        if(!lst_cur) {
+            gids = gids->next;
+            continue;
+        }
             
         if(!lst_fd) {
             lst_fd = lst_cur;
@@ -39,10 +42,11 @@ int ShareCmdSelect::ExecCmd()
 
 int ShareCmdJoinGroup::ExecCmd()
 {
-    LOG_INFO("ShareCmdJoinGroup: cmd start.");
+    LOG_INFO("ShareCmdJoinGroup: prc[%d] cmd start.", this->prc_id);
     tgg_vhash_list* gid = this->data->gids;
+    int64_t fdidcid = *((int64_t*)this->data->snddata);
     while(gid) {
-        if(tgg_add_gid(gid->vhash, this->data->cid) < 0) {
+        if(fdidcid <= 0 || tgg_add_gid(gid->vhash, fdidcid) < 0) {
             LOG_ERROR("add cid[%u] for gid[%llu] failed.", this->data->cid, gid->vhash);
         }
         gid = gid->next;
@@ -52,12 +56,13 @@ int ShareCmdJoinGroup::ExecCmd()
 
 int ShareCmdLeaveGroup::ExecCmd()
 {
-    LOG_INFO("ShareCmdLeaveGroup: cmd start.");
+    LOG_INFO("ShareCmdLeaveGroup: prc[%d] cmd start.", this->prc_id);
     tgg_vhash_list* gids = this->data->gids;
+    int64_t fdidcid = *((int64_t*)this->data->snddata);
     while(gids) {
-        int64_t fdidcid = tgg_get_fdbycid(this->data->cid);
-        if(fdidcid < 0 || tgg_del_fd4gid(gids->vhash, this->data->cid) < 0) {
-            LOG_ERROR("add cid[%u] fdidcid[%lld] for gid[%llu] failed.", gids->vhash, fdidcid, this->data->cid);
+        // int64_t fdidcid = tgg_get_fdbycid(this->data->cid);
+        if(fdidcid <= 0 || tgg_del_fd4gid(gids->vhash, fdidcid) < 0) {
+            LOG_ERROR("del cid[%u] fdidcid[%lld] for gid[%llu] failed.", this->data->cid, gids->vhash, fdidcid);
         }
         gids = gids->next;
     }
@@ -66,20 +71,24 @@ int ShareCmdLeaveGroup::ExecCmd()
 
 int ShareCmdUnGroup::ExecCmd()
 {
-    LOG_INFO("ShareCmdUnGroup: cmd start.");
-    tgg_vhash_list* gids = this->data->gids;
-    while(gids) {
-        if(tgg_del_gid(gids->vhash) < 0) {
-            LOG_ERROR("delete gid[%llu] failed.", gids->vhash);
-        }
-        gids = gids->next;
+    LOG_INFO("ShareCmdUnGroup: prc[%d] cmd start.", this->prc_id);
+    // tgg_vhash_list* gids = this->data->gids;
+    std::string gid((char*)this->data->snddata, this->data->snddata_len);
+    if(!gid.empty()) {
+        LOG_INFO("ShareCmdUnGroup: try to ungroup gid[%s].", gid.c_str());
+        tgg_del_gid_cidgid(gid.c_str());// 这里顺序不能动，得先删除hash<cid,gid>中的部分，才能删除hash<gid,list<fdid>>
+        tgg_del_gid(gid.c_str());
+        // if(tgg_del_gid(gids->vhash) < 0) {
+        //     LOG_ERROR("delete gid[%llu] failed.", gids->vhash);
+        // }
+        // gids = gids->next;
     }
     return 0;
 }
 
 int ShareCmdSendToGroup::ExecCmd()
 {
-    LOG_INFO("ShareCmdSendToGroup: cmd start.");
+    LOG_INFO("ShareCmdSendToGroup: prc[%d] cmd start.", this->prc_id);
     tgg_vhash_list* gids = this->data->gids;
     int raw = true;
     std::set<uint32_t> setExept;
@@ -94,7 +103,7 @@ int ShareCmdSendToGroup::ExecCmd()
     lstAllFds.reserve(RESERVED_SIZE_FOR_GID_CIDS);
     while(gids) {
         tgg_fd_list* lstFds = NULL;
-        if(tgg_get_fdsbygid(gids->vhash, lstFds) < 0) {
+        if(tgg_get_fdsbygid(gids->vhash, &lstFds) < 0) {
             LOG_ERROR("get fds by gid[%llu] failed.", gids->vhash);
             gids = gids->next;
             continue;
@@ -104,12 +113,12 @@ int ShareCmdSendToGroup::ExecCmd()
         tgg_fd_list* tmp = lstFds;
         tgg_fd_list* node = tmp;
         while (tmp) {
-            uint32_t cid = GET_CID_FDCID_MASK(lstFds->fdidcid);
+            uint32_t cid = GET_CID_FDCID_MASK(node->fdidcid);
             if(setExept.size() == 0 || setExept.find(cid) == setExept.end()) {
-                lstAllFds.push_back(cid);
+                lstAllFds.push_back(node->fdidcid);
             }
             tmp = tmp->next;
-            dpdk_rte_free(node);
+            // dpdk_rte_free(__FILE__, __LINE__, node);
             node = tmp;
         }
         iter_del_list<tgg_fd_list>(lstFds);
@@ -126,23 +135,24 @@ int ShareCmdSendToGroup::ExecCmd()
 
 int ShareCmdGetClientSessionsByGroup::ExecCmd()
 {
-    LOG_INFO("ShareCmdGetClientSessionsByGroup: cmd start.");
+    LOG_INFO("ShareCmdGetClientSessionsByGroup: prc[%d] cmd start.", this->prc_id);
     tgg_vhash_list* gid = this->data->gids;
     tgg_fd_list* lst_fd = NULL;
     if(gid) {// getcidbygid只有一个gid
-        if (!tgg_get_fdsbygid(gid->vhash, lst_fd)) {
-            LOG_ERROR("GetClientSessionsByGroup: get fds by gid[%llu] failed.", gid->vhash);
+        if (tgg_get_fdsbygid(gid->vhash, &lst_fd) < 0) {
+            LOG_ERROR("ShareCmdGetClientSessionsByGroup: get fds by gid[%llu] failed.", gid->vhash);
             return -1;
         }
+        // iter_del_list<tgg_fd_list>(lst_fd);
     }
     return tgg_add_bwfdx_gid_result(this->data->prc_id, this->data->fd, this->data->time, lst_fd);
 }
 
 int ShareCmdGetClientCountByGroup::ExecCmd()
 {
-    LOG_INFO("ShareCmdGetClientCountByGroup: cmd start.");
+    LOG_INFO("ShareCmdGetClientCountByGroup: prc[%d] cmd start.", this->prc_id);
     tgg_vhash_list* gid = this->data->gids;
-    tgg_fd_list* lst_fd = (tgg_fd_list*)dpdk_rte_malloc(sizeof(tgg_fd_list));
+    tgg_fd_list* lst_fd = (tgg_fd_list*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_fd_list));
     if(!lst_fd) {
         LOG_ERROR("GetClientCountByGroup: malloc for result failed.");
         return -1;
@@ -152,14 +162,23 @@ int ShareCmdGetClientCountByGroup::ExecCmd()
         lst_fd->fdidcid = tgg_get_cidcount_bygid(gid->vhash);
         if (lst_fd->fdidcid < 0) {
             LOG_ERROR("GetClientCountByGroup: get fds by gid[%llu] failed, ret %d.", gid->vhash, lst_fd->fdidcid);
-            dpdk_rte_free(lst_fd);
+            dpdk_rte_free(__FILE__, __LINE__, lst_fd);
             return -1;
         }
     }
     return tgg_add_bwfdx_gid_result(this->data->prc_id, this->data->fd, this->data->time, lst_fd);
 }
 
- 
+ int ShareCmdPrintMemStats::ExecCmd()
+{
+    LOG_INFO("ShareCmdPrintMemStats: prc[%d] cmd start.", this->prc_id);
+    tgg_clean_bw_share_qdata(this->prc_id, this->data);
+    this->data = NULL;
+    print_mem_statistics();
+    // print_hash_statistics();
+    return 0;
+}
+
 int exec_sharequeue_cmd_processor(int prc_id)
 {
     bw_share_qdata* data = NULL;
@@ -192,6 +211,9 @@ int exec_sharequeue_cmd_processor(int prc_id)
             break;
         case CMD_GET_CLIENT_COUNT_BY_GROUP:
             pro = new ShareCmdGetClientCountByGroup(prc_id, data);
+            break;
+        case CMD_PRINT_MEM_STATS:
+            pro = new ShareCmdPrintMemStats(prc_id, data);
             break;
         default :
             LOG_ERROR("Gateway inner pack err, Unknown cmd=%d.", data->cmd);

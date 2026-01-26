@@ -242,10 +242,10 @@ typedef struct st_stats {
 } tgg_stats;
 
 // gid hash data
-typedef tgg_fd_hash_value tgg_gid_data;
+typedef struct st_tgg_rbtree tgg_gid_data;
 
 // uid hash data
-typedef tgg_fd_hash_value tgg_uid_data;
+typedef tgg_fd_hash_list tgg_uid_data;
 
 
 typedef struct st_tgg_cid_list {

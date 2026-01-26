@@ -160,11 +160,11 @@ class HighPerfForwarder:
                     header_data = new_header.create_full_packet(payload)
                     processed_data.append(header_data)
                 else:
-                    gid_base = 62205555455823872
+                    gid = gid_base
                     for x in range(gid_count):
-                        # parsed_header.data = str(gid_base).encode('utf-8')
-                        gid_base += 1
-                        payload = str(gid_base).encode('utf-8')
+                        # parsed_header.data = str(gid).encode('utf-8')
+                        gid += 1
+                        payload = str(gid).encode('utf-8')
                         header_data = new_header.create_full_packet(payload)
 
                         # processed_packets.append(header_data)
