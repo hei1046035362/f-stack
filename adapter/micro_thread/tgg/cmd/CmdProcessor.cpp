@@ -104,11 +104,8 @@ int CmdBaseProcessor::AddGid4Prcid(const char* gid, std::map<int, tgg_vhash_list
         } else {
             gids->next = it->second;
             it->second = gids;
-            // tgg_vhash_list* tmp = it->second;
-            // while(tmp->next) tmp = tmp->next;
-            // tmp->next = gids;
         }
-        LOG_DEBUG("share gid[%s] hash[%llu] for prcid:%d", gid, gidhash, calc_id);
+        // LOG_DEBUG("share gid[%s] hash[%llu] for prcid:%d", gid, gidhash, calc_id);
         return 0;// 不属于本进程的处理的gid都通过队列发给相应的进程
     }
     return 1;
@@ -135,7 +132,6 @@ int CmdBaseProcessor::PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>&
         bw_share_qdata* qdata = NULL;
         if (high_freq_malloc(g_mempool_bwshare[itProc->first], (void**)&qdata, sizeof(bw_share_qdata)) < 0) {
             LOG_ERROR("format gid to prc_id[%d] failed,malloc share command failed.", itProc->first);
-            // tgg_clean_bwfdx_sharecmd(this->prc_id, this->fd);
             goto push_share_cmd_failed;
         }
         qdata->gids = itProc->second;
@@ -148,7 +144,6 @@ int CmdBaseProcessor::PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>&
             qdata->snddata = (char*)dpdk_rte_malloc(__FILE__, __LINE__, data.size());
             if(!qdata->snddata) {
                 LOG_ERROR("malloc for prc_id[%d] send data failed", itProc->first);
-                // tgg_clean_bwfdx_sharecmd(this->prc_id, this->fd);
                 goto push_share_cmd_failed;
             }
             memcpy(qdata->snddata, data.data(), data.size());
@@ -182,7 +177,7 @@ int CmdBaseProcessor::PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>&
             co_msleep(2);
         } 
         if (ret >= 0){
-            LOG_DEBUG("pushed command[%d] to prcid[%d]", cmd, itProc->first);
+            LOG_DEBUG("prc[%d] pushed command[%d] to prcid[%d]", this->prc_id, cmd, itProc->first);
             continue;
         } else {
             LOG_ERROR("format gid to prc_id[%d] failed, enqueue bwshare failed.", itProc->first);
@@ -196,7 +191,6 @@ push_share_cmd_failed:
         tgg_clean_bwfdx_sharecmd(this->prc_id, this->fd);
         return -1;
     }
-    // clean_vhashlist_map(mapGid);
     return 0;
 }
 
@@ -378,14 +372,9 @@ int CmdSendToGroup::ExecCmd()
         const rapidjson::Value& excludeObj = ext_data["exclude"];
         for (rapidjson::Value::ConstMemberIterator itr = excludeObj.MemberBegin(); 
              itr != excludeObj.MemberEnd(); ++itr) {
-            // 提取键（需转为字符串）
-            // const char* key = itr->name.GetString();
             // 提取值（需检查类型）
             if (itr->value.IsUint()) {
                 hint = setExcept.insert(hint, itr->value.GetUint());
-                // setExcept.insert(itr->value.GetUint());
-                // int value = itr->value.GetInt();
-                //tgg_add_expt_cid(prc_id, itr->value.GetInt());
             } else {
                 LOG_ERROR("Invalid type of value for key:%s", itr->name.GetString());
             }
@@ -415,7 +404,6 @@ int CmdSendToGroup::ExecCmd()
             if (tgg_get_fdsbygid(gid, lstFds) >= 0) {
                 // 批量过滤
                 for (size_t j = 0; j < lstFds.size(); j++) {
-                    // if (tgg_check_expt_cid_exist(prc_id, cid_cache[j]) < 0) {
                     if (setExcept.size() == 0 || setExcept.find(GET_CID_FDCID_MASK(lstFds[j])) == setExcept.end()) {
                         lstAllFds.push_back(lstFds[j]);
                     }
@@ -429,9 +417,7 @@ int CmdSendToGroup::ExecCmd()
             // 日志优化：直接记录gid数量而非完整JSON[1](@ref)
             LOG_INFO("SendToGroup: cmd executed for %u groups %d fds", groupArray.Size(), lstAllFds.size());
         }
-        // tgg_reset_expt_cid(prc_id);
     } else {
-        // tgg_reset_expt_cid(prc_id);
         LOG_WARNING("SendToGroup: cmd executed, no Group found.");
         return -1;
     }

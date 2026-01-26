@@ -197,8 +197,6 @@ struct rte_hash *g_idx_hash[MAX_LCORE_COUNT] = {NULL};  // 存放已使用的cli
 struct rte_hash *g_bwfdx_hash = NULL;  // 用于服务端连接的负载均衡，存放正在使用的bwfd, 确定客户端的数据要发送到哪个服务端
 struct rte_hash *g_bwwkkey_hash = NULL;  // 存放正在使用的bw的worker key
 
-struct rte_hash *g_expt_cid_hash[MAX_LCORE_COUNT] = {NULL};// sendgroup时，要排除的cid列表，标准库的set和unordered_set效率太低
-
 struct rte_rcu_qsbr *g_gid_rcu = NULL;
 struct rte_rcu_qsbr *g_uid_rcu = NULL;
 struct rte_rcu_qsbr *g_cid_rcu = NULL;
@@ -540,9 +538,6 @@ void tgg_master_init()
 		sprintf(bwshare_pool_name, "%s_%d", s_pool_bwshare_name, i);
 		g_mempool_bwshare[i] = make_mempool(bwshare_pool_name, 1024, sizeof(bw_share_qdata));
 
-		char expt_cid_hash_name[128] = {0};
-		sprintf(expt_cid_hash_name, "%s_%d", s_expt_cid_hash_name, i);
-		g_expt_cid_hash[i] = init_hash(expt_cid_hash_name, 126, sizeof(int64_t));
 	}
 	// cli上行透传
 	g_ring_trans = make_ring(s_trans_ring_name, s_trans_ring_size);
@@ -636,8 +631,6 @@ void tgg_master_uninit()
 		rte_mempool_free(g_mempool_bwshare[i]);
 		g_mempool_bwshare[i] = NULL;
 
-		rte_hash_free(g_expt_cid_hash[i]);
-		g_expt_cid_hash[i] = NULL;
 	}
 	rte_memzone_free(g_lock_zone);
 	g_lock_zone = NULL;
@@ -870,11 +863,6 @@ void tgg_bwprc_init(int bwcount)
 		char idx_hash_name[128] = {0};
 		sprintf(idx_hash_name, "%s_%d", s_idx_hash_name, i);
 		g_idx_hash[i] = get_hash_byname(idx_hash_name);
-
-		char expt_cid_hash_name[128] = {0};
-		sprintf(expt_cid_hash_name, "%s_%d", s_expt_cid_hash_name, i);
-		g_expt_cid_hash[i] = get_hash_byname(expt_cid_hash_name);
-
 	}
 	tgg_secondary_init();
 	g_bwprc_zone = find_memzone(bwprc_zone_name);
