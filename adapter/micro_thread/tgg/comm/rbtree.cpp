@@ -7,8 +7,8 @@
 // extern struct rte_mempool* g_mempool_gid_rbnode = NULL;
 
 // 创建红黑树
-tgg_rbtree* tgg_rbtree_create(void) {
-    tgg_rbtree *tree = (tgg_rbtree*)dpdk_rte_malloc(sizeof(tgg_rbtree));
+tgg_rbtree* tgg_rbtree_create(uint64_t fdidcid) {
+    tgg_rbtree *tree = (tgg_rbtree*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_rbtree));
     if (!tree) return NULL;
     
     // 创建哨兵节点
@@ -16,10 +16,10 @@ tgg_rbtree* tgg_rbtree_create(void) {
     //     free(tree);
     //     return NULL;
     // }
-    tree->nil = (tgg_rb_node*)dpdk_rte_malloc(sizeof(tgg_rb_node));
+    tree->nil = (tgg_rb_node*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_rb_node));
 
     if (!tree->nil) {
-        dpdk_rte_free(tree);
+        dpdk_rte_free(__FILE__, __LINE__, tree);
         return NULL;
     }
     
@@ -40,7 +40,7 @@ void destroy_nodes(tgg_rb_node *node, tgg_rb_node *nil) {
     if (node == nil) return;
     destroy_nodes(node->left, nil);
     destroy_nodes(node->right, nil);
-    dpdk_rte_free(node);
+    dpdk_rte_free(__FILE__, __LINE__, node);
 }
 
 // 销毁红黑树
@@ -49,8 +49,8 @@ void tgg_rbtree_destroy(tgg_rbtree *tree) {
     
     
     destroy_nodes(tree->root, tree->nil);
-    dpdk_rte_free(tree->nil);
-    dpdk_rte_free(tree);
+    dpdk_rte_free(__FILE__, __LINE__, tree->nil);
+    dpdk_rte_free(__FILE__, __LINE__, tree);
 }
 
 // 左旋
@@ -166,7 +166,7 @@ bool tgg_rbtree_insert(tgg_rbtree *tree, int64_t fdidcid) {
     }
     
     // 创建新节点
-    tgg_rb_node *z = (tgg_rb_node*)dpdk_rte_malloc(sizeof(tgg_rb_node));
+    tgg_rb_node *z = (tgg_rb_node*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_rb_node));
     // if(high_freq_malloc(g_mempool_gid_rbnode, (void**)&z, sizeof(tgg_rb_node)) < 0) {
     //     return false;
     // }
@@ -376,7 +376,7 @@ bool tgg_rbtree_delete(tgg_rbtree *tree, int64_t fdidcid) {
     if (!y_original_red) {
         rb_delete_fixup(tree, x);
     }
-    dpdk_rte_free(z);
+    dpdk_rte_free(__FILE__, __LINE__, z);
 
     // free(z);
     return true;
@@ -398,21 +398,51 @@ void tgg_rbtree_getall_value(tgg_rbtree *tree, tgg_rb_node *node, std::vector<in
     tgg_rbtree_getall_value(tree, node->right, vec);
 }
 
-int tgg_rbtree_getall_value(tgg_rbtree *tree, tgg_rb_node *node, tgg_fd_list* lst)
+int tgg_rbtree_getall_value(tgg_rbtree *tree, tgg_rb_node *node, tgg_fd_list** lst_head)
 {
-    if (node == tree->nil) return 0;
-    tgg_rbtree_getall_value(tree, node->left, lst);
-    tgg_fd_list* data = (tgg_fd_list*)dpdk_rte_malloc(sizeof(tgg_fd_list));
-    if (!data) {
+    if (node == tree->nil || node == NULL) {
+        return 0;
+    }
+    
+    // 递归遍历左子树
+    if (node->left != tree->nil && node->left != NULL) {
+        if (tgg_rbtree_getall_value(tree, node->left, lst_head) != 0) {
+            return -1;
+        }
+    }
+    
+    // 创建新节点
+    tgg_fd_list* new_node = (tgg_fd_list*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_fd_list));
+    if (!new_node) {
         LOG_ERROR("malloc for get rbtree value failed.");
         return -1;
     }
-    data->next = lst;
-    lst = data;
-    tgg_rbtree_getall_value(tree, node->right, lst);
+    new_node->fdidcid = node->fdidcid;
+    new_node->next = NULL;
+    
+    // 将新节点添加到链表尾部（避免逆序）
+    if (*lst_head == NULL) {
+        *lst_head = new_node;
+    } else {
+        // tgg_fd_list* current = *lst_head;
+        // while (current->next != NULL) {
+        //     current = current->next;
+        // }
+        // current->next = new_node;
+
+        new_node->next = *lst_head;
+        *lst_head = new_node;
+    }
+    
+    // 递归遍历右子树
+    if (node->right != tree->nil && node->right != NULL) {
+        if (tgg_rbtree_getall_value(tree, node->right, lst_head) != 0) {
+            return -1;
+        }
+    }
+    
     return 0;
 }
-
 
 // 获取节点数量
 static int rb_size(tgg_rb_node *node, tgg_rb_node *nil) {

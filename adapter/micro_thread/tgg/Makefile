@@ -90,12 +90,12 @@ clean:
 MASTER_OBJ = dpdk_init.o master_reactor.o reactor/reactor.o reactor/timeout_wheel.o \
 			tgg_comm/tgg_common.o tgg_comm/tgg_bwcomm.o tgg_comm/tgg_bw_cache.o comm/rbtree.o comm/log.o\
 			comm/Websocket.o comm/Encrypt.o tgg_comm/WsConsumer.o tgg_comm/tgg_transport.o\
-			tgg_comm/tgg_lock.o comm/RWIni.o tgg_comm/tgg_conf.o comm/common.o tgg_comm/tgg_data_opt.o \
+			tgg_comm/tgg_lock.o comm/RWIni.o tgg_comm/tgg_conf.o comm/common.o \
 			tgg_comm/tgg_master_timers.o tgg_comm/tgg_ip_filter.o comm/picohttpparser.o comm/MurmurHash3.o
 
 
 CLIPRC_OBJ = cliprc.o dpdk_init.o tgg_comm/tgg_bw_cache.o comm/rbtree.o comm/log.o\
-				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
+				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o \
 				tgg_comm/tgg_lock.o comm/Websocket.o comm/Encrypt.o \
 				tgg_comm/WsConsumer.o tgg_comm/tgg_conf.o comm/common.o \
 				comm/RWIni.o tgg_comm/tgg_cliprc.o tgg_comm/tgg_transport.o \
@@ -110,7 +110,7 @@ BWSERVER_OBJ = bwprc.o dpdk_init.o cmd/CmdProcessor.o tgg_comm/tgg_bw_cache.o co
 				comm/picohttpparser.o comm/MurmurHash3.o cmd/ShareCmdProcessor.o
 
 REGISTER_OBJ = register.o dpdk_init.o tgg_comm/tgg_bw_cache.o comm/rbtree.o comm/log.o\
-				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o tgg_comm/tgg_data_opt.o \
+				tgg_comm/tgg_bwcomm.o tgg_comm/tgg_common.o \
 				tgg_comm/tgg_lock.o \
 				tgg_comm/tgg_conf.o tgg_comm/tgg_register.o \
 				comm/RWIni.o comm/common.o comm/picohttpparser.o comm/MurmurHash3.o

@@ -22,7 +22,7 @@ int tgg_del_fd4gid(uint64_t gid, int64_t fdidcid);
 int tgg_get_fdsbygid(const char* gid, std::vector<int64_t>& lst_fd);
 int tgg_get_fdsbygid(uint64_t gid, std::vector<int64_t>& lst_fd);
 typedef struct st_tgg_fd_list tgg_fd_list;
-int tgg_get_fdsbygid(uint64_t gid, tgg_fd_list* lst_fd);
+int tgg_get_fdsbygid(uint64_t gid, tgg_fd_list** lst_fd);
 int tgg_get_cidcount_bygid(uint64_t gid);
 // 获取所有在线的分组
 int tgg_get_allonlinegids(std::vector<uint64_t>& lst_gid);
@@ -61,7 +61,7 @@ int tgg_del_gid_cidgid(int64_t cid, const char* gid);
 void tgg_del_gid_cidgid(const char* gid);
 
 // 返回格式  list<string(uid)>
-int tgg_get_gidsbyuid(const char* uid, std::set<std::string>& lst_gid);
+// int tgg_get_gidsbyuid(const char* uid, std::set<std::string>& lst_gid);
 // void tgg_iterprint_gidsbyuid(const char* uid = NULL);
 
 

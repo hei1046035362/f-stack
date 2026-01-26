@@ -203,7 +203,7 @@ static void deal_master_cmd_dequeue(struct rte_timer* tm, void* arg)
                     LOG_WARNING("unknown cmd:%d", cmd->cmd);
                     break;
             }
-            dpdk_rte_free(cmd);
+            dpdk_rte_free(__FILE__, __LINE__, cmd);
         }
     } else {
         // primary执行完成后会设置标志，sync_ip_filter函数内部会根据标记判断是否执行同步

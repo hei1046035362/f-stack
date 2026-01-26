@@ -21,7 +21,7 @@ typedef struct st_tgg_rbtree {
 } tgg_rbtree;
 
 // 初始化红黑树
-tgg_rbtree* tgg_rbtree_create(void);
+tgg_rbtree* tgg_rbtree_create(uint64_t fdidcid);
 
 // 销毁红黑树
 void tgg_rbtree_destroy(tgg_rbtree *tree);
@@ -53,7 +53,7 @@ void tgg_rbtree_inorder_walk(tgg_rbtree *tree, tgg_rb_node *node);
 void tgg_rbtree_getall_value(tgg_rbtree *tree, tgg_rb_node *node, std::vector<int64_t>& vec);
 
 typedef struct st_tgg_fd_list tgg_fd_list;
-int tgg_rbtree_getall_value(tgg_rbtree *tree, tgg_rb_node *node, tgg_fd_list* lst);
+int tgg_rbtree_getall_value(tgg_rbtree *tree, tgg_rb_node *node, tgg_fd_list** lst);
 
 // 获取节点数量
 int tgg_rbtree_size(tgg_rbtree *tree);

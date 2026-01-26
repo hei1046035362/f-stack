@@ -7,15 +7,13 @@
 #include "tgg_comm/tgg_bwcomm.h"
 #include "tgg_comm/tgg_conf.h"
 
-
 extern int g_prc_id;
-
-
+extern struct rte_mempool* g_mempool_bwshare[MAX_LCORE_COUNT];
 
 int CmdTggGateway::ReloadIpFilter()
 {
     LOG_INFO("ExecCmd reload ip filter...");
-    tgg_send_master_data* data = (tgg_send_master_data*)dpdk_rte_malloc(sizeof(tgg_send_master_data));
+    tgg_send_master_data* data = (tgg_send_master_data*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_send_master_data));
     if(!data) {
         LOG_ERROR("Enqueue master cmd failed, malloc data error.");
         return -1;
@@ -23,7 +21,7 @@ int CmdTggGateway::ReloadIpFilter()
     data->cmd = CMD_IP_FILTER_RELOAD;
     if(tgg_enqueue_master(data) < 0) {
         LOG_ERROR("Enqueue master cmd failed.");
-        dpdk_rte_free(data);
+        dpdk_rte_free(__FILE__, __LINE__, data);
         return -1;
     }
     LOG_INFO("reload ip filter success.");
@@ -33,7 +31,7 @@ int CmdTggGateway::ReloadIpFilter()
 int CmdTggGateway::UpdateRealWorkers()
 {
     LOG_INFO("ExecCmd UpdateRealWorkers...");
-    tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(sizeof(tgg_bwfdx_data));
+    tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_bwfdx_data));
     if(!bwfdxdata) {
         LOG_ERROR("malloc bwfdxdata failed.");
         return -1;
@@ -42,7 +40,7 @@ int CmdTggGateway::UpdateRealWorkers()
     bwfdxdata->cmd = BWFDX_CMD_UPDATEALL;
     if(tgg_enqueue_bwfdx(bwfdxdata)) {
         LOG_ERROR("Enqueue bwfdxdata failed.");
-        dpdk_rte_free(bwfdxdata);
+        dpdk_rte_free(__FILE__, __LINE__, bwfdxdata);
     }
     LOG_INFO("UpdateRealWorkers success.");
     return 0;
@@ -51,7 +49,7 @@ int CmdTggGateway::UpdateRealWorkers()
 int CmdTggGateway::CleanupAllBwHash()
 {
     LOG_INFO("ExecCmd CleanupAllBwHash...");
-    tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(sizeof(tgg_bwfdx_data));
+    tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_bwfdx_data));
     if(!bwfdxdata) {
         LOG_ERROR("malloc bwfdxdata failed.");
         return -1;
@@ -60,7 +58,7 @@ int CmdTggGateway::CleanupAllBwHash()
     bwfdxdata->cmd = BWFDX_CMD_CLEAN_BWHASH;
     if(tgg_enqueue_bwfdx(bwfdxdata)) {
         LOG_ERROR("Enqueue bwfdxdata failed.");
-        dpdk_rte_free(bwfdxdata);
+        dpdk_rte_free(__FILE__, __LINE__, bwfdxdata);
     }
     LOG_INFO("CleanupAllBwHash success.");
     return 0;
@@ -395,7 +393,7 @@ int CmdTggGateway::PrintWorkerCount()
 int CmdTggGateway::PrintRealAllWorkers()
 {
     LOG_INFO("ExecCmd PrintRealAllWorkers...");
-    tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(sizeof(tgg_bwfdx_data));
+    tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_bwfdx_data));
     if(!bwfdxdata) {
         LOG_ERROR("malloc bwfdxdata failed.");
         return -1;
@@ -404,7 +402,7 @@ int CmdTggGateway::PrintRealAllWorkers()
     bwfdxdata->cmd = BWFDX_CMD_PRINTWORKERS;
     if(tgg_enqueue_bwfdx(bwfdxdata)) {
         LOG_ERROR("Enqueue bwfdxdata failed.");
-        dpdk_rte_free(bwfdxdata);
+        dpdk_rte_free(__FILE__, __LINE__, bwfdxdata);
     }
     LOG_INFO("PrintRealAllWorkers success.");
     return 0;
@@ -413,7 +411,7 @@ int CmdTggGateway::PrintRealAllWorkers()
 int CmdTggGateway::PrintRealWorkerCount()
 {
     LOG_INFO("ExecCmd PrintRealWorkerCount...");
-    tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(sizeof(tgg_bwfdx_data));
+    tgg_bwfdx_data* bwfdxdata = (tgg_bwfdx_data*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_bwfdx_data));
     if(!bwfdxdata) {
         LOG_ERROR("malloc bwfdxdata failed.");
         return -1;
@@ -422,7 +420,7 @@ int CmdTggGateway::PrintRealWorkerCount()
     bwfdxdata->cmd = BWFDX_CMD_PRINTWORKERCOUNT;
     if(tgg_enqueue_bwfdx(bwfdxdata)) {
         LOG_ERROR("Enqueue bwfdxdata failed.");
-        dpdk_rte_free(bwfdxdata);
+        dpdk_rte_free(__FILE__, __LINE__, bwfdxdata);
     }
     LOG_INFO("PrintRealWorkerCount success.");
     return 0;
@@ -593,16 +591,40 @@ int CmdTggGateway::CheckCidAvaliable()
 int CmdTggGateway::PrintMemStats()
 {
     LOG_INFO("ExecCmd reload ip filter...");
-    tgg_send_master_data* data = (tgg_send_master_data*)dpdk_rte_malloc(sizeof(tgg_send_master_data));
+    tgg_send_master_data* data = (tgg_send_master_data*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_send_master_data));
     if(!data) {
         LOG_ERROR("Enqueue master cmd failed, malloc data error.");
-        return -1;
+    } else {
+        data->cmd = CMD_PRINT_DATA_STATS;
+        if(tgg_enqueue_master(data) < 0) {
+            LOG_ERROR("Enqueue master cmd failed.");
+            dpdk_rte_free(__FILE__, __LINE__, data);
+        }
     }
-    data->cmd = CMD_PRINT_DATA_STATS;
-    if(tgg_enqueue_master(data) < 0) {
-        LOG_ERROR("Enqueue master cmd failed.");
-        dpdk_rte_free(data);
-        return -1;
+    for (int i = 0; i < int(TggConfigure::getInstance()->get_bwsvr_count()); ++i)
+    {
+        if(i == this->prc_id) {
+            print_mem_statistics();
+            continue;
+        }
+        bw_share_qdata* qdata = NULL;
+        if (!g_mempool_bwshare[i] || high_freq_malloc(g_mempool_bwshare[i], (void**)&qdata, sizeof(bw_share_qdata)) < 0) {
+            LOG_ERROR("format gid to prc_id[%d] failed,malloc share command failed.", i);
+            continue;
+        }
+        qdata->prc_id = this->prc_id;
+        qdata->fd = this->fd;
+        qdata->cmd = CMD_PRINT_MEM_STATS;
+        qdata->snddata_len = 0;
+        qdata->gids = NULL;
+        qdata->uids = NULL;
+        qdata->except_cid = NULL;
+        if(tgg_enqueue_bwshare(i, qdata) < 0) {
+            LOG_ERROR("Enqueue bwshare[%d] PrintMemStats cmd failed.", i);
+            high_freq_free(g_mempool_bwshare[i], qdata, sizeof(bw_share_qdata));
+            continue;
+        }
+
     }
     LOG_INFO("print mem stats success.");
     return 0;

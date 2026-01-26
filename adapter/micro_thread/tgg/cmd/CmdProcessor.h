@@ -32,8 +32,8 @@ protected:
 	// -1 退出， 0 其他进程处理，1本进程处理
 	int AddGid4Prcid(const char* gid, std::map<int, tgg_vhash_list*>& mapGid);
 
-	int PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>& mapGid,
-	 uint32_t cid = 0, const std::string& data = "", const std::set<uint32_t>& setExcept = CmdBaseProcessor::GetEmptySet());
+	int PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>& mapGid, bool wait = false,
+	 uint32_t cid = 0, const std::string_view data = "", const std::set<uint32_t>& setExcept = CmdBaseProcessor::GetEmptySet());
 
 	int WaitSharecmdRslt(std::vector<int64_t>& lst_fds);
 
@@ -267,6 +267,20 @@ public:
     int ExecCmd() { return 0; }
 };
 
+class CmdFreeClientSession : public CmdBaseProcessor {
+private:
+	uint32_t cid;
+public:
+
+	CmdFreeClientSession(int prc_id, int fd, void* data, const rapidjson::Document& jdata):CmdBaseProcessor(prc_id, fd, data, jdata) {}
+	~CmdFreeClientSession() {}
+    int ExecCmd();
+    void SetCid(uint32_t cid) {this->cid = cid;}
+};
+
+
 int exec_cmd_processor(int prc_id, int fd, void* data);
+
+int exec_free_session(int prc_id, int fd, uint32_t cid);
 
 #endif // __CMD_PROCESSOR_H__

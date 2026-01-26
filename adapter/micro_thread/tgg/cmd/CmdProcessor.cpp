@@ -61,7 +61,7 @@ void co_msleep(int ms) {
     pf.fd = -1;  // 关键：使用无效的fd
     co_poll(co_get_epoll_ct(), &pf, 1, ms);
 }
-static void clean_vhashlist_map(std::map<int, tgg_vhash_list*> mapGid)
+static void clean_vhashlist_map(std::map<int, tgg_vhash_list*>& mapGid)
 {
     auto it = mapGid.begin();
     while(it != mapGid.end()) {
@@ -90,38 +90,50 @@ int CmdBaseProcessor::AddGid4Prcid(const char* gid, std::map<int, tgg_vhash_list
     uint64_t gidhash = murmurhash3_64(gid, strlen(gid), tgg_get_seed());
     int calc_id = gidhash % TggConfigure::getInstance()->get_bwsvr_count();
     if (calc_id != this->prc_id) {
-        tgg_vhash_list* gids = (tgg_vhash_list*)dpdk_rte_malloc(sizeof(tgg_vhash_list));
+        tgg_vhash_list* gids = (tgg_vhash_list*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_vhash_list));
         if(!gids) {
-            LOG_ERROR("Select: malloc for prcid[%d] gid[%s] vhash list failed.", calc_id, gid);
+            LOG_ERROR("malloc for prcid[%d] gid[%s] vhash[%llu] list failed.", calc_id, gid, gidhash);
             clean_vhashlist_map(mapGid);
             return -1;
         }
+        gids->vhash = gidhash;
+        gids->next = NULL;
         auto it = mapGid.find(calc_id);
         if (it == mapGid.end()) {
             mapGid[calc_id] = gids;
         } else {
-            tgg_vhash_list* tmp = it->second;
-            while(tmp->next) tmp = tmp->next;
-            tmp->next = gids;
+            gids->next = it->second;
+            it->second = gids;
+            // tgg_vhash_list* tmp = it->second;
+            // while(tmp->next) tmp = tmp->next;
+            // tmp->next = gids;
         }
-        gids->vhash = gidhash;
-        gids->next = NULL;
+        LOG_DEBUG("share gid[%s] hash[%llu] for prcid:%d", gid, gidhash, calc_id);
         return 0;// 不属于本进程的处理的gid都通过队列发给相应的进程
     }
     return 1;
 }
 
-int CmdBaseProcessor::PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>& mapGid,
-        uint32_t cid, const std::string& data, const std::set<uint32_t>& setExcept)
+int CmdBaseProcessor::PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>& mapGid, bool wait,
+        uint32_t cid, const std::string_view data, const std::set<uint32_t>& setExcept)
 {
     int tasktime = get_system_ms() & 0x7fffffff;
-    if(tgg_add_bwfdx_sharecmd(this->prc_id, this->fd, mapGid.size(), tasktime) < 0) return -1;
+    int try_times = 50;
+    int ret = 0;
+    if(wait && tgg_add_bwfdx_sharecmd(this->prc_id, this->fd, mapGid.size(), tasktime) < 0) {
+        for (std::map<int, tgg_vhash_list*>::iterator itProc = mapGid.begin(); 
+            itProc != mapGid.end(); itProc++)
+        {
+            iter_del_list<tgg_vhash_list>(itProc->second);
+        }
+        return -1;
+    }
     for (std::map<int, tgg_vhash_list*>::iterator itProc = mapGid.begin(); 
         itProc != mapGid.end(); itProc++)
     {
         tgg_list_cid* cids = NULL;
         bw_share_qdata* qdata = NULL;
-        if (high_freq_malloc(g_mempool_bwshare[this->prc_id], (void**)&qdata, sizeof(bw_share_qdata)) < 0) {
+        if (high_freq_malloc(g_mempool_bwshare[itProc->first], (void**)&qdata, sizeof(bw_share_qdata)) < 0) {
             LOG_ERROR("format gid to prc_id[%d] failed,malloc share command failed.", itProc->first);
             // tgg_clean_bwfdx_sharecmd(this->prc_id, this->fd);
             goto push_share_cmd_failed;
@@ -133,14 +145,14 @@ int CmdBaseProcessor::PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>&
         qdata->cid = cid;
         qdata->time = tasktime;
         if(!data.empty()) {// 需要发送数据时，把data传过去
-            qdata->snddata = (char*)dpdk_rte_malloc(data.length());
+            qdata->snddata = (char*)dpdk_rte_malloc(__FILE__, __LINE__, data.size());
             if(!qdata->snddata) {
                 LOG_ERROR("malloc for prc_id[%d] send data failed", itProc->first);
                 // tgg_clean_bwfdx_sharecmd(this->prc_id, this->fd);
                 goto push_share_cmd_failed;
             }
-            memcpy(qdata->snddata, data.c_str(), data.length());
-            qdata->snddata_len = data.length();
+            memcpy(qdata->snddata, data.data(), data.size());
+            qdata->snddata_len = data.size();
         } else {
             qdata->snddata_len = 0;
         }
@@ -149,7 +161,7 @@ int CmdBaseProcessor::PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>&
         } else {
             for (auto itExcept : setExcept)
             {
-                cids = (tgg_list_cid*)dpdk_rte_malloc(sizeof(tgg_list_cid));
+                cids = (tgg_list_cid*)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_list_cid));
                 if(!cids) {
                     LOG_ERROR("malloc for prcid[%d] except cid[%u] node failed.", itProc->first, itExcept);
                     goto push_share_cmd_failed;
@@ -165,38 +177,48 @@ int CmdBaseProcessor::PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>&
             }
         }
         qdata->uids = NULL;// 后续看情况是否需要
-        if(tgg_enqueue_bwshare(qdata->prc_id, qdata) < 0) {
-            LOG_ERROR("format gid to prc_id[%d] failed, enqueue bwshare failed.", itProc->first);
-        } else {
+        try_times = 50;
+        while((ret = tgg_enqueue_bwshare(itProc->first, qdata)) < 0 && try_times-- > 0) {
+            co_msleep(2);
+        } 
+        if (ret >= 0){
+            LOG_DEBUG("pushed command[%d] to prcid[%d]", cmd, itProc->first);
             continue;
+        } else {
+            LOG_ERROR("format gid to prc_id[%d] failed, enqueue bwshare failed.", itProc->first);
         }
 push_share_cmd_failed:
-        do {// 继续迭代删除后续没有入队列的数据才可退出，防止内存泄漏
+        tgg_clean_bw_share_qdata(itProc->first, qdata);
+        do {// 继续迭代删除后续没有入队列的数据才可退出，防止内存泄漏，前面的已经加入了任务队列，不能删除
             iter_del_list<tgg_vhash_list>(itProc->second);
             itProc++;
         } while(itProc != mapGid.end());
-        tgg_clean_bw_share_qdata(this->prc_id, qdata);
         tgg_clean_bwfdx_sharecmd(this->prc_id, this->fd);
         return -1;
     }
+    // clean_vhashlist_map(mapGid);
     return 0;
 }
 
 int CmdBaseProcessor::WaitSharecmdRslt(std::vector<int64_t>& lst_fds)
 {
-    int try_times = 100;// 最多等待1s中，还没有执行完，就不执行了
+    int try_times = 500;// 最多等待1s中，还没有执行完，就不执行了
+    int ret = 0;
     lst_fds.reserve(RESERVED_SIZE_FOR_GID_CIDS);
-    while(tgg_get_bwfdx_fdid_result(this->prc_id, this->fd, lst_fds) < 0 && try_times-- > 0) {
+    while((ret = tgg_get_bwfdx_fdid_result(this->prc_id, this->fd, lst_fds)) < 0 && try_times-- > 0) {
         if(tgg_get_bwfx_sharecmd_halt(this->prc_id, this->fd)) {// 任务被终止
             LOG_ERROR("wait result faild, prc[%d] fd[%d] command halt.", this->prc_id, this->fd);
+            tgg_clean_bwfdx_sharecmd(this->prc_id, this->fd);
             return -1;
         }
-        co_msleep(10);
+        co_msleep(2);
     }
-    if(try_times <= 0) {
+    if(ret < 0) {
         LOG_ERROR("wait result faild, prc[%d] fd[%d] try times[%d].", this->prc_id, this->fd, 100 - try_times);
+        tgg_clean_bwfdx_sharecmd(this->prc_id, this->fd);
         return -1;
     }
+    tgg_clean_bwfdx_sharecmd(this->prc_id, this->fd);
     return 0;
 }
 
@@ -372,35 +394,32 @@ int CmdSendToGroup::ExecCmd()
 
     if (ext_data.HasMember("group") && ext_data["group"].IsArray()) {
         const rapidjson::Value& groupArray = ext_data["group"];
-        std::map<int, tgg_vhash_list*> mapGid;
         std::vector<int64_t> lstAllFds;
         lstAllFds.reserve(RESERVED_SIZE_FOR_GID_CIDS);
         for (rapidjson::SizeType i = 0; i < groupArray.Size(); i++) {
+            std::map<int, tgg_vhash_list*> mapGid;
             std::vector<int64_t> lstFds;
             const char* gid = groupArray[i].GetString();
             int ret = AddGid4Prcid(gid, mapGid);
             if (ret < 0) {
-                LOG_ERROR("Select: add gid 4 prcid failed.");
+                LOG_ERROR("SendToGroup: add gid 4 prcid failed.");
                 break;
             }
             else if (ret == 0) {
+                if(PushSharecmd(CMD_SEND_TO_GROUP, mapGid, false, 0, body, setExcept) < 0) {
+                    LOG_ERROR("SendToGroup: push share command failed.");
+                    return -1;
+                }
                 continue;
             }
             if (tgg_get_fdsbygid(gid, lstFds) >= 0) {
                 // 批量过滤
                 for (size_t j = 0; j < lstFds.size(); j++) {
                     // if (tgg_check_expt_cid_exist(prc_id, cid_cache[j]) < 0) {
-                    if (setExcept.size() == 0 || setExcept.find(GET_CID_FDCID_MASK(lstFds[j])) != setExcept.end()) {
+                    if (setExcept.size() == 0 || setExcept.find(GET_CID_FDCID_MASK(lstFds[j])) == setExcept.end()) {
                         lstAllFds.push_back(lstFds[j]);
                     }
                 }
-            }
-        }
-        if (mapGid.size() > 0)
-        {
-            if(PushSharecmd(CMD_SELECT, mapGid, 0, "", setExcept) < 0) {
-                LOG_ERROR("Select: push share command failed.");
-                return -1;
             }
         }
 
@@ -433,7 +452,7 @@ int CmdKick::ExecCmd()
         LOG_INFO("Kick: cmd executed failed, get fdidcid[%ld] by cid[%u] failed.", fdidcid, cid);
         return -1;
     }
-    tgg_free_session(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), cid);
+    exec_free_session(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), cid);
     LOG_INFO("Kick: cmd executed cid[%u].", cid);
     return 0;
 }
@@ -444,7 +463,11 @@ int CmdDestroy::ExecCmd()
     int raw = true;//jdata["flag"].get<std::int32_t>() & GatewayProtocal::FLAG_NOT_CALL_ENCODE;
     Send2Client(cid, "destroy", FD_WRITE|FD_CLOSE, !raw);// TODO 是否要立即销毁，不发送ws的关闭帧(去掉FD_WRITE就行)了
     int64_t fdidcid = tgg_get_fdbycid(cid);
-    tgg_free_session(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), cid);
+    if(fdidcid <= 0) {
+        LOG_INFO("Destroy: cmd executed failed, get fdidcid[%ld] by cid[%u] failed.", fdidcid, cid);
+        return -1;
+    }
+    exec_free_session(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), cid);
     LOG_INFO("Destroy: cmd executed cid[%u].", cid);
     return 0;
 }
@@ -513,13 +536,28 @@ void CmdSelect::FormatResult(const std::vector<int64_t>& lst_fd, int mask, rapid
             continue;
         }
         
+        uint32_t cid = GET_CID_FDCID_MASK(*itFd);
+        if(cid == 0) {
+            LOG_WARNING("invalid cid, fdidcid[%lld].", *itFd);
+            itFd++;
+            continue;
+        }
+
         int coreid = GET_COREID_FDCID_MASK(*itFd);
         int fd = GET_FD_FDCID_MASK(*itFd);
-        uint32_t cid = GET_CID_FDCID_MASK(*itFd);
         std::string scid = std::to_string(cid);
-        
+
         // 检查并创建 CID 对象（使用 rapidjson API）
         if(!result.HasMember(scid.c_str())) {
+            if(mask == 0) {
+                result.AddMember(
+                    rapidjson::Value(scid.c_str(), allocator).Move(),
+                    rapidjson::Value(rapidjson::kNullType),
+                    allocator
+                );
+                itFd++;
+                continue;
+            }        
             rapidjson::Value cidObj(rapidjson::kObjectType);
             result.AddMember(
                 rapidjson::Value(scid.c_str(), allocator).Move(),
@@ -529,37 +567,72 @@ void CmdSelect::FormatResult(const std::vector<int64_t>& lst_fd, int mask, rapid
         }
         
         rapidjson::Value& cidObj = result[scid.c_str()];
-        std::string uid = tgg_get_cli_uid(coreid, fd);
-        
-        if(uid.empty()) {
-            LOG_WARNING("uid for fd[%d] not exist.", fd);
-            itFd++;
-            continue;
+
+        // 处理 session 字段
+        if(mask & FIELD_CID) {
+            std::string session = tgg_get_cli_reserved(coreid, fd);
+            if (!cidObj.HasMember("session")) {
+                cidObj.AddMember(
+                    "session",
+                    rapidjson::Value(session.c_str(), allocator).Move(),
+                    allocator
+                );
+            } else {
+                LOG_WARNING("cid[%u] session already exist.", cid);
+            }
         }
-        
+
         // 处理 GROUP ID 字段
         if(mask & FIELD_GID) {
-            std::set<std::string> set_gids;
-            if (!tgg_get_gidsbyuid(uid.c_str(), set_gids)) {
-                if (!cidObj.HasMember("groups")) {
-                    rapidjson::Value groups(rapidjson::kArrayType);
-                    cidObj.AddMember("groups", groups, allocator);
+            std::vector<std::string> vec_gids;
+            if (!tgg_get_gidsbycid(cid, vec_gids)) {
+                rapidjson::Value* pGroups = nullptr;
+                if (cidObj.HasMember("groups")) {
+                    pGroups = &cidObj["groups"];
+                    // 确保是对象类型
+                    if (!pGroups->IsObject()) {
+                        pGroups->SetObject();
+                    }
                 } else {
-                    LOG_WARNING("cid[%u] groups already exist.", cid);
+                    rapidjson::Value groups(rapidjson::kObjectType);
+                    cidObj.AddMember("groups", groups, allocator);
+                    pGroups = &cidObj["groups"];
                 }
-                
-                rapidjson::Value& groupsArray = cidObj["groups"];
-                for (auto& gid : set_gids) {
-                    groupsArray.PushBack(
-                        rapidjson::Value(gid.c_str(), allocator).Move(),
-                        allocator
-                    );
+        
+                rapidjson::Value& groupsObj = *pGroups;
+        
+                // 添加/更新所有GID
+                for (auto& gidStr : vec_gids) {
+                    // 转换GID
+                    char* endptr = nullptr;
+                    uint64_t gid = strtoull(gidStr.c_str(), &endptr, 10);
+                    if (*endptr != '\0') {
+                        LOG_WARNING("Invalid GID format: %s", gidStr.c_str());
+                        continue;
+                    }
+
+                    // 创建键（字符串形式）
+                    std::string keyStr = std::to_string(gid);
+                    rapidjson::Value key(keyStr.c_str(), allocator);
+
+                    // 创建值（字符串）
+                    rapidjson::Value value(gidStr.c_str(), allocator);
+
+                    // 添加到对象（覆盖已存在的）
+                    groupsObj.AddMember(key, value, allocator);
                 }
             }
         }
         
         // 处理 UID 字段
         if(mask & FIELD_UID) {
+            std::string uid = tgg_get_cli_uid(coreid, fd);
+            
+            if(uid.empty()) {
+                LOG_WARNING("uid for fd[%d] not exist.", fd);
+                itFd++;
+                continue;
+            }
             if (!cidObj.HasMember("uid")) {
                 cidObj.AddMember(
                     "uid",
@@ -609,15 +682,19 @@ int CmdSelect::ExecCmd()
             const rapidjson::Value& fieldsArray = jext_data["fields"];
             for (rapidjson::SizeType i = 0; i < fieldsArray.Size(); i++) {
                 fields.push_back(fieldsArray[i].GetString());
+                // LOG_INFO("SELECT result should contain field:%s", fieldsArray[i].GetString());
             }
         }
 
         // 设置字段掩码
         int mask = 0;
         for (auto& it : fields) {
-            if (it == "cid") mask |= FIELD_CID;
+            if (it == "session") mask |= FIELD_CID;
             else if (it == "uid") mask |= FIELD_UID;
-            else if (it == "gid") mask |= FIELD_GID;
+            else if (it == "groups") mask |= FIELD_GID;
+        }
+        if(mask == 0) {
+            LOG_WARNING("no valid fields found, ext_data:%s", ext_data.c_str());
         }
         // 处理 where 条件
         result.SetObject();
@@ -645,8 +722,9 @@ int CmdSelect::ExecCmd()
                                     LOG_ERROR("Select: add gid 4 prcid failed.");
                                     return -1;
                                 }
-                                else if (ret == 0)
+                                else if (ret == 0) {
                                     continue;
+                                }
                                 if (tgg_get_fdsbygid(item, lst_fd) < 0) continue;
                             } 
                             else if (key == "uid") {
@@ -676,17 +754,19 @@ int CmdSelect::ExecCmd()
                 }
             }
             // 发布任务给其他进程处理gid
-            std::vector<int64_t> lst_fds;
-            if(PushSharecmd(CMD_SELECT, mapGid) < 0) {
-                LOG_ERROR("Select: push share command failed.");
-                return -1;
-            }
-            if(WaitSharecmdRslt(lst_fds) < 0) {
-                LOG_ERROR("Select: wait share command result failed.");
-                return -1;
-            }
-            if (!lst_fds.empty()) {
-                FormatResult(lst_fds, mask, result);
+            if(mapGid.size() > 0) {
+                std::vector<int64_t> lst_fds;
+                if(PushSharecmd(CMD_SELECT, mapGid, true) < 0) {
+                    LOG_ERROR("Select: push share command failed.");
+                    return -1;
+                }
+                if(WaitSharecmdRslt(lst_fds) < 0) {
+                    LOG_ERROR("Select: wait share command result failed.");
+                    return -1;
+                }
+                if (!lst_fds.empty()) {
+                    FormatResult(lst_fds, mask, result);
+                }
             }
         } 
         else {
@@ -750,7 +830,7 @@ int CmdSetSession::ExecCmd()
         return -1;
     }
     int64_t fdidcid = tgg_get_fdbycid(cid);
-    if(fdidcid < 0) {
+    if(fdidcid <= 0) {
         LOG_ERROR("get fdidcid by cid[%u] failed.", cid);
         return -1;
     }
@@ -899,7 +979,7 @@ int CmdUpdateSession::ExecCmd()
         return -1;
     }
     int64_t fdidcid = tgg_get_fdbycid(cid);
-    if(fdidcid < 0) {
+    if(fdidcid <= 0) {
         LOG_ERROR("get fd by cid[%u] failed.", cid);
         return -1;
     }
@@ -933,8 +1013,8 @@ int CmdIsOnline::ExecCmd()
 {
     rapidjson::Document result;
     uint32_t cid = jdata["connection_id"].GetUint();
-    int clifdx = tgg_get_fdbycid(cid);
-    if(clifdx <= 0) {
+    int64_t fdidcid = tgg_get_fdbycid(cid);
+    if(fdidcid <= 0) {
         result.SetString("0");
     } else {
         result.SetString("1");
@@ -1032,9 +1112,9 @@ int CmdJoinGroup::ExecCmd()
         LOG_ERROR("set session failed, ext_data[%s] and cid[%u] shouldn't be empty.", group.c_str(), cid);
         return -1;
     }
-    int fdid = tgg_get_fdbycid(cid);
-    if(fdid < 0) {
-        LOG_ERROR("get fdid by cid[%u] failed.", cid);
+    int64_t fdidcid = tgg_get_fdbycid(cid);
+    if(fdidcid <= 0) {
+        LOG_ERROR("get fdidcid by cid[%u] failed.", cid);
         return -1;
     }
     std::vector<std::string> vec_group;
@@ -1047,22 +1127,26 @@ int CmdJoinGroup::ExecCmd()
     } else {
         vec_group.push_back(group);
     }
-    std::map<int, tgg_vhash_list*> mapGid;
+    std::string strFdidcid;
+    strFdidcid.resize(sizeof(int64_t));  // 分配4字节空间
+    memcpy(&strFdidcid[0], &fdidcid, sizeof(int64_t));  // 二进制拷贝
     for(auto group_unit : vec_group) {
+        std::map<int, tgg_vhash_list*> mapGid;
         int ret = AddGid4Prcid(group_unit.c_str(), mapGid);
         if (ret < 0) {
             LOG_ERROR("JoinGroup: add gid 4 prcid failed.");
-            mapGid.clear();
             continue;
         } else if (ret == 0){
-            if(PushSharecmd(CMD_JOIN_GROUP, mapGid, cid) < 0) {
+            if(PushSharecmd(CMD_JOIN_GROUP, mapGid, false, cid, strFdidcid) < 0) {
                 LOG_ERROR("JoinGroup: push share command failed.");
             }
-            mapGid.clear();
+            tgg_join_group(group_unit.c_str(), cid, false);
             continue;
+        } else {
+            LOG_DEBUG("JoinGroup: prc[%d] cmd executed cid[%u] gid[%s].", this->prc_id, cid, group_unit.c_str());
+            tgg_join_group(group_unit.c_str(), cid, true);
         }
 
-        tgg_join_group(group_unit.c_str(), cid);
     }
 
     LOG_INFO("JoinGroup: cmd executed cid[%u] gid[%s].", cid, group.c_str());
@@ -1078,9 +1162,9 @@ int CmdLeaveGroup::ExecCmd()
         LOG_ERROR("set session failed, ext_data[%s] and cid[%u] shouldn't be empty.", group.c_str(), cid);
         return -1;
     }
-    int fdid = tgg_get_fdbycid(cid);
-    if(fdid < 0) {
-        LOG_ERROR("get fdid by cid[%u] failed.", cid);
+    int64_t fdidcid = tgg_get_fdbycid(cid);
+    if(fdidcid <= 0) {
+        LOG_ERROR("get fdidcid by cid[%u] failed.", cid);
         return -1;
     }
     std::vector<std::string> vec_group;
@@ -1093,21 +1177,23 @@ int CmdLeaveGroup::ExecCmd()
     } else {
         vec_group.push_back(group);
     }
-    std::map<int, tgg_vhash_list*> mapGid;
+    std::string strFdidcid;
+    strFdidcid.resize(sizeof(int64_t));  // 分配4字节空间
+    memcpy(&strFdidcid[0], &fdidcid, sizeof(int64_t));  // 二进制拷贝
     for(auto group_unit : vec_group) {
+        std::map<int, tgg_vhash_list*> mapGid;
         int ret = AddGid4Prcid(group_unit.c_str(), mapGid);
         if (ret < 0) {
             LOG_ERROR("LeaveGroup: add gid 4 prcid failed.");
-            mapGid.clear();
-            continue;
         } else if (ret == 0) {
-            if(PushSharecmd(CMD_LEAVE_GROUP, mapGid, cid) < 0) {
+            if(PushSharecmd(CMD_LEAVE_GROUP, mapGid, false, cid, strFdidcid) < 0) {
                 LOG_ERROR("LeaveGroup: push share command failed.");
             }
-            mapGid.clear();
-            continue;
+            tgg_exit_group(group_unit.c_str(), cid, false);
+        } else {
+            LOG_DEBUG("LeaveGroup: prc[%d] cmd executed cid[%u] gid[%s].", this->prc_id, cid, group_unit.c_str());
+            tgg_exit_group(group_unit.c_str(), cid, true);
         }
-        tgg_exit_group(group_unit.c_str(), cid);
     }
     LOG_INFO("LeaveGroup: cmd executed cid[%u] gid[%s].", cid, group.c_str());
     return 0;
@@ -1132,19 +1218,23 @@ int CmdUnGroup::ExecCmd()
     } else {
         vec_group.push_back(group);
     }
-    std::map<int, tgg_vhash_list*> mapGid;
     for(auto group_unit : vec_group) {
-        int ret = AddGid4Prcid(group_unit.c_str(), mapGid);
-        if (ret < 0) {
-            LOG_ERROR("UnGroup: add gid 4 prcid failed.");
-            mapGid.clear();
-        } else if (ret == 0) {
-            if(PushSharecmd(CMD_UNGROUP, mapGid) < 0) {
-                LOG_ERROR("UnGroup: push share command failed.");
-            }
-            mapGid.clear();
+        if(group_unit.length() > TGG_GID_LEN) {
+            LOG_ERROR("UnGroup: invalid gid[%s] len[%d].", group_unit.c_str(), group_unit.length());
             continue;
         }
+        std::map<int, tgg_vhash_list*> mapGid;
+        int ret = AddGid4Prcid(group_unit.c_str(), mapGid);
+        if (ret < 0) {
+            LOG_ERROR("UnGroup: add gid[%s] 4 prcid failed.", group_unit.c_str());
+            continue;
+        } else if (ret == 0) {
+            if(PushSharecmd(CMD_UNGROUP, mapGid, false, 0, group_unit.c_str()) < 0) {
+                LOG_ERROR("UnGroup: push share command failed gid[%s].", group_unit.c_str());
+            }
+            continue;
+        }
+        LOG_DEBUG("UnGroup: prc[%d] cmd executed gid[%s].", this->prc_id, group_unit.c_str());
         tgg_del_gid_cidgid(group_unit.c_str());// 这里顺序不能动，得先删除hash<cid,gid>中的部分，才能删除hash<gid,list<fdid>>
         tgg_del_gid(group_unit.c_str());
     }
@@ -1171,7 +1261,7 @@ int CmdGetClientSessionsByGroup::ExecCmd()
         LOG_ERROR("GetClientSessionsByGroup[%s]: add gid 4 prcid failed.", group.c_str());
         return -1;
     } else if (ret == 0) {
-        if(PushSharecmd(CMD_GET_CLIENT_SESSIONS_BY_GROUP, mapGid) < 0) {
+        if(PushSharecmd(CMD_GET_CLIENT_SESSIONS_BY_GROUP, mapGid, true) < 0) {
             LOG_ERROR("GetClientSessionsByGroup[%s]: push share command failed.", group.c_str());
             return -1;
         }
@@ -1180,7 +1270,7 @@ int CmdGetClientSessionsByGroup::ExecCmd()
             return -1;
         }
     } else {
-        if (!tgg_get_fdsbygid(group.c_str(), lst_fds)) {
+        if (tgg_get_fdsbygid(group.c_str(), lst_fds) < 0) {
             LOG_ERROR("GetClientSessionsByGroup: get fds by gid[%s] failed.", group.c_str());
             return -1;
         }
@@ -1232,7 +1322,7 @@ int CmdGetClientCountByGroup::ExecCmd()
         LOG_ERROR("GetClientCountByGroup[%s]: add gid 4 prcid failed.", group.c_str());
         return -1;
     } else if (ret == 0) {
-        if(PushSharecmd(CMD_GET_CLIENT_COUNT_BY_GROUP, mapGid) < 0) {
+        if(PushSharecmd(CMD_GET_CLIENT_COUNT_BY_GROUP, mapGid, true) < 0) {
             LOG_ERROR("GetClientCountByGroup[%s]: push share command failed.", group.c_str());
             return -1;
         }
@@ -1335,6 +1425,51 @@ int CmdBatchGetClientIdByUid::ExecCmd()
 
     Send2BW(result);
     LOG_INFO("BatchGetClientIdByUid: cmd executed data:%s.", rapidjson_to_string(result).c_str());
+    return 0;
+}
+
+int CmdFreeClientSession::ExecCmd()
+{
+    std::string uid = tgg_get_cli_uid(this->prc_id, this->fd);
+    int64_t fdidcid = generate_fdidcid(this->prc_id, this->fd, cid);
+    int ret = 0;
+    if(cid > 0) {
+        std::string strFdidcid;
+        strFdidcid.resize(sizeof(int64_t));  // 分配4字节空间
+        memcpy(&strFdidcid[0], &fdidcid, sizeof(int64_t));  // 二进制拷贝
+        std::vector<std::string> lstgid;
+        if (!tgg_get_gidsbycid(cid, lstgid)) {
+            std::vector<std::string>::iterator itgid = lstgid.begin();
+            while(itgid != lstgid.end()) {
+                // 清理hash<gid,list<fdx>>
+                LOG_DEBUG("FreeClientSession: try to send share command: gid[%s].", (*itgid).c_str());
+                std::map<int, tgg_vhash_list*> mapGid;
+                ret = AddGid4Prcid((*itgid).c_str(), mapGid);
+                if (ret < 0) {
+                    LOG_ERROR("FreeClientSession : add gid 4 prcid failed.");
+                } else if (ret == 0) {
+                    if(PushSharecmd(CMD_LEAVE_GROUP, mapGid, false, cid, strFdidcid) < 0) {
+                        LOG_ERROR("FreeClientSession: push share command failed.");
+                    }
+                } else {
+                    LOG_DEBUG("FreeClientSession: try to delete fdidcid[%llu] for gid[%s].", fdidcid, (*itgid).c_str());
+                    tgg_del_fd4gid((*itgid).c_str(), fdidcid);
+                }
+                itgid++;
+            }
+
+        }
+        tgg_del_cid_cidgid(cid);
+    }
+    // 清理hash<uid,list<fdx>>
+    if(!uid.empty()) {
+        tgg_del_fd4uid(uid.c_str(), fdidcid);
+    }
+    if (tgg_del_cid(cid) < 0) {// 删除cid就代表客户端连接信息在bw侧的处理已经完全结束了
+        LOG_ERROR("delete cid[%u] failed.", cid);
+    }
+    // 清空bw侧的cli信息
+    tgg_close_cli_bw(this->prc_id, this->fd);
     return 0;
 }
 
@@ -1594,3 +1729,10 @@ int exec_cmd_processor(int prc_id, int fd, void* data)
     return 0;
 }
 
+int exec_free_session(int prc_id, int fd, uint32_t cid)
+{
+    rapidjson::Document jdata;
+    CmdFreeClientSession pro(prc_id, fd, NULL, jdata);
+    pro.SetCid(cid);
+    return pro.ExecCmd();
+}

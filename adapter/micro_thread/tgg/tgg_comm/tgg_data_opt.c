@@ -108,7 +108,7 @@ int tgg_free_session(int core_id, int fd, uint32_t cid)
 
 }
 
-int tgg_join_group(const char* gid, uint32_t cid)
+int tgg_join_group(const char* gid, uint32_t cid, bool add_gid)
 {
 	int64_t fdidcid = tgg_get_fdbycid(cid);
 	if (fdidcid <= 0) {
@@ -116,7 +116,7 @@ int tgg_join_group(const char* gid, uint32_t cid)
 		return -1;
 	}
 	// 添加到 hash<gid, list<fdid>>
-	if (tgg_add_gid(gid, fdidcid) < 0){
+	if (add_gid && tgg_add_gid(gid, fdidcid) < 0){
 		LOG_ERROR("join group failed, add gid not found, gid[%s] cid[%u].", gid, cid);
 		return -1;
 	}
@@ -129,7 +129,7 @@ int tgg_join_group(const char* gid, uint32_t cid)
 	return 0;
 }
 
-int tgg_exit_group(const char* gid, uint32_t cid)
+int tgg_exit_group(const char* gid, uint32_t cid, bool del_gid)
 {
 	int64_t fdidcid = tgg_get_fdbycid(cid);
 	if (fdidcid <= 0) {
@@ -137,7 +137,7 @@ int tgg_exit_group(const char* gid, uint32_t cid)
 		return -1;
 	}
 	// 从 hash<gid, list<fdid>>移除cid对应的fd
-	if (tgg_del_fd4gid(gid, fdidcid) < 0){
+	if (del_gid && tgg_del_fd4gid(gid, fdidcid) < 0){
 		LOG_DEBUG("exit group failed, gid not found, gid[%s] cid[%u].", gid, cid);
 		return -1;
 	}

@@ -154,7 +154,7 @@ static void* deal_trans(void*)
                     LOG_INFO("invalid cmd[%d].", bwfdxdata->cmd);
                     break;
             }
-            dpdk_rte_free(bwfdxdata);
+            dpdk_rte_free(__FILE__, __LINE__, bwfdxdata);
         }
 
         // 取数据
