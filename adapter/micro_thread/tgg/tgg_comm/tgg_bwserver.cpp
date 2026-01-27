@@ -696,7 +696,7 @@ void *sharecmd_routine( void *arg )
     LOG_INFO("sharecmd_routine start.");
     while(g_run) {
         if(exec_sharequeue_cmd_processor(g_prc_id) < 0) {
-            poll(NULL, 0, 2);// sleep 10ms
+            poll(NULL, 0, 1);// sleep 10ms
         }
     }
     return 0;

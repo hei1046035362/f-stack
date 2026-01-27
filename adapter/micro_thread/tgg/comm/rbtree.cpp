@@ -161,7 +161,8 @@ bool tgg_rbtree_insert(tgg_rbtree *tree, int64_t fdidcid) {
             x = x->right;
         } else {
             // 节点已存在
-            return false;
+            LOG_WARNING("Duplicate fdidcid[%lld] found.", fdidcid);
+            return true;
         }
     }
     

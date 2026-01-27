@@ -532,11 +532,11 @@ void tgg_master_init()
 
 		char bwshare_ring_name[RTE_RING_NAMESIZE] = {0};
 		sprintf(bwshare_ring_name, "%s_%d", s_bwshare_ring_name, i);
-		g_ring_bwshare[i] = make_ring(bwshare_ring_name, 1024);
+		g_ring_bwshare[i] = make_ring(bwshare_ring_name, 1024*32);
 
 		char bwshare_pool_name[RTE_MEMPOOL_NAMESIZE] = {0};
 		sprintf(bwshare_pool_name, "%s_%d", s_pool_bwshare_name, i);
-		g_mempool_bwshare[i] = make_mempool(bwshare_pool_name, 1024, sizeof(bw_share_qdata));
+		g_mempool_bwshare[i] = make_mempool(bwshare_pool_name, 1024*32, sizeof(bw_share_qdata));
 
 	}
 	// cli上行透传
