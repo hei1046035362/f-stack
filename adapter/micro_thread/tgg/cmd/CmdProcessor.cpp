@@ -115,7 +115,7 @@ int CmdBaseProcessor::PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>&
         uint32_t cid, const std::string_view data, const std::set<uint32_t>& setExcept)
 {
     int tasktime = get_system_ms() & 0x7fffffff;
-    int try_times = 50;
+    int try_times = ENQUEUE_TRY_TIMES;
     int ret = 0;
     if(wait && tgg_add_bwfdx_sharecmd(this->prc_id, this->fd, mapGid.size(), tasktime) < 0) {
         for (std::map<int, tgg_vhash_list*>::iterator itProc = mapGid.begin(); 
@@ -130,8 +130,12 @@ int CmdBaseProcessor::PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>&
     {
         tgg_list_cid* cids = NULL;
         bw_share_qdata* qdata = NULL;
-        if (high_freq_malloc(g_mempool_bwshare[itProc->first], (void**)&qdata, sizeof(bw_share_qdata)) < 0) {
-            LOG_ERROR("format gid to prc_id[%d] failed,malloc share command failed.", itProc->first);
+        try_times = ENQUEUE_TRY_TIMES;
+        while ((ret = high_freq_malloc(g_mempool_bwshare[itProc->first], (void**)&qdata, sizeof(bw_share_qdata))) < 0 && try_times-- > 0)
+            co_msleep(1);
+        if (ret < 0) {
+            LOG_ERROR("format gid to prc_id[%d] failed,malloc share command failed, try times[%d].", 
+                itProc->first, ENQUEUE_TRY_TIMES-try_times);
             goto push_share_cmd_failed;
         }
         qdata->gids = itProc->second;
@@ -172,15 +176,15 @@ int CmdBaseProcessor::PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>&
             }
         }
         qdata->uids = NULL;// 后续看情况是否需要
-        try_times = 50;
+        try_times = ENQUEUE_TRY_TIMES;
         while((ret = tgg_enqueue_bwshare(itProc->first, qdata)) < 0 && try_times-- > 0) {
-            co_msleep(2);
+            co_msleep(1);
         } 
         if (ret >= 0){
             LOG_DEBUG("prc[%d] pushed command[%d] to prcid[%d]", this->prc_id, cmd, itProc->first);
             continue;
         } else {
-            LOG_ERROR("format gid to prc_id[%d] failed, enqueue bwshare failed.", itProc->first);
+            LOG_ERROR("format gid to prc_id[%d] failed, enqueue bwshare failed, try times[%d].", itProc->first, ENQUEUE_TRY_TIMES - try_times);
         }
 push_share_cmd_failed:
         tgg_clean_bw_share_qdata(itProc->first, qdata);

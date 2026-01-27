@@ -61,23 +61,13 @@ static int tgg_hash_add_keywithfdrbtree(const rte_hash* hash, uint64_t key, int6
         }
     }
 
-    // 检查是否已存在 fdidcid
-    tgg_rb_node *existing_node = tgg_rbtree_find(rbtree, fdidcid);
-    
-    if (existing_node) {
-        LOG_WARNING("Duplicate hash[%s] key[%llu] found.", hash->name, key);
-        return 0; // 重复的 fdidcid
-    }
-
-    // 获取写锁，添加节点到红黑树
-    bool inserted = tgg_rbtree_insert(rbtree, fdidcid);
-    
-    if (!inserted) {
-        LOG_ERROR("Failed to insert fdidcid[%ld] into rbtree for key[%llu]", fdidcid, key);
+    // 添加节点到红黑树    
+    if (!tgg_rbtree_insert(rbtree, fdidcid)) {
+        LOG_ERROR("Failed to insert fdidcid[%ld] into rbtree for hash[%s] key[%llu]", fdidcid, hash->name, key);
         return -1;
     }
     
-    LOG_DEBUG("Successfully added fdidcid[%ld] to rbtree for key[%llu]", fdidcid, key);
+    LOG_DEBUG("Successfully added fdidcid[%ld] to rbtree for hash[%s] key[%llu]", fdidcid, hash->name, key);
     return 0;
 }
 
@@ -86,7 +76,7 @@ static void* tgg_hash_get_value(const rte_hash* hash, uint64_t key) {
     void* pdata = NULL;
     int ret = rte_hash_lookup_with_hash_data(hash, &key, rte_hash_crc(&key, sizeof(uint64_t), 0), &pdata);
     if (ret < 0) {
-        LOG_DEBUG("Get key[%llu] data failed:%d", key, ret);
+        LOG_DEBUG("Get hash[%s] key[%llu] data failed:%d", hash->name, key, ret);
         return NULL;
     }
     return pdata;
@@ -145,12 +135,8 @@ static int tgg_hash_del_fdrbtree4key(const rte_hash* hash, rte_rcu_qsbr *rcu, ui
     
     LOG_DEBUG("deleted hash[%s] key[%llu] node[%ld] from rbtree.", hash->name, key, fdidcid);
     
-    // 检查红黑树是否为空
-    bool is_empty = (tgg_rbtree_find(rbtree, 0) == NULL && 
-                     tgg_rbtree_size(rbtree) == 0);
-    
     // 如果红黑树为空，删除整个key
-    if (is_empty) {
+    if (rbtree->root == rbtree->nil) {
         int ret = rte_hash_del_key_with_hash(hash, &key, rte_hash_crc(&key, sizeof(uint64_t), 0));
         if (ret >= 0) {
             if (rte_hash_free_key_with_position(hash, ret) < 0) {
@@ -219,6 +205,7 @@ static int tgg_hash_add_keywithfdlst(const rte_hash* hash, uint64_t key, int64_t
     // 分配新节点
     tgg_fd_list *new_node = (tgg_fd_list *)dpdk_rte_malloc(__FILE__, __LINE__, sizeof(tgg_fd_list));
     if (!new_node) {
+        LOG_ERROR("add hash[%s] key[%llu] failed, malloc new node failed.", hash->name, key);
         return -1;
     }
     
