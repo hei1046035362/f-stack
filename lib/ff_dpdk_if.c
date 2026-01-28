@@ -1497,7 +1497,6 @@ ff_dpdk_init(int argc, char **argv)
 
 void ff_dpdk_release(void)
 {
-    release_clock();
     if(s_mz_prc_ready) {
         rte_memzone_free(s_mz_prc_ready);
         s_mz_prc_ready = NULL;
