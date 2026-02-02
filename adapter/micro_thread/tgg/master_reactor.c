@@ -292,7 +292,7 @@ static void tgg_recv(int fd, event_type_t events, void *arg)
         return;
     }
     if (idx != ctx->idx) {
-        LOG_ERROR("Client %d idx[%d] != ctx->idx[%d] , closing", fd, idx, ctx->idx);
+        LOG_WARNING("Client %d idx[%d] != ctx->idx[%d] , closing", fd, idx, ctx->idx);
         goto recv_failed;        
     }
     // 读取数据
@@ -326,12 +326,12 @@ static void tgg_recv(int fd, event_type_t events, void *arg)
 recv_failed:                                  
     if(!(tgg_get_cli_status(g_core_id, fd) & FD_STATUS_CLOSING) && // 没发送过close给gwcliprc
         (tgg_get_cli_idx(g_core_id, fd) != TGG_FD_CLOSING)) {// ws握手完成
-        consume_rdata(fd, NULL, 0, idx, FD_CLOSE);// 通知bwprc 清理这个客户端相关信息
+        consume_rdata(fd, NULL, 0, ctx->idx, FD_CLOSE);// 通知bwprc 清理这个客户端相关信息
     }
     if((tgg_get_cli_idx(g_core_id, fd) == TGG_FD_CLOSED)) {
         return;
     }
-    clean_client_data(fd, idx);
+    clean_client_data(fd, ctx->idx);
     reactor_remove_event(fd);
     free_client_context(ctx);
     

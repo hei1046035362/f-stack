@@ -235,7 +235,7 @@ void WsConsumer::OnHandShake(std::string_view request, const std::string& respon
     tgg_set_cli_authorized(this->core_id, this->fd, AUTH_TYPE_HANDLESHAKED);
     OnSend(response, FD_WRITE);// 响应客户端的http请求
     // 通知服务端websocket 握手完成
-    LOG_INFO("OnHandShake:%s.", request.data());
+    LOG_INFO("OnHandShake");//:%s.", request.data());
     // if(_Send2Server(result, FD_HANDLESHAKE) == NO_BW_AVALIABLE) {
     //     SendONnoAuth("", FD_WRITE|FD_CLOSE);// TODO FD_CLOSE会强制关闭socket,这种方式欠妥，会报错
     // }
