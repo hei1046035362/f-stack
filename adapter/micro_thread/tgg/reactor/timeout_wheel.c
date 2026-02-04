@@ -99,6 +99,7 @@ int timer_wheel_add(timer_wheel_t* wheel, int fd, uint64_t expire_ms) {
     
     node->fd = fd;
     node->expire_time = expire_ms;
+    node->slot = slot;
     node->next = NULL;
     node->prev = NULL;
     
@@ -134,29 +135,30 @@ int timer_wheel_remove(timer_wheel_t* wheel, int fd) {
     
     timer_node_t* node = wheel->nodes[fd];
     
-    // 从链表中移除节点
-    if (node->prev) {
-        node->prev->next = node->next;
-    } else {
-        // 是头节点，需要更新槽的头指针
+    // 从链表中移除节点（使用记录的 slot，O(1)）
+    int slot = node->slot;
+    if (slot < 0 || slot >= TIME_WHEEL_SIZE) {
+        // 防御性处理：回退到全表扫描（兼容旧数据）
         for (int i = 0; i < TIME_WHEEL_SIZE; i++) {
             if (wheel->slots[i].head == node) {
-                wheel->slots[i].head = node->next;
+                slot = i;
                 break;
             }
         }
     }
-    
+
+    timer_slot_t* timer_slot = &wheel->slots[slot];
+    if (node->prev) {
+        node->prev->next = node->next;
+    } else {
+        // 头节点
+        timer_slot->head = node->next;
+    }
     if (node->next) {
         node->next->prev = node->prev;
     } else {
-        // 是尾节点，需要更新槽的尾指针
-        for (int i = 0; i < TIME_WHEEL_SIZE; i++) {
-            if (wheel->slots[i].tail == node) {
-                wheel->slots[i].tail = node->prev;
-                break;
-            }
-        }
+        // 尾节点
+        timer_slot->tail = node->prev;
     }
     
     // 释放节点
@@ -192,29 +194,19 @@ int timer_wheel_process_slot(timer_wheel_t* wheel, int slot,
     
     // LOG_DEBUG("处理槽位 %d 的定时器", slot);
     
-    // 处理当前槽的所有定时器
+    // 处理当前槽的所有定时器（不能假设链表按时间排序，遍历所有节点）
     timer_node_t* node = timer_slot->head;
     while (node) {
         timer_node_t* next = node->next;
-        
-        // LOG_DEBUG("检查定时器: fd=%d, 超时时间=%lu, 当前时间=%lu", 
-        //           node->fd, node->expire_time, now);
-        
-        if (node->expire_time <= now) {
-            // LOG_WARNING("定时器触发: fd=%d", node->fd);
-            
+
+        if (node->expire_time < now) {
             if (callback) {
                 callback(node->fd, arg);
             }
-            
-            // 从时间轮中移除
+            // 从时间轮中移除（timer_wheel_remove 会处理链表指针并 free 节点）
             timer_wheel_remove(wheel, node->fd);
             processed++;
-        } else {
-            // 链表按时间排序，后续的定时器都未超时
-            break;
         }
-        
         node = next;
     }
     
@@ -224,8 +216,7 @@ int timer_wheel_process_slot(timer_wheel_t* wheel, int slot,
 // 移动时间轮指针并处理超时
 int timer_wheel_process(timer_wheel_t* wheel,
                        void (*callback)(int fd, void* arg), 
-                       void* arg) {
-    uint64_t now = get_current_ms();
+                       void* arg, uint64_t now) {
     uint64_t elapsed = now - wheel->last_check_time;
     
     if (elapsed < TIME_UNIT_MS) {
@@ -234,17 +225,23 @@ int timer_wheel_process(timer_wheel_t* wheel,
     
     wheel->current_time = now;
     
-    // 计算需要移动多少槽
-    int steps = (int)elapsed; // / TIME_UNIT_MS);
-    if (steps > TIME_WHEEL_SIZE) {
-        steps = TIME_WHEEL_SIZE;  // 最多移动一圈
+    // 计算需要移动多少槽（以 TIME_UNIT_MS 为单位）
+    // 根据实际 elapsed 时间计算，最多不超过轮大小（防止无限积压）
+    // 例如：elapsed=100ms → steps=1，elapsed=300ms → steps=3，elapsed=60s → steps=600
+    int steps = (int)(elapsed / TIME_UNIT_MS);
+    int steps_to_process = steps > TIME_WHEEL_SIZE ? TIME_WHEEL_SIZE : steps;
+    
+    // 如果需要处理的槽数已经达到轮大小，说明有严重延迟，记录告警
+    if (steps_to_process >= TIME_WHEEL_SIZE) {
+        LOG_WARNING("Timer wheel severe backlog: elapsed=%lums (>60s), processing full wheel. Check system load or callback latency",
+                    elapsed);
     }
     
     int total_processed = 0;
     
-    // LOG_DEBUG("时间轮处理: 经过时间=%lums, 需要移动%d个槽", elapsed, steps);
+    // LOG_DEBUG("时间轮处理: 经过时间=%lums, 需要移动%d个槽, 本次处理%d个", elapsed, steps, steps_to_process);
     
-    for (int i = 0; i < steps; i++) {
+    for (int i = 0; i < steps_to_process; i++) {
         int slot = wheel->current_slot;
         
         // 处理当前槽
@@ -259,7 +256,10 @@ int timer_wheel_process(timer_wheel_t* wheel,
         // }
     }
     
-    wheel->last_check_time = now;
+    // 只推进已处理步数对应的时间，不人为加速时间轮
+    // 这样确保超时判定基于真实时间，避免因加速轮导致的假超时
+    // 如果 steps=3，则只推进 300ms；剩余 elapsed 的部分在下次调用时重新计算
+    wheel->last_check_time += (uint64_t)steps_to_process * TIME_UNIT_MS;
     
     return total_processed;
 }

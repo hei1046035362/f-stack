@@ -52,6 +52,7 @@ protected:
     int fd;
     int handshake;  // ws的handleshake是否成功
     int healthcheck;// 标记http请求是否为健康检查
+    std::vector<char> tmp_buffer;
 private:
 
     // 新的连接处理

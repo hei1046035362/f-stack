@@ -18,7 +18,27 @@
 
 reactor_t g_reactor;
 
+// 全局缓存的时间戳,减少系统调用
+static __thread uint64_t g_cached_time_ms = 0;
+
+// 更新缓存时间(每帧调用一次)
+static inline void update_cached_time() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    g_cached_time_ms = (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+// 获取缓存的时间(性能优化)
 static inline uint64_t get_current_ms() {
+    // 如果未初始化,先更新
+    if (unlikely(g_cached_time_ms == 0)) {
+        update_cached_time();
+    }
+    return g_cached_time_ms;
+}
+
+// 当需要精确时间时使用此函数
+static inline uint64_t get_current_ms_precise() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
@@ -252,41 +272,52 @@ int reactor_remove_event(int fd) {
         return -1;
     }
     
-    if (ff_epoll_ctl(g_reactor.epoll_fd, EPOLL_CTL_DEL, fd, NULL) < 0) {
-        timer_wheel_remove(&g_reactor.timer_wheel, fd);
-        g_reactor.stats.timer_removes++;
-        return -1;
-    }
-    
-    // 从时间轮移除
+    int ret = ff_epoll_ctl(g_reactor.epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+
+    // 从时间轮移除（无论 epoll_ctl 成功与否，都应从时间轮移除并将事件标记为不激活）
     timer_wheel_remove(&g_reactor.timer_wheel, fd);
     g_reactor.stats.timer_removes++;
 
     g_reactor.events[fd].active = 0;
+
+    if (ret < 0) {
+        return -1;
+    }
     return 0;
 }
 
 void reactor_run(void* data) {
-    // int idx = *((int*)data);
-    // if (!g_reactor.reactors) return;
-
     g_reactor.running = 1;
 
     struct epoll_event events[MAX_EVENTS];
 
     // 上一次检查超时的时间
     static uint64_t last_timer_check = get_current_ms();
-    // 上一次统计时间
-    // static time_t last_stat_time = 0;
     
     while (g_reactor.running) {
-        // 计算下次超时时间
-        int next_timeout = 1000;  // 默认1秒
+        // 每次循环开始更新缓存时间,减少系统调用
+        update_cached_time();
+        uint64_t now = g_cached_time_ms;
+        
+        // 动态计算超时时间
+        int next_timeout;
+        if (g_reactor.timer_wheel.count > 0 && g_reactor.timer_wheel.next_expire_time > 0) {
+            // 有定时器,计算到下一个定时器的时间
+            int64_t time_to_expire = (int64_t)(g_reactor.timer_wheel.next_expire_time - now);
+            if (time_to_expire <= 0) {
+                next_timeout = 0;  // 立即检查
+            } else if (time_to_expire < 100) {
+                next_timeout = 1;  // 小于100ms,最小1ms
+            } else {
+                next_timeout = (int)time_to_expire;  // 精确等待
+            }
+        } else {
+            next_timeout = 1000;  // 无定时器,默认1秒
+        }
         
         // 检查定时器
-        uint64_t now = get_current_ms();
         if (now - last_timer_check >= 100) {  // 100ms检查一次
-            reactor_check_timers();
+            reactor_check_timers(now);
             last_timer_check = now;
         }
 
@@ -305,8 +336,25 @@ void reactor_run(void* data) {
             if (fd < 0 || fd >= g_reactor.max_events || !g_reactor.events[fd].active) {
                 continue;
             }
-            
             event_type_t revents = static_cast<event_type_t>(0);
+
+            // 区分连接关闭（EPOLLHUP）和真正的错误（EPOLLERR）
+            if (events[i].events & EPOLLHUP) {
+                // 对方关闭连接或本端关闭（正常关闭），用 EVENT_HUP 标记
+                LOG_INFO("connection hangup (remote closed), fd=%d", fd);
+                revents |= EVENT_HUP;
+                g_reactor.events[fd].rcallback(fd, revents, g_reactor.events[fd].arg);
+                continue;
+            }
+            
+            if (events[i].events & EPOLLERR) {
+                // 真正的连接错误
+                LOG_ERROR("connection error, fd=%d", fd);
+                revents |= EVENT_ERROR;
+                g_reactor.events[fd].rcallback(fd, revents, g_reactor.events[fd].arg);
+                continue;
+            }            
+
             if (events[i].events & EPOLLIN) {
                 revents |= EVENT_READ;
                 g_reactor.events[fd].rcallback(fd, revents, g_reactor.events[fd].arg);
@@ -315,11 +363,6 @@ void reactor_run(void* data) {
                 revents |= EVENT_WRITE;
                 // reactor_update_activity(fd);
                 g_reactor.events[fd].wcallback(fd, revents, g_reactor.events[fd].arg);
-            }
-            if (events[i].events & (EPOLLERR | EPOLLHUP)) {
-                LOG_WARNING("connection error, fd=%d", fd);
-                revents |= EVENT_ERROR;
-                g_reactor.events[fd].rcallback(fd, revents, g_reactor.events[fd].arg);
             }
         }
         // 调试打印reactor的相关统计信息
@@ -397,8 +440,8 @@ int reactor_set_timeout(int fd, int timeout_seconds) {
     return 0;
 }
 
-void reactor_check_timers() {
-    int processed = timer_wheel_process(&g_reactor.timer_wheel, on_timer_expired, &g_reactor);
+void reactor_check_timers(uint64_t now) {
+    int processed = timer_wheel_process(&g_reactor.timer_wheel, on_timer_expired, &g_reactor, now);
     g_reactor.stats.timer_ticks++;
     
     if (processed > 0) {

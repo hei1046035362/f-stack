@@ -48,6 +48,7 @@ typedef struct timer_wheel_s {
     uint64_t last_check_time;             // 上次检查时间
     timer_node_t* nodes[MAX_CLIENTS];
     int count;
+    uint64_t next_expire_time;             // 下一个定时器过期时间
 } timer_wheel_t;
 // // 多级时间轮（借鉴nginx）
 // typedef struct timer_wheel_s {
@@ -64,7 +65,8 @@ typedef enum {
     EVENT_UNKNOWN = 0,
     EVENT_READ = 0x01,
     EVENT_WRITE = 0x02,
-    EVENT_ERROR = 0x04
+    EVENT_ERROR = 0x04,    // 真正的连接错误（EPOLLERR）
+    EVENT_HUP = 0x08       // 正常关闭/对方关闭（EPOLLHUP）
 } event_type_t;
 
 typedef struct client_context_s {
@@ -134,11 +136,11 @@ int timer_wheel_update(timer_wheel_t* wheel, int fd, uint64_t expire_time);
 int timer_wheel_remove(timer_wheel_t* wheel, int fd);
 int timer_wheel_process(timer_wheel_t* wheel, 
                        void (*callback)(int fd, void* arg), 
-                       void* arg);
+                       void* arg, uint64_t now);
 void timer_wheel_free(timer_wheel_t* wheel);
 
 int reactor_set_timeout(int fd, int timeout_seconds);
 int reactor_update_activity(int fd);
-void reactor_check_timers();
+void reactor_check_timers(uint64_t now);
 
 #endif
