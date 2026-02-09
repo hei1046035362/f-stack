@@ -1,5 +1,4 @@
-[![Build Status](https://travis-ci.org/F-Stack/f-stack.svg?branch=master)](https://travis-ci.org/F-Stack/f-stack)
-
+![Build Status](https://github.com/F-Stack/f-stack/actions/workflows/ci.yml/badge.svg?branch=dev)
 # F-Stack
 ![](F-Stack.png)
 
@@ -56,9 +55,8 @@ Currently, besides authorized DNS server of DNSPod, there are various products i
     cd f-stack
     # Compile DPDK
     cd dpdk/
-    # re-enable kni now, to remove kni later
-    # disable crypto/openssl for Redhat/Centos 7.x.
-    meson -Denable_kmods=true -Ddisable_libs=flow_classify -Ddisable_drivers=crypto/openssl build
+    # igb_uio is about 5% more efficient than vfio-pci, so continue using it.
+    meson -Denable_kmods=true build
     ninja -C build
     ninja -C build install
     
@@ -85,7 +83,6 @@ Currently, besides authorized DNS server of DNSPod, there are various products i
     # For Linux:
     modprobe uio
     insmod /data/f-stack/dpdk/build/kernel/linux/igb_uio/igb_uio.ko
-    insmod /data/f-stack/dpdk/build/kernel/linux/kni/rte_kni.ko carrier=on # carrier=on is necessary, otherwise need to be up `veth0` via `echo 1 > /sys/class/net/veth0/carrier`
     python dpdk-devbind.py --status
     ifconfig eth0 down
     python dpdk-devbind.py --bind=igb_uio eth0 # assuming that use 10GE NIC and eth0
@@ -159,7 +156,6 @@ for more details, see [nginx guide](https://github.com/F-Stack/f-stack/blob/mast
     sleep 10
     ifconfig veth0 <ipaddr>  netmask <netmask>  broadcast <broadcast> hw ether <mac addr>
     route add -net 0.0.0.0 gw <gateway> dev veth0
-    echo 1 > /sys/class/net/veth0/carrier # if `carrier=on` not set while `insmod rte_kni.ko` 
     # route add -net ...  # other route rules
 
 ## Nginx Testing Result
@@ -184,19 +180,30 @@ All of these test cases use CPUs' physical cores.
 
 
 CPS (Connection:close, Small data packet)  test result
+
 ![](CPS.png)
 
 CPS_Reuseport (Connection:close, Small data packet)  test result, This test case runs in a different test environment
+
 ![](CPS_Reuseport.png)
 
 RPS (Connection:Keep-Alive, Small data packet) test data
+
 ![](RPS.png)
 
 Bandwidth (Connection:Keep-Alive, 3.7k bytes data packet) test data
+
 ![](Bandwidth.png)
 
 ## Licenses
+
 See [LICENSE](LICENSE)
+
+## Wiki
+
+See [wiki page](https://github.com/F-Stack/f-stack/wiki).
+
+And more info see [deepwiki of F-Stack](https://deepwiki.com/F-Stack/f-stack), [powered by devin](https://devin.ai/).
 
 ## Join us
 

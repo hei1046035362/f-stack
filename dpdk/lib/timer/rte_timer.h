@@ -36,7 +36,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
-#include <rte_compat.h>
+
 #include <rte_common.h>
 #include <rte_spinlock.h>
 
@@ -64,12 +64,11 @@ enum rte_timer_type {
  * config) and an owner (the id of the lcore that owns the timer).
  */
 union rte_timer_status {
-	RTE_STD_C11
 	struct {
-		uint16_t state;  /**< Stop, pending, running, config. */
-		int16_t owner;   /**< The lcore that owns the timer. */
+		RTE_ATOMIC(uint16_t) state;  /**< Stop, pending, running, config. */
+		RTE_ATOMIC(int16_t) owner;   /**< The lcore that owns the timer. */
 	};
-	uint32_t u32;            /**< To atomic-set status + owner. */
+	RTE_ATOMIC(uint32_t) u32;            /**< To atomic-set status + owner. */
 };
 
 #ifdef RTE_LIBRTE_TIMER_DEBUG
@@ -190,6 +189,15 @@ void rte_timer_subsystem_finalize(void);
  *   The timer to initialize.
  */
 void rte_timer_init(struct rte_timer *tim);
+
+/**
+ * Initialize the timer metadata.
+ * For f-stack internal use only.
+ * @return
+ *   - 0: Success
+ *   - -EINVAL: invalid timer data instance identifier
+ */
+int rte_timer_meta_init(void);
 
 /**
  * Reset and start the timer associated with the timer handle.
@@ -332,9 +340,6 @@ void rte_timer_stop_sync(struct rte_timer *tim);
 int rte_timer_pending(struct rte_timer *tim);
 
 /**
- * @warning
- * @b EXPERIMENTAL: this API may change without prior notice
- *
  * Time until the next timer on the current lcore
  * This function gives the ticks until the next timer will be active.
  *
@@ -344,7 +349,6 @@ int rte_timer_pending(struct rte_timer *tim);
  *   - 0: a timer is pending and will run at next rte_timer_manage()
  *   - >0: ticks until the next timer is ready
  */
-__rte_experimental
 int64_t rte_timer_next_ticks(void);
 
 /**

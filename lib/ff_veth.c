@@ -372,10 +372,6 @@ ff_mbuf_gethdr(void *pkt, uint16_t total, void *data,
         return NULL;
     }
 
-    if (m_pkthdr_init(m, M_NOWAIT) != 0) {
-        return NULL;
-    }
-
     m_extadd(m, data, len, ff_mbuf_ext_free, pkt, NULL, 0, EXT_DISPOSABLE);
 
     m->m_pkthdr.len = total;
@@ -877,8 +873,7 @@ ff_veth_setup_interface(struct ff_veth_softc *sc, struct ff_port_cfg *cfg)
             printf("%s: ff_veth_setaddr failed\n", sc->host_ifname);
         }
 
-        fib_num = cfg->port_id;
-        ret = ff_veth_set_gateway(sc, fib_num);
+        ret = ff_veth_set_gateway(sc, RT_DEFAULT_FIB);
         if (ret != 0) {
             printf("%s: ff_veth_set_gateway failed\n", sc->host_ifname);
         }
@@ -889,6 +884,7 @@ ff_veth_setup_interface(struct ff_veth_softc *sc, struct ff_port_cfg *cfg)
 
 #ifdef FF_IPFW
         if (cfg->nb_pr) {
+            fib_num = cfg->port_id;
             ff_ipfw_add_simple_v4(cfg, NULL, fib_num);
         }
 #endif
@@ -1056,6 +1052,30 @@ ff_veth_softc_to_hostc(void *softc)
 {
     struct ff_veth_softc *sc = (struct ff_veth_softc *)softc;
     return (void *)sc->host_ctx;
+}
+
+void *
+ff_veth_get_softc(void *host_ctx)
+{
+    struct ff_veth_softc *sc = NULL;
+
+    sc = malloc(sizeof(struct ff_veth_softc), M_DEVBUF, M_WAITOK);
+    if (NULL == sc) {
+        printf("ff_veth_softc allocation failed\n");
+        return NULL;
+    }
+    memset(sc, 0, sizeof(struct ff_veth_softc));
+
+    sc->host_ctx = host_ctx;
+
+    return sc;
+}
+
+void
+ff_veth_free_softc(void *softc)
+{
+    if (softc)
+        free(softc, M_DEVBUF);
 }
 
 /********************

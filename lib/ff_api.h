@@ -90,6 +90,7 @@ int ff_getsockopt(int s, int level, int optname, void *optval,
 int ff_listen(int s, int backlog);
 int ff_bind(int s, const struct linux_sockaddr *addr, socklen_t addrlen);
 int ff_accept(int s, struct linux_sockaddr *addr, socklen_t *addrlen);
+int ff_accept4(int s, struct linux_sockaddr *addr, socklen_t *addrlen, int flags);
 int ff_connect(int s, const struct linux_sockaddr *name, socklen_t namelen);
 int ff_close(int fd);
 int ff_shutdown(int s, int how);
@@ -151,7 +152,7 @@ int ff_gettimeofday(struct timeval *tv, struct timezone *tz);
 int ff_dup(int oldfd);
 int ff_dup2(int oldfd, int newfd);
 
-int ff_pthread_create(pthread_t * thread, const pthread_attr_t * attr, 
+int ff_pthread_create(pthread_t * thread, const pthread_attr_t * attr,
     void * (* start_routine) (void *), void * arg);
 int ff_pthread_join(pthread_t thread, void **retval);
 
@@ -165,7 +166,7 @@ extern int ff_getmaxfd(void);
 
 /*
  * Get traffic for QoS or other via API.
- * The size of buffer must >= siezof(struct ff_traffic_args), now is 32 bytes.
+ * The size of buffer must >= siezof(struct ff_traffic_args), now is 48 bytes.
  */
 void ff_get_traffic(void *buffer);
 
@@ -220,8 +221,47 @@ int ff_route_ctl(enum FF_ROUTE_CTL req, enum FF_ROUTE_FLAG flag,
 typedef int (*dispatch_func_t)(void *data, uint16_t *len,
     uint16_t queue_id, uint16_t nb_queues);
 
+/*
+ * Packet dispatcher context structure.
+ * Contains additional context information for packet dispatching.
+ */
+struct ff_dispatcher_context {
+  struct {
+      uint8_t stripped;
+      uint16_t vlan_tci;  /**< Priority (3) + CFI (1) + Identifier Code (12) */
+  } vlan;
+};
+
+/*
+ * Enhanced packet dispatch callback function with context.
+ * Implemented by user.
+ *
+ * @param data
+ *   The data pointer of this packet.
+ * @param len
+ *   The length of this packet.
+ * @param queue_id
+ *   Current queue of this packet.
+ * @param nb_queues
+ *   Number of queues to be dispatched.
+ * @param context
+ *   Additional context information for packet dispatching.
+ *
+ * @return 0 to (nb_queues - 1)
+ *   The queue id that the packet will be dispatched to.
+ * @return FF_DISPATCH_ERROR (-1)
+ *   Error occurs or packet is handled by user, packet will be freed.
+ * @return FF_DISPATCH_RESPONSE (-2)
+ *   Packet is handled by user, packet will be responsed.
+ */
+typedef int (*dispatch_func_context_t)(void *data, uint16_t *len,
+    uint16_t queue_id, uint16_t nb_queues, struct ff_dispatcher_context context);
+
 /* regist a packet dispath function */
 void ff_regist_packet_dispatcher(dispatch_func_t func);
+
+/* Register a packet dispatch function with context support */
+void ff_regist_packet_dispatcher_context(dispatch_func_context_t func);
 
 /*
  * RAW packet send direty with DPDK by user APP.
@@ -356,6 +396,18 @@ int ff_zc_mbuf_write(struct ff_zc_mbuf *m, const char *data, int len);
  * not implemented now.
  */
 int ff_zc_mbuf_read(struct ff_zc_mbuf *m, const char *data, int len);
+
+/*
+ * Create user thread context for LD_PRELOAD mode.
+ * It saved in ff_so_context.
+ */
+void *ff_adapt_user_thread_add(void *parent);
+
+void ff_adapt_user_thread_exit(void *td);
+
+void *ff_switch_curthread(void *new_curthread);
+
+void ff_restore_curthread(void *old_curthread);
 
 /* ZERO COPY API end */
 
