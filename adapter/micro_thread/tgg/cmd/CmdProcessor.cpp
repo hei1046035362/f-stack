@@ -187,6 +187,9 @@ int CmdBaseProcessor::PushSharecmd(uint32_t cmd, std::map<int, tgg_vhash_list*>&
             LOG_ERROR("format gid to prc_id[%d] failed, enqueue bwshare failed, try times[%d].", itProc->first, ENQUEUE_TRY_TIMES - try_times);
         }
 push_share_cmd_failed:
+        // 修复：标记任务为中止，通知已入队的进程停止处理
+        tgg_set_bwfx_sharecmd_halt(this->prc_id, this->fd, 1);
+        // 清理当前失败进程的qdata
         tgg_clean_bw_share_qdata(itProc->first, qdata);
         do {// 继续迭代删除后续没有入队列的数据才可退出，防止内存泄漏，前面的已经加入了任务队列，不能删除
             iter_del_list<tgg_vhash_list>(itProc->second);
@@ -213,6 +216,8 @@ int CmdBaseProcessor::WaitSharecmdRslt(std::vector<int64_t>& lst_fds)
     }
     if(ret < 0) {
         LOG_ERROR("wait result faild, prc[%d] fd[%d] try times[%d].", this->prc_id, this->fd, 100 - try_times);
+        // 修复：标记任务为中止，通知所有进程停止处理
+        tgg_set_bwfx_sharecmd_halt(this->prc_id, this->fd, 1);
         tgg_clean_bwfdx_sharecmd(this->prc_id, this->fd);
         return -1;
     }
@@ -439,7 +444,7 @@ int CmdKick::ExecCmd()
     Send2Client(cid, "kick", FD_WRITE|FD_CLOSE, !raw);
     int64_t fdidcid = tgg_get_fdbycid(cid);
     if(fdidcid <= 0) {
-        LOG_INFO("Kick: cmd executed failed, get fdidcid[%ld] by cid[%u] failed.", fdidcid, cid);
+        LOG_INFO("Kick: cmd executed failed, get fdidcid[%lld] by cid[%u] failed.", fdidcid, cid);
         return -1;
     }
     exec_free_session(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), cid);
@@ -454,7 +459,7 @@ int CmdDestroy::ExecCmd()
     Send2Client(cid, "destroy", FD_WRITE|FD_CLOSE, !raw);// TODO 是否要立即销毁，不发送ws的关闭帧(去掉FD_WRITE就行)了
     int64_t fdidcid = tgg_get_fdbycid(cid);
     if(fdidcid <= 0) {
-        LOG_INFO("Destroy: cmd executed failed, get fdidcid[%ld] by cid[%u] failed.", fdidcid, cid);
+        LOG_INFO("Destroy: cmd executed failed, get fdidcid[%lld] by cid[%u] failed.", fdidcid, cid);
         return -1;
     }
     exec_free_session(GET_COREID_FDCID_MASK(fdidcid), GET_FD_FDCID_MASK(fdidcid), cid);

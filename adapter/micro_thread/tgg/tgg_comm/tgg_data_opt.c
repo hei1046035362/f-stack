@@ -8,6 +8,18 @@
 // 执行bind   cid bind uid的时候需要执行这个函数
 int tgg_bind_session(const char* uid, uint32_t cid)
 {
+    // 修复: 添加参数有效性检查
+    if (!uid || cid <= 0) {
+        LOG_ERROR("Invalid parameters: uid=%p, cid=%u", uid, cid);
+        return -1;
+    }
+    
+    int uid_len = strlen(uid);
+    if(uid_len <= 0) {
+        LOG_ERROR("uid should not be empty, cid=%u", cid);
+        return -1;
+    }
+    
     int64_t fdidcid = tgg_get_fdbycid(cid);
     if(fdidcid < 0) {
         LOG_DEBUG("get fd by cid[%u] failed, cid may not exist.", cid);
@@ -22,10 +34,6 @@ int tgg_bind_session(const char* uid, uint32_t cid)
 		return -1;
 	}
 
-	if(strlen(uid) <= 0 || cid <= 0) {
-		LOG_ERROR("uid[%s] and cid[%u] should not be empty.", uid, cid);
-		return -1;
-	}
 	// 添加到 hash<uid, list<fd>>
 	if (tgg_add_uid(uid, fdidcid) < 0) {
 		LOG_ERROR("add uid[%s] fdidcid[%lld] failed.", uid, fdidcid);

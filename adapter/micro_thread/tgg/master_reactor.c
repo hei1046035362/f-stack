@@ -39,10 +39,10 @@ extern int64_t g_max_concurency;
 // 进程是否退出  master进程退出不需要做什么事情，但是secondary退出前必须要释放他持有的内存
 int g_run_status = 1;
 int g_monitor_count = 0;
+int* g_pid_check_times = NULL;  // 修复: 初始化为NULL,防止野指针
 using namespace NS_MICRO_THREAD;
 int sig_pipe[2];// 信号处理放入主函数异步处理，信号函数中很多系统函数不能调用，会崩溃死锁
 static int64_t s_left_fd = 0;// 剩余客户端连接数
-int* g_pid_check_times;
 
 typedef struct st_conn_info {
     int cli_fd;
@@ -232,19 +232,22 @@ static void tgg_recv(int fd, event_type_t events, void *arg)
     int idx = tgg_get_cli_idx(g_core_id, fd);
     char buf[BUFFER_PACKET_LEN] = {0};
     int n = 0;
-    if(ctx == NULL || idx == TGG_FD_CLOSED) {
-        LOG_INFO("Client %d is closed, idx:%d", fd, idx);
-        return;
+    
+    // 优先检查异常事件,避免空指针检查过早返回
+    if (events & EVENT_ERROR) {
+        // 真正的连接错误：EPOLLERR
+        LOG_ERROR("Client %d connection error, closing", fd);
+        goto recv_failed;
     }
     if (events & EVENT_HUP) {
         // 正常关闭：对方发送了 FIN（EPOLLHUP）
         LOG_DEBUG("Client %d peer hangup (normal close)", fd);
         goto recv_failed;
     }
-    if (events & EVENT_ERROR) {
-        // 真正的连接错误：EPOLLERR
-        LOG_ERROR("Client %d connection error, closing", fd);
-        goto recv_failed;
+    
+    if(ctx == NULL || idx == TGG_FD_CLOSED) {
+        LOG_INFO("Client %d is closed, idx:%d", fd, idx);
+        return;
     }
     
     if (!(events & EVENT_READ)) {
@@ -274,9 +277,10 @@ static void tgg_recv(int fd, event_type_t events, void *arg)
     // 更新活动时间
     reactor_update_activity(fd);
 
+    // 优化调试日志:使用宏避免不必要的函数调用
     if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
         // 调试打印
-        if(!strncmp(buf, "GET", 3)) {// GET请求消息
+        if(n >= 3 && !strncmp(buf, "GET", 3)) {// GET请求消息
             LOG_DEBUG("fd:%d idx:%d recv data:%s.", fd, idx, (char*)buf);
         } else {// 其他消息
             LOG_DEBUG("fd:%d idx:%d revc data:%s.", fd, idx, bin2hex(std::string_view((char*)buf, n)).c_str());
@@ -289,18 +293,26 @@ static void tgg_recv(int fd, event_type_t events, void *arg)
     }
     return;
 recv_failed:
-    if(!(tgg_get_cli_status(g_core_id, fd) & FD_STATUS_CLOSING) && // 没发送过close给gwcliprc
-        (tgg_get_cli_idx(g_core_id, fd) != TGG_FD_CLOSING)) {// ws握手完成
-        consume_rdata(fd, NULL, 0, ctx->idx, FD_CLOSE);// 通知bwprc 清理这个客户端相关信息
-    }
-    if((tgg_get_cli_idx(g_core_id, fd) == TGG_FD_CLOSED)) {
+    // 双重检查防止重复清理
+    if(tgg_get_cli_idx(g_core_id, fd) == TGG_FD_CLOSED) {
         LOG_WARNING("Client %d already closed.", fd);
-        free_client_context(ctx);
+        if(ctx) {
+            free_client_context(ctx);
+        }
         return;
     }
+    
+    // 通知bwprc清理客户端相关信息(仅当未发送过close时)
+    if(!(tgg_get_cli_status(g_core_id, fd) & FD_STATUS_CLOSING) &&
+        (tgg_get_cli_idx(g_core_id, fd) != TGG_FD_CLOSING)) {
+        consume_rdata(fd, NULL, 0, ctx->idx, FD_CLOSE);
+    }
+    
     reactor_remove_event(fd);
     clean_client_data(fd, ctx->idx);
-    free_client_context(ctx);
+    if(ctx) {
+        free_client_context(ctx);
+    }
 }
 
 static void on_client_connect(void *arg)
@@ -347,14 +359,17 @@ static void on_client_connect(void *arg)
 // static uint64_t add_send_times = 0;
 static void tgg_do_send(tgg_write_data* wdata)
 {
+    // 缓存日志级别,避免循环内重复调用
+    bool is_debug = (AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG);
+    
     tgg_fd_id_list* fd_id_list = wdata->lst_fd;
     while (fd_id_list) {
         int cli_fd = fd_id_list->fdid;// 数据传递时fdid存的是fd
         int idx = tgg_get_cli_idx(g_core_id, cli_fd);
-        if(AsyncLogger::getInstance().getloglevel() == LogLevel::DEBUG) {
-            if(wdata->data_len > 4 && !strncmp((char*)wdata->data, "HTTP", 4)) {// GET请求消息
+        if(is_debug) {
+            if(wdata->data && wdata->data_len > 4 && !strncmp((char*)wdata->data, "HTTP", 4)) {// GET请求消息
                 LOG_DEBUG("fd:%d idx:%d send to clien:%s.", cli_fd, idx, (char*)wdata->data);
-            } else {// 其他消息
+            } else if(wdata->data) {// 其他消息
                 LOG_DEBUG("fd:%d idx:%d send to clien:%s.", cli_fd, idx, bin2hex(std::string_view((char*)wdata->data, wdata->data_len)).c_str());
             }
         }
@@ -374,7 +389,7 @@ static void tgg_do_send(tgg_write_data* wdata)
                 {
                     mt_sleep(1);
                 }
-                if(try_times < 0) {
+                if(try_times <= 0) {  // 修复: 使用 <= 0 而不是 < 0
                     LOG_ERROR("add cli[fd:%d, idx:%d] snd data failed, exceed try_times", cli_fd, idx);
                     ff_close(cli_fd);
                     wdata->ref--;
@@ -428,11 +443,13 @@ static int tgg_gw_master()
         mt_start_thread((void *)tgg_send, NULL);
     // }
 
+    // 缓存配置值,避免重复调用
+    int gateway_port = TggConfigure::getInstance()->get_gateway_port();
+    
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-
-    addr.sin_port = big_endian() ? TggConfigure::getInstance()->get_gateway_port() : htons(TggConfigure::getInstance()->get_gateway_port());
+    addr.sin_port = big_endian() ? gateway_port : htons(gateway_port);
 
     int fd = create_tcp_sock();
     if (fd < 0) {
@@ -451,7 +468,7 @@ static int tgg_gw_master()
         LOG_ERROR("listen failed [%s]", strerror(errno));
         return -1;
     }
-    LOG_INFO("start service for port:%d.", TggConfigure::getInstance()->get_gateway_port());
+    LOG_INFO("start service for port:%d.", gateway_port);
     int clt_fd = 0;
     // int idx = -1;
     conn_info *p;
@@ -461,8 +478,9 @@ static int tgg_gw_master()
 
         clt_fd = ff_accept(fd, (struct linux_sockaddr*)&client_addr, (socklen_t*)&addr_len);
         if (clt_fd < 0) {
-            if(clt_fd != -1) {
-                LOG_WARNING("accept error[%d]", clt_fd);
+            // 修复: 负数都是错误,记录错误码
+            if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
+                LOG_WARNING("accept error[%d]: %s", clt_fd, strerror(errno));
             }
             mt_sleep(1);
             continue;
@@ -484,13 +502,15 @@ static int tgg_gw_master()
         }
         if (set_fd_nonblock(clt_fd) == -1) {
             LOG_ERROR("set clt_fd nonblock failed [%s]", strerror(errno));
-            break;
+            ff_close(clt_fd);
+            continue;  // 修复: 使用 continue 而不是 break
         }
+        // TODO: 性能优化 - 考虑使用内存池替代malloc,减少内存碎片
         p = (conn_info *)malloc(sizeof(conn_info));
         if (!p) {
             LOG_ERROR("malloc conn_info failed.");
             ff_close(clt_fd); 
-            return -1;
+            continue;  // 修复: 使用 continue 而不是 return,避免泄漏监听socket
         }
         p->cli_fd = clt_fd;
         p->ip = client_addr.sin_addr.s_addr;
@@ -595,7 +615,11 @@ int main(int argc, char *argv[])
             kill_all_child();
             wait_all_child_exit();
             LOG_INFO("-------master core[%d] exit-------", g_core_id);
-            delete[] g_pid_check_times;
+            // 修复: 添加空指针检查,防止野指针
+            if(g_pid_check_times) {
+                delete[] g_pid_check_times;
+                g_pid_check_times = NULL;
+            }
         }
         tgg_master_uninit();
         cleanup_ip_filter();

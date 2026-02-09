@@ -367,8 +367,10 @@ int tgg_set_cli_bwfdx(int core_id, int fd, int bwfdx)
 int tgg_set_cli_uid(int core_id, int fd, const char* uid)
 {
 	// SpinLock lock(get_cli_lock());
-	memset(((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd].uid, 0, sizeof(tgg_cli_bw_info::uid));
-	strncpy(((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd].uid, uid, strlen(uid));
+	size_t uid_len = strlen(uid);
+	uid_len = uid_len > sizeof(tgg_cli_bw_info::uid) - 1 ? sizeof(tgg_cli_bw_info::uid) - 1 : uid_len;
+	strncpy(((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd].uid, uid, uid_len);
+	((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd].uid[uid_len] = '\0';
 	return 0;
 }
 
@@ -382,8 +384,11 @@ int tgg_set_cli_cid(int core_id, int fd, uint32_t cid)
 int tgg_set_cli_reserved(int core_id, int fd, const char* reserved)
 {
 	// SpinLock lock(get_cli_lock());
-	memset(((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd].reserved, 0, sizeof(tgg_cli_bw_info::reserved));
-	strncpy(((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd].reserved, reserved, strlen(reserved));
+	// memset(((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd].reserved, 0, sizeof(tgg_cli_bw_info::reserved));
+	size_t reserved_len = strlen(reserved);
+	reserved_len = reserved_len > sizeof(tgg_cli_bw_info::reserved) - 1 ? sizeof(tgg_cli_bw_info::reserved) - 1 : reserved_len;
+	strncpy(((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd].reserved, reserved, reserved_len);
+	((tgg_cli_bw_info*)g_fd_bw_zones[core_id]->addr)[fd].reserved[reserved_len] = '\0';
 	return 0;
 }
 
@@ -490,8 +495,11 @@ int tgg_set_bwfdx_seckey(int prc_id, int fd, const char* secretkey)
 
 int tgg_set_bwfdx_workerkey(int prc_id, int fd, const char* workerkey)
 {
-	memset(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].workerkey, 0, sizeof(tgg_bw_info::workerkey));
-	strncpy(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].workerkey, workerkey, strlen(workerkey));
+	// memset(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].workerkey, 0, sizeof(tgg_bw_info::workerkey));
+	size_t workerkey_len = strlen(workerkey);
+	workerkey_len = workerkey_len > sizeof(tgg_bw_info::workerkey) - 1 ? sizeof(tgg_bw_info::workerkey) - 1 : workerkey_len;
+	strncpy(((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].workerkey, workerkey, workerkey_len);
+	((tgg_bw_info*)g_bwfdx_zones[prc_id]->addr)[fd].workerkey[workerkey_len] = '\0';
 	return 0;
 }
 
@@ -790,7 +798,7 @@ void tgg_update_gw_monitor(int prc_id, uint64_t now)
 	WriteLock lock(get_gw_monitor_lock());
 	pid_data* prc = (pid_data*)g_gw_monitor_zone->addr + prc_id;
 	if(prc->heart_beat != 0 && now - prc->heart_beat > GW_MONITOR_HEART_BEAT_CHECK) {// 调试代码，更新时间超过心跳时打印日志
-		LOG_WARNING("update heart_beat time delayed, PID:%d, prc_id:%d heart_beat:%ld now:%ld diff:%d, curr_diff:%ld",
+		LOG_WARNING("update heart_beat time delayed, PID:%d, prc_id:%d heart_beat:%ld now:%llu diff:%llu, curr_diff:%lllu",
 		 prc->pid, prc_id, prc->heart_beat, now, now - prc->heart_beat, get_system_ms() - now);
 	}
 	prc->heart_beat = now;
@@ -1426,7 +1434,7 @@ void print_mem_statistics()
 	}
 #endif
 
-	LOG_WARNING("ws buffer left count:%ld", s_buffer_count);
+	LOG_WARNING("ws buffer left count:%lld", s_buffer_count);
     if(rte_eal_process_type() != RTE_PROC_PRIMARY) {
     	return;
     }

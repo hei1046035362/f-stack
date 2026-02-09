@@ -181,7 +181,7 @@ static void concurrency_stat(struct rte_timer* tm, void* arg)
     int64_t concurency = cur_count - s_last_fd_count;
     if(concurency > 0 && g_max_concurency < concurency) {// 最大并发
         g_max_concurency = concurency;
-        LOG_WARNING("core[%d] max concurency :%ld", g_core_id, g_max_concurency);
+        LOG_WARNING("core[%d] max concurency :%lld", g_core_id, g_max_concurency);
     }
     s_last_fd_count = cur_count;
 }

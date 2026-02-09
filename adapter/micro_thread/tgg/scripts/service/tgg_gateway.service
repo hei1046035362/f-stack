@@ -21,6 +21,8 @@ TimeoutStopSec=30s
 # 仅终止主进程
 KillMode=process
 Environment="PROC_ROOT=/usr/local/tgg_gateway/bin"
+# core文件大小限制
+# LimitCORE=infinity
 
 # 日志配置 (自动轮转)
 StandardOutput=syslog
